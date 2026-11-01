@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Editor de texto y código, en homenaje a Federico García Lorca"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -22,3 +23,20 @@ muda = { version = "0.21.2", default-features = false }
 
 [lints]
 workspace = true
+
+# Empaquetado con cargo-packager: `cargo packager --release` desde esta carpeta (o con
+# `-p lorca` desde la raíz). Formatos por plataforma: .app/.dmg, .msi/.exe y .deb/AppImage.
+[package.metadata.packager]
+product-name = "Lorca"
+identifier = "io.github.gallegomanuel8.lorca"
+category = "DeveloperTool"
+before-packaging-command = "cargo build --release -p lorca"
+out-dir = "../../target/packages"
+icons = ["../../assets/icons/*.png", "../../assets/icons/icon.ico"]
+binaries = [{ path = "lorca", main = true }]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.deb]
+section = "editors"
