@@ -132,11 +132,14 @@ mod tests {
             .files
             .iter()
             .map(|f| {
+                // Con «/» en todos los sistemas (Windows separa con «\»).
                 f.path
                     .strip_prefix(dir.path())
                     .unwrap()
-                    .display()
-                    .to_string()
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/")
             })
             .collect();
         assert_eq!(names, ["b.txt", "sub/c.rs"]);
