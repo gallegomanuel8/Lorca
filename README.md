@@ -1,0 +1,82 @@
+# Lorca
+
+> *Verde que te quiero verde.*
+
+Lorca es un editor de texto y código de escritorio para Windows, macOS y Linux, escrito en
+Rust. El nombre es un homenaje a Federico García Lorca.
+
+Pensado para tomar notas y programar: resaltado de muchos lenguajes, búsqueda y sustitución
+con expresiones regulares, visualización de espacios, finales de línea y codificaciones, y
+gestión de documentos en pestañas.
+
+## Estado
+
+**Fase 1 (MVP) completada:**
+
+- Pestañas horizontales con indicador ● de cambios sin guardar, botón de cerrar y clic
+  central para cerrar.
+- Editor con números de línea, fuente monoespaciada, selección con teclado y ratón
+  (doble clic: palabra; triple clic: línea), portapapeles e IME.
+- Deshacer/rehacer por transacciones: una palabra tecleada seguida se deshace de una vez.
+- Barra de estado con línea:columna, lenguaje (por extensión), codificación y LF/CRLF.
+- Abre UTF-8, UTF-8 con BOM, UTF-16 LE/BE y Windows-1252, y guarda conservando la
+  codificación y los finales de línea originales.
+- Confirmación al cerrar una pestaña o la aplicación con cambios sin guardar.
+
+### Atajos
+
+| Acción | macOS | Windows / Linux |
+|---|---|---|
+| Nuevo | ⌘N | Ctrl+N |
+| Abrir | ⌘O | Ctrl+O |
+| Guardar / Guardar como | ⌘S / ⌘⇧S | Ctrl+S / Ctrl+Mayús+S |
+| Cerrar pestaña | ⌘W | Ctrl+W |
+| Deshacer / Rehacer | ⌘Z / ⌘⇧Z | Ctrl+Z / Ctrl+Mayús+Z (o Ctrl+Y) |
+| Pestaña siguiente / anterior | ⌃Tab / ⌃⇧Tab | Ctrl+Tab / Ctrl+Mayús+Tab |
+| Copiar / Cortar / Pegar / Seleccionar todo | ⌘C / ⌘X / ⌘V / ⌘A | Ctrl+C / X / V / A |
+| Palabra anterior / siguiente | ⌥← / ⌥→ | Ctrl+← / Ctrl+→ |
+| Inicio / fin de línea | ⌘← / ⌘→ | Inicio / Fin |
+
+## Compilar y ejecutar
+
+Requisitos: Rust estable (1.85 o posterior, edición 2024).
+
+En Linux hacen falta además las bibliotecas de desarrollo de X11/Wayland y
+`xdg-desktop-portal` para los diálogos nativos.
+
+```bash
+cargo run --release                     # abre un documento nuevo
+cargo run --release -- notas.md main.rs # abre archivos en pestañas
+cargo test --workspace                  # pruebas
+```
+
+## Arquitectura
+
+Workspace de Cargo:
+
+| Crate | Responsabilidad |
+|---|---|
+| `crates/core` (`lorca-core`) | Buffer (ropey), selección, ediciones, deshacer/rehacer, codificaciones y finales de línea. Sin GUI. |
+| `crates/syntax` (`lorca-syntax`) | Detección de lenguaje (y, en la Fase 2, resaltado). |
+| `crates/search` (`lorca-search`) | Buscar y reemplazar (Fase 3). |
+| `crates/formats` (`lorca-formats`) | Preview de Markdown y formateadores SQL/JSON (Fase 4). |
+| `crates/workspace` (`lorca-workspace`) | Documentos abiertos, pestañas, guardado, sesión y configuración. |
+| `crates/app` (`lorca`) | Binario con la GUI en iced: dibuja y traduce eventos a órdenes. |
+
+## Hoja de ruta
+
+1. **MVP** ✅: workspace, núcleo de edición, pestañas, guardar/abrir, atajos.
+2. **Lenguajes**: detección por extensión y shebang, selector manual en la barra de estado,
+   resaltado de sintaxis.
+3. **Búsqueda**: panel buscar/reemplazar (⌘F, ⌘H), expresiones regulares, resaltado de
+   coincidencias, siguiente/anterior, reemplazar todo; ir a línea (⌘G).
+4. **Formato**: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
+   codificaciones, preview de Markdown en panel dividido, formatear SQL y JSON.
+5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta, restaurar
+   sesión, reordenar pestañas arrastrando, recarga si el archivo cambia en disco.
+6. **Avanzado**: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),
+   configuración en TOML, empaquetado y CI para los tres sistemas.
+
+## Licencia
+
+MIT o Apache-2.0, a tu elección.
