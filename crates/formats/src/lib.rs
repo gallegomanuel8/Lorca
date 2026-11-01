@@ -1,3 +1,13 @@
-//! Formateadores (SQL, JSON) y previsualización de Markdown.
+//! Formateadores (JSON, SQL), conversión de mayúsculas y Markdown a HTML.
 //!
-//! Pendiente de implementar en la Fase 4.
+//! Funciones puras sobre texto, sin dependencias de interfaz.
+
+mod case;
+mod json;
+mod markdown;
+mod sql;
+
+pub use case::{Case, change_case};
+pub use json::{FormatError, format_json, minify_json};
+pub use markdown::markdown_to_html;
+pub use sql::format_sql;

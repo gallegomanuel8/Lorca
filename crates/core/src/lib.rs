@@ -21,7 +21,7 @@ pub use bookmarks::Bookmarks;
 pub use buffer::Buffer;
 pub use edit::Edit;
 pub use editor::{EditorState, Motion};
-pub use encoding::{Decoded, TextEncoding, decode, encode};
+pub use encoding::{Decoded, TextEncoding, decode, decode_as, encode};
 pub use error::CoreError;
 pub use history::{EditKind, History, Transaction};
 pub use line_ending::LineEnding;

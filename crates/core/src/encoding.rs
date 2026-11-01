@@ -1,6 +1,6 @@
 //! Detección y conversión de codificaciones de texto.
 
-use encoding_rs::{Encoding, UTF_8, UTF_16BE, WINDOWS_1252};
+use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE, WINDOWS_1252};
 
 use crate::CoreError;
 
@@ -100,6 +100,35 @@ pub fn decode(bytes: &[u8]) -> Decoded {
     }
 }
 
+/// Decodifica bytes con una codificación elegida por el usuario («Reabrir con…»).
+///
+/// Si los bytes empiezan por el BOM de esa misma codificación, se descarta.
+pub fn decode_as(bytes: &[u8], encoding: TextEncoding) -> Decoded {
+    let (decoder, bom): (&'static Encoding, &[u8]) = match encoding {
+        TextEncoding::Utf8 | TextEncoding::Utf8Bom => (UTF_8, &[0xEF, 0xBB, 0xBF]),
+        TextEncoding::Utf16Le => (UTF_16LE, &[0xFF, 0xFE]),
+        TextEncoding::Utf16Be => (UTF_16BE, &[0xFE, 0xFF]),
+        TextEncoding::Windows1252 => (WINDOWS_1252, &[]),
+    };
+    let has_bom = !bom.is_empty() && bytes.starts_with(bom);
+    let body = if has_bom {
+        bytes.get(bom.len()..).unwrap_or_default()
+    } else {
+        bytes
+    };
+    let (text, had_errors) = decoder.decode_without_bom_handling(body);
+    // Si se pide UTF-8 sin BOM pero el archivo lo tiene, se conserva al guardar.
+    let encoding = match encoding {
+        TextEncoding::Utf8 if has_bom => TextEncoding::Utf8Bom,
+        other => other,
+    };
+    Decoded {
+        text: text.into_owned(),
+        encoding,
+        had_errors,
+    }
+}
+
 /// Codifica texto en la codificación indicada (incluyendo BOM cuando corresponde).
 pub fn encode(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, CoreError> {
     let bytes = match encoding {
@@ -144,6 +173,26 @@ mod tests {
             assert_eq!(TextEncoding::from_id(encoding.id()), Some(encoding));
         }
         assert_eq!(TextEncoding::from_id("ebcdic"), None);
+    }
+
+    #[test]
+    fn decode_as_forces_encoding() {
+        // «canción» en UTF-8 leída como Windows-1252 da mojibake…
+        let d = decode_as("canción".as_bytes(), TextEncoding::Windows1252);
+        assert_eq!(d.text, "canciÃ³n");
+        assert_eq!(d.encoding, TextEncoding::Windows1252);
+        // …y al revés se recupera.
+        let d = decode_as(b"canci\xF3n", TextEncoding::Windows1252);
+        assert_eq!(d.text, "canción");
+    }
+
+    #[test]
+    fn decode_as_strips_matching_bom() {
+        let d = decode_as(&[0xEF, 0xBB, 0xBF, b'a'], TextEncoding::Utf8);
+        assert_eq!(d.text, "a");
+        assert_eq!(d.encoding, TextEncoding::Utf8Bom);
+        let d = decode_as(&[0xFF, 0xFE, b'a', 0], TextEncoding::Utf16Le);
+        assert_eq!(d.text, "a");
     }
 
     #[test]
