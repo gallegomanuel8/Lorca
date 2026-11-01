@@ -4,6 +4,7 @@
 //! guarda en memoria con finales de línea LF; el formato original del archivo
 //! (codificación y finales de línea) se conserva en [`TextFormat`] y se restaura al guardar.
 
+mod bookmarks;
 mod buffer;
 pub mod display;
 mod edit;
@@ -16,6 +17,7 @@ mod position;
 mod selection;
 mod text_format;
 
+pub use bookmarks::Bookmarks;
 pub use buffer::Buffer;
 pub use edit::Edit;
 pub use editor::{EditorState, Motion};

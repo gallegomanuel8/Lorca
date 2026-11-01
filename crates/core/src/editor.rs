@@ -1,6 +1,10 @@
 //! Estado de edición de un documento: buffer, selección e historial.
 
-use crate::{Buffer, CoreError, Edit, EditKind, History, LineEnding, Position, Selection};
+use std::ops::Range;
+
+use crate::{
+    Bookmarks, Buffer, CoreError, Edit, EditKind, History, LineEnding, Position, Selection,
+};
 
 /// Movimientos del cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,6 +37,7 @@ pub struct EditorState {
     history: History,
     /// Columna que se intenta mantener en movimientos verticales consecutivos.
     preferred_column: Option<usize>,
+    bookmarks: Bookmarks,
 }
 
 impl EditorState {
@@ -298,7 +303,7 @@ impl EditorState {
             return Ok(false);
         };
         for edit in transaction.edits.iter().rev() {
-            edit.inverse().apply(&mut self.buffer)?;
+            apply_edit(&mut self.buffer, &mut self.bookmarks, &edit.inverse())?;
         }
         self.selection = transaction
             .selection_before
@@ -313,10 +318,151 @@ impl EditorState {
             return Ok(false);
         };
         for edit in &transaction.edits {
-            edit.apply(&mut self.buffer)?;
+            apply_edit(&mut self.buffer, &mut self.bookmarks, edit)?;
         }
         self.selection = transaction.selection_after.clamped(self.buffer.len_chars());
         Ok(true)
+    }
+
+    /// Sustituye varios rangos en una sola transacción (p. ej. «Reemplazar todo»).
+    ///
+    /// Los rangos deben estar ordenados y no solaparse. El cursor se mantiene sobre el
+    /// mismo texto. Devuelve el número de sustituciones.
+    pub fn replace_ranges(
+        &mut self,
+        replacements: &[(Range<usize>, String)],
+    ) -> Result<usize, CoreError> {
+        let len = self.buffer.len_chars();
+        let mut previous_end = 0;
+        for (range, _) in replacements {
+            if range.start < previous_end || range.start > range.end || range.end > len {
+                return Err(CoreError::InvalidRange {
+                    start: range.start,
+                    end: range.end,
+                    len,
+                });
+            }
+            previous_end = range.end;
+        }
+
+        let head = self.selection.head;
+        let mut shift: isize = 0;
+        let mut edits = Vec::with_capacity(replacements.len() * 2);
+        // De atrás hacia delante, para que los índices de los rangos sigan siendo válidos.
+        for (range, text) in replacements.iter().rev() {
+            let text = LineEnding::normalize(text);
+            if !range.is_empty() {
+                edits.push(Edit::Delete {
+                    at: range.start,
+                    text: self.buffer.slice(range.clone())?,
+                });
+            }
+            if !text.is_empty() {
+                edits.push(Edit::Insert {
+                    at: range.start,
+                    text: text.clone().into_owned(),
+                });
+            }
+            if range.end <= head {
+                let added = isize::try_from(text.chars().count()).unwrap_or(isize::MAX);
+                let removed = isize::try_from(range.len()).unwrap_or(isize::MAX);
+                shift = shift.saturating_add(added - removed);
+            }
+        }
+        let new_head = head.saturating_add_signed(shift);
+        self.history.seal();
+        self.apply(edits, Selection::cursor(new_head), None)?;
+        self.history.seal();
+        self.selection = self.selection.clamped(self.buffer.len_chars());
+        Ok(replacements.len())
+    }
+
+    // --- Marcadores --------------------------------------------------------------------
+
+    pub fn bookmarks(&self) -> &Bookmarks {
+        &self.bookmarks
+    }
+
+    /// Marca o desmarca la línea del cursor. Devuelve `true` si queda marcada.
+    pub fn toggle_bookmark(&mut self) -> bool {
+        let line = self.cursor().line;
+        self.bookmarks.toggle(line)
+    }
+
+    /// Marca las líneas que contienen los índices de carácter dados.
+    pub fn bookmark_lines_at(&mut self, indices: impl IntoIterator<Item = usize>) {
+        for index in indices {
+            let line = self.buffer.char_to_line(index);
+            self.bookmarks.insert(line);
+        }
+    }
+
+    pub fn clear_bookmarks(&mut self) {
+        self.bookmarks.clear();
+    }
+
+    /// Mueve el cursor al siguiente (o anterior) marcador, volviendo al principio.
+    /// Devuelve `false` si no hay marcadores.
+    pub fn go_to_bookmark(&mut self, forward: bool) -> bool {
+        let line = self.cursor().line;
+        let target = if forward {
+            self.bookmarks.next_after(line, true)
+        } else {
+            self.bookmarks.previous_before(line, true)
+        };
+        match target {
+            Some(target) => {
+                self.set_cursor(self.buffer.line_start(target), false);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Texto de las líneas marcadas, cada una terminada en salto de línea.
+    pub fn bookmarked_lines_text(&self) -> String {
+        self.bookmarks
+            .iter()
+            .filter(|&line| line < self.buffer.len_lines())
+            .map(|line| format!("{}\n", self.buffer.line_text(line)))
+            .collect()
+    }
+
+    /// Borra las líneas marcadas en una sola transacción y quita los marcadores.
+    pub fn delete_bookmarked_lines(&mut self) -> Result<usize, CoreError> {
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let mut ranges: Vec<(Range<usize>, String)> = Vec::new();
+        for line in self.bookmarks.iter().filter(|&l| l <= last) {
+            let start = self.buffer.line_start(line);
+            let end = if line < last {
+                self.buffer.line_start(line + 1)
+            } else {
+                self.buffer.len_chars()
+            };
+            match ranges.last_mut() {
+                Some((previous, _)) if previous.end >= start => previous.end = end,
+                _ => ranges.push((start..end, String::new())),
+            }
+        }
+        // Si el borrado llega al final del documento, se lleva también el salto de línea
+        // anterior, para no dejar una línea vacía al final.
+        let len = self.buffer.len_chars();
+        if let Some((range, _)) = ranges.last_mut()
+            && range.end == len
+            && range.start > 0
+        {
+            range.start -= 1;
+        }
+        if let [.., (previous, _), (last_range, _)] = ranges.as_mut_slice()
+            && previous.end >= last_range.start
+        {
+            last_range.start = previous.start;
+            ranges.remove(ranges.len() - 2);
+        }
+        let count = self.bookmarks.len();
+        self.bookmarks.clear();
+        self.replace_ranges(&ranges)?;
+        Ok(count)
     }
 
     // --- Auxiliares -------------------------------------------------------------------
@@ -342,11 +488,11 @@ impl EditorState {
         kind: Option<EditKind>,
     ) -> Result<(), CoreError> {
         for (applied, edit) in edits.iter().enumerate() {
-            if let Err(error) = edit.apply(&mut self.buffer) {
+            if let Err(error) = apply_edit(&mut self.buffer, &mut self.bookmarks, edit) {
                 for done in edits.iter().take(applied).rev() {
                     // Revertir lo que acabamos de aplicar no puede fallar; si fallara, el
                     // error original es el más útil para quien llama.
-                    let _ = done.inverse().apply(&mut self.buffer);
+                    let _ = apply_edit(&mut self.buffer, &mut self.bookmarks, &done.inverse());
                 }
                 return Err(error);
             }
@@ -415,6 +561,16 @@ impl EditorState {
             first_non_blank
         }
     }
+}
+
+/// Aplica una edición al buffer ajustando antes los marcadores de línea.
+fn apply_edit(
+    buffer: &mut Buffer,
+    bookmarks: &mut Bookmarks,
+    edit: &Edit,
+) -> Result<(), CoreError> {
+    bookmarks.adjust(buffer, edit);
+    edit.apply(buffer)
 }
 
 /// Clasificación de caracteres para movimientos por palabra.
@@ -741,6 +897,71 @@ mod tests {
         let mut s = EditorState::from_text("abc");
         s.set_selection(Selection::new(1, 99));
         assert_eq!(s.selection(), Selection::new(1, 3));
+    }
+
+    #[test]
+    fn replace_ranges_is_one_undo_step_and_keeps_cursor() {
+        let mut s = at("uno dos uno tres uno", 17);
+        let n = s
+            .replace_ranges(&[
+                (0..3, "1".into()),
+                (8..11, "1".into()),
+                (17..20, "UNO".into()),
+            ])
+            .unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(s.text(), "1 dos 1 tres UNO");
+        // El cursor estaba al principio del último «uno»: sigue ahí.
+        assert_eq!(s.selection(), Selection::cursor(13));
+        s.undo().unwrap();
+        assert_eq!(s.text(), "uno dos uno tres uno");
+        assert!(!s.can_undo());
+    }
+
+    #[test]
+    fn replace_ranges_rejects_overlaps() {
+        let mut s = EditorState::from_text("abcdef");
+        let result = s.replace_ranges(&[(0..3, String::new()), (2..4, String::new())]);
+        assert!(result.is_err());
+        assert_eq!(s.text(), "abcdef");
+    }
+
+    #[test]
+    fn bookmarks_follow_edits_and_undo() {
+        let mut s = at("a\nb\nc", 2);
+        assert!(s.toggle_bookmark());
+        s.set_cursor(0, false);
+        s.insert_newline().unwrap();
+        assert!(s.bookmarks().contains(2));
+        s.undo().unwrap();
+        assert!(s.bookmarks().contains(1));
+    }
+
+    #[test]
+    fn bookmark_navigation_wraps() {
+        let mut s = EditorState::from_text("0\n1\n2\n3");
+        s.bookmark_lines_at([2, 6]);
+        s.set_cursor(0, false);
+        assert!(s.go_to_bookmark(true));
+        assert_eq!(s.cursor().line, 1);
+        assert!(s.go_to_bookmark(true));
+        assert_eq!(s.cursor().line, 3);
+        assert!(s.go_to_bookmark(true));
+        assert_eq!(s.cursor().line, 1);
+        assert!(s.go_to_bookmark(false));
+        assert_eq!(s.cursor().line, 3);
+    }
+
+    #[test]
+    fn copy_and_delete_bookmarked_lines() {
+        let mut s = EditorState::from_text("uno\ndos\ntres\ncuatro");
+        s.bookmark_lines_at([0, 9, 14]);
+        assert_eq!(s.bookmarked_lines_text(), "uno\ntres\ncuatro\n");
+        assert_eq!(s.delete_bookmarked_lines().unwrap(), 3);
+        assert_eq!(s.text(), "dos");
+        assert!(s.bookmarks().is_empty());
+        s.undo().unwrap();
+        assert_eq!(s.text(), "uno\ndos\ntres\ncuatro");
     }
 
     #[test]
