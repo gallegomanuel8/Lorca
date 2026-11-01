@@ -168,6 +168,12 @@ impl Document {
         }
     }
 
+    /// Acepta la versión actual del disco como base (p. ej. cuando el usuario decide
+    /// conservar sus cambios tras una modificación externa), para no volver a avisar.
+    pub fn acknowledge_disk_change(&mut self) {
+        self.disk_stamp = self.path.as_deref().and_then(DiskStamp::of);
+    }
+
     /// Marca el documento como modificado aunque el texto no haya cambiado.
     pub fn mark_modified(&mut self) {
         self.forced_modified = true;

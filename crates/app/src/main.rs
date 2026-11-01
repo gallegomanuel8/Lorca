@@ -10,6 +10,7 @@ mod find;
 mod key_filter;
 mod shortcut_labels;
 mod shortcuts;
+mod watcher;
 mod welcome;
 
 use app::Lorca;

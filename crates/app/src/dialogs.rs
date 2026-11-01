@@ -49,6 +49,33 @@ pub async fn pick_pdf_path(file_name: String, directory: Option<PathBuf>) -> Opt
     dialog.save_file().await.map(|f| f.path().to_path_buf())
 }
 
+/// El archivo `name` cambió en disco y tiene cambios sin guardar: ¿recargar?
+/// Devuelve `true` si el usuario quiere recargar (perdiendo sus cambios).
+pub async fn confirm_reload(name: String) -> bool {
+    const RELOAD: &str = "Recargar";
+    const KEEP: &str = "Conservar mis cambios";
+    let buttons = if cfg!(windows) {
+        MessageButtons::OkCancel
+    } else {
+        MessageButtons::OkCancelCustom(RELOAD.into(), KEEP.into())
+    };
+    let result = AsyncMessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Archivo cambiado en disco")
+        .set_description(format!(
+            "Otro programa ha modificado «{name}» y tienes cambios sin guardar.\n\
+             ¿Recargar el archivo del disco y perder tus cambios?"
+        ))
+        .set_buttons(buttons)
+        .show()
+        .await;
+    match result {
+        MessageDialogResult::Ok => true,
+        MessageDialogResult::Custom(label) => label == RELOAD,
+        _ => false,
+    }
+}
+
 /// Pregunta si se guardan los cambios del documento `name`.
 pub async fn confirm_save(name: String) -> SaveChoice {
     // En Windows los botones personalizados requieren common-controls v6 y un manifiesto;

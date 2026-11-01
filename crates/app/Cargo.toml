@@ -13,6 +13,7 @@ lorca-formats = { version = "0.1.0", path = "../formats" }
 lorca-search = { version = "0.1.0", path = "../search" }
 lorca-syntax = { version = "0.1.0", path = "../syntax" }
 lorca-workspace = { version = "0.1.0", path = "../workspace" }
+notify = "8.2.1"
 rfd = "0.17.2"
 
 [lints]

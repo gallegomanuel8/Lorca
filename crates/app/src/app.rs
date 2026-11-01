@@ -17,13 +17,16 @@ use iced::{
 use lorca_formats::{PdfFonts, markdown_to_pdf};
 use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
-use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
+use lorca_workspace::{
+    Config, DiskStamp, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir,
+};
 
 use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
 use crate::dialogs::{self, SaveChoice};
 use crate::editor::{DocView, EditorAction, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::shortcuts::shortcut;
+use crate::watcher;
 use crate::welcome;
 
 #[path = "find_actions.rs"]
@@ -97,6 +100,13 @@ pub enum Message {
     /// Abre el menú de la barra de estado («UTF-8», «LF», «¶»).
     StatusMenu(MenuTarget, Point),
     OpenUrl(String),
+    /// Otro programa cambió (o borró) un archivo abierto.
+    FileChanged(PathBuf),
+    /// Respuesta a «¿recargar?» para un documento con cambios sin guardar.
+    ExternalChangeChoice {
+        id: DocumentId,
+        reload: bool,
+    },
     /// Exportar la vista previa de un Markdown a PDF: pedir ruta, generar y avisar.
     ExportPdf(DocumentId),
     ExportPdfPath(DocumentId, Option<PathBuf>),
@@ -311,6 +321,12 @@ impl Lorca {
             window::close_requests().map(|_| Message::CloseRequested),
             system::theme_changes().map(Message::SystemTheme),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
+            watcher::watch(
+                self.workspace
+                    .documents()
+                    .filter_map(|d| d.path().map(PathBuf::from))
+                    .collect(),
+            ),
         ];
         if self.session_dirty.is_some() {
             subscriptions.push(iced::time::every(SESSION_TICK).map(|_| Message::Tick));
@@ -476,6 +492,16 @@ impl Lorca {
                 match result {
                     Ok(path) => self.show_info(format!("PDF guardado en «{}»", path.display())),
                     Err(error) => self.show_error(format!("No se pudo exportar el PDF: {error}")),
+                }
+                Task::none()
+            }
+            Message::FileChanged(path) => self.file_changed(&path),
+            Message::ExternalChangeChoice { id, reload } => {
+                self.dialog_open = false;
+                if reload {
+                    self.reload_document(id);
+                } else if let Some(document) = self.workspace.document_mut(id) {
+                    document.acknowledge_disk_change();
                 }
                 Task::none()
             }
@@ -898,6 +924,58 @@ impl Lorca {
         self.previews.remove(&id);
         self.preview_cache.remove(&id);
         self.ensure_document();
+    }
+
+    /// Reacciona a un cambio externo de un archivo abierto.
+    fn file_changed(&mut self, path: &std::path::Path) -> Task<Message> {
+        let Some(id) = self.workspace.find_by_path(path) else {
+            return Task::none();
+        };
+        let Some(document) = self.workspace.document_mut(id) else {
+            return Task::none();
+        };
+        let now = DiskStamp::of(path);
+        // Nuestro propio guardado también genera eventos: la huella ya coincide.
+        if now == document.disk_stamp() {
+            return Task::none();
+        }
+        let name = document.display_name();
+        match now {
+            None => {
+                document.mark_modified();
+                document.acknowledge_disk_change();
+                self.show_error(format!(
+                    "«{name}» se ha borrado o movido en disco; guárdalo para conservarlo"
+                ));
+                Task::none()
+            }
+            Some(_) if !document.is_modified() => {
+                self.reload_document(id);
+                self.show_info(format!("«{name}» se ha recargado: cambió en disco"));
+                Task::none()
+            }
+            Some(_) => {
+                if self.dialog_open {
+                    return Task::none();
+                }
+                self.dialog_open = true;
+                Task::perform(dialogs::confirm_reload(name), move |reload| {
+                    Message::ExternalChangeChoice { id, reload }
+                })
+            }
+        }
+    }
+
+    /// Relee un documento de disco conservando, en lo posible, cursor y desplazamiento.
+    fn reload_document(&mut self, id: DocumentId) {
+        let selection = self.workspace.document(id).map(|d| d.editor.selection());
+        if let Err(error) = self.workspace.reload(id) {
+            self.show_error(error.to_string());
+            return;
+        }
+        if let (Some(selection), Some(document)) = (selection, self.workspace.document_mut(id)) {
+            document.editor.set_selection(selection);
+        }
     }
 
     /// Mantiene siempre al menos una pestaña abierta.

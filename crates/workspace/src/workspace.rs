@@ -316,6 +316,32 @@ impl Workspace {
         id: DocumentId,
         encoding: TextEncoding,
     ) -> Result<(), WorkspaceError> {
+        self.reload_with(id, |bytes| {
+            let decoded = decode_as(bytes, encoding);
+            let line_ending =
+                LineEnding::detect(&decoded.text).unwrap_or_else(LineEnding::platform_default);
+            LoadedText {
+                text: LineEnding::normalize(&decoded.text).into_owned(),
+                format: TextFormat {
+                    encoding: decoded.encoding,
+                    line_ending,
+                },
+                had_decoding_errors: decoded.had_errors,
+            }
+        })
+    }
+
+    /// Vuelve a leer el archivo de disco (p. ej. porque otro programa lo cambió),
+    /// detectando de nuevo la codificación y descartando los cambios sin guardar.
+    pub fn reload(&mut self, id: DocumentId) -> Result<(), WorkspaceError> {
+        self.reload_with(id, load_bytes)
+    }
+
+    fn reload_with(
+        &mut self,
+        id: DocumentId,
+        decode: impl FnOnce(&[u8]) -> LoadedText,
+    ) -> Result<(), WorkspaceError> {
         let document = self
             .documents
             .get(&id)
@@ -326,18 +352,7 @@ impl Workspace {
             path: path.clone(),
             source,
         })?;
-        let decoded = decode_as(&bytes, encoding);
-        let line_ending =
-            LineEnding::detect(&decoded.text).unwrap_or_else(LineEnding::platform_default);
-        let loaded = LoadedText {
-            text: LineEnding::normalize(&decoded.text).into_owned(),
-            format: TextFormat {
-                encoding: decoded.encoding,
-                line_ending,
-            },
-            had_decoding_errors: decoded.had_errors,
-        };
-        let mut reloaded = Document::from_loaded(id, path, loaded);
+        let mut reloaded = Document::from_loaded(id, path, decode(&bytes));
         if let Some(language) = manual_language {
             reloaded.set_language(language);
         }
@@ -745,6 +760,21 @@ mod tests {
         assert_eq!(doc.format().line_ending, LineEnding::CrLf);
         assert!(!doc.is_modified());
         assert_eq!(ws.tabs(), &[id]);
+    }
+
+    #[test]
+    fn reload_picks_up_external_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "antes").unwrap();
+        let mut ws = Workspace::new();
+        let id = ws.open_file(&path).unwrap();
+        std::fs::write(&path, "después\r\n").unwrap();
+        ws.reload(id).unwrap();
+        let doc = ws.document(id).unwrap();
+        assert_eq!(doc.editor.text(), "después\n");
+        assert_eq!(doc.disk_stamp(), crate::DiskStamp::of(&path));
+        assert!(!doc.is_modified());
     }
 
     #[test]
