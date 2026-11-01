@@ -101,6 +101,107 @@ gestión de documentos en pestañas.
 - **Barra de menús nativa en macOS** (Archivo, Editar, Buscar, Ver, Ventana); ⌘Q guarda la
   sesión antes de salir.
 
+**Fase 6 completada:**
+
+- **Temas con nombres de obras de Lorca**: oscuros *Romancero gitano*, *Yerma*, *Bodas de
+  sangre* y *Poeta en Nueva York*; claros *Mariana Pineda*, *La casa de Bernarda Alba* y
+  *Doña Rosita la soltera*. Se elige un tema claro y otro oscuro; el modo automático
+  alterna entre ellos. Selector en la barra de estado y en la paleta («Tema: …»).
+- **Temas propios** en `themes/*.toml` (ver abajo); «Crear tema a partir del actual» copia
+  el tema activo para editarlo, y se recarga al guardar.
+- **Configuración en `config.toml`**: tamaño de letra (⌘+ / ⌘− / ⌘0), tabulador, espacios
+  o tabuladores, invisibles, temas y servidores de lenguaje. ⌘, la abre; los cambios se
+  aplican al guardar.
+- **Cliente LSP**: diagnósticos subrayados (mensaje en la barra de estado, F8 para
+  recorrerlos), autocompletado al escribir o con ⌃Espacio, información con ⌘I e ir a la
+  definición con F12 o ⌘+clic. Menú **Código** en macOS.
+- **Paquetes** `.app`/`.dmg`, `.msi`/`.exe` y `.deb`/AppImage con cargo-packager, y **CI**
+  en GitHub Actions para los tres sistemas.
+
+### Configuración
+
+`config.toml` (en la carpeta de datos, abajo) se crea al cambiar cualquier preferencia.
+Todos los campos son opcionales:
+
+```toml
+theme = "auto"                 # "auto", "light" o "dark"
+light_theme = "Mariana Pineda"
+dark_theme = "Romancero gitano"
+font_size = 14                 # de 8 a 40
+tab_width = 4                  # de 1 a 16
+insert_spaces = true           # la tecla Tab inserta espacios (false: un tabulador)
+show_whitespace = false
+show_line_endings = false
+indent_guides = true
+
+[lsp]
+enabled = true
+auto_completion = true         # false: solo con ⌃Espacio
+
+# Sustituye al servidor conocido de un lenguaje (rust, python, javascript,
+# typescript, json, yaml, toml, html, css, bash, markdown).
+[lsp.servers.python]
+command = "pylsp"
+args = []
+
+[lsp.servers.markdown]
+enabled = false                # ningún servidor para Markdown
+```
+
+Lorca guarda el archivo al cambiar preferencias desde la interfaz, así que **los
+comentarios que añadas se pierden**.
+
+### Temas propios
+
+Un tema es un `.toml` en `themes/`, dentro de la carpeta de datos. Si se llama igual que
+uno incluido, lo sustituye. Lo más fácil es partir de «Crear tema a partir del actual».
+
+```toml
+name = "Llanto por Ignacio"
+appearance = "dark"            # "dark" o "light"
+description = "A las cinco de la tarde"
+
+[palette]                      # interfaz (botones, paneles, campos)
+background = "#16120f"
+text = "#e8dccb"
+primary = "#c9a227"
+success = "#7fa37a"
+warning = "#e0a95a"
+danger = "#d0443a"
+
+[editor]                       # opcionales; se derivan de la paleta
+selection = "#c9a22755"        # #rrggbbaa admite transparencia
+cursor = "#f2d16b"
+current_line = "#201a15"
+# gutter, line_number, line_number_active, find, find_current, mark,
+# bookmark, whitespace, guide, error, warning, info
+
+[syntax]                       # un color o { color, bold, italic }
+keyword = { color = "#c9a227", bold = true }
+string = "#a8b87a"
+comment = { color = "#76695b", italic = true }
+# function, type, escape, number, constant, property, variable, operator,
+# punctuation, tag, attribute, heading, emphasis, strong, link, code
+```
+
+### Servidores de lenguaje
+
+Lorca usa el primer servidor instalado de esta lista para cada lenguaje (o el de
+`[lsp.servers]`):
+
+| Lenguaje | Servidor |
+|---|---|
+| Rust | `rust-analyzer` |
+| Python | `pyright-langserver`, `basedpyright-langserver` o `pylsp` |
+| JavaScript / TypeScript | `typescript-language-server` |
+| JSON, HTML, CSS | `vscode-json-language-server`, `vscode-html-language-server`, `vscode-css-language-server` |
+| YAML · TOML · Bash · Markdown | `yaml-language-server` · `taplo` · `bash-language-server` · `marksman` |
+
+Se buscan en el `PATH` y en las carpetas habituales (`~/.cargo/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin`, `~/.local/bin`…), porque una app abierta desde el Finder no hereda el
+`PATH` de la terminal. Solo funcionan con archivos guardados (el servidor necesita la
+ruta). Por ejemplo, `brew install rust-analyzer` o `rustup component add rust-analyzer`.
+
 ### Datos de usuario
 
 | Sistema | Carpeta |
@@ -109,8 +210,8 @@ gestión de documentos en pestañas.
 | Windows | `%APPDATA%\Lorca\` |
 | Linux | `~/.config/lorca/` |
 
-Contiene `config.toml` (preferencias), `session.toml` (pestañas) y `backups/` (texto sin
-guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
+Contiene `config.toml` (preferencias), `themes/` (temas propios), `session.toml`
+(pestañas) y `backups/` (texto sin guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
 
 ### Atajos
 
@@ -133,6 +234,21 @@ guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
 | Dividir pantalla / quitar división | ⌘\ (⌘ç en teclado español) | Ctrl+\ |
 | Palabra anterior / siguiente | ⌥← / ⌥→ | Ctrl+← / Ctrl+→ |
 | Inicio / fin de línea | ⌘← / ⌘→ | Inicio / Fin |
+| Paleta de órdenes | ⇧⌘P | Ctrl+Mayús+P |
+| Buscar en carpeta | ⇧⌘F | Ctrl+Mayús+F |
+| Añadir cursor · siguiente aparición · en columna | ⌥+clic · ⌘D · ⌥⌘↑/↓ | Alt+clic · Ctrl+D · Ctrl+Alt+↑/↓ |
+| Vista previa de Markdown | ⇧⌘V | Ctrl+Mayús+V |
+| Formatear JSON/SQL | ⌥⌘L | Ctrl+Alt+L |
+| Tamaño de letra mayor · menor · normal | ⌘+ · ⌘− · ⌘0 | Ctrl++ · Ctrl+− · Ctrl+0 |
+| Ajustes (`config.toml`) | ⌘, | Ctrl+, |
+| Autocompletar | ⌃Espacio | Ctrl+Espacio |
+| Información del símbolo | ⌘I | Ctrl+I |
+| Ir a la definición | F12 o ⌘+clic | F12 o Ctrl+clic |
+| Siguiente / anterior problema | F8 / ⇧F8 | F8 / Mayús+F8 |
+
+En macOS, ⌃Espacio suele estar asignado a «Seleccionar la fuente de entrada anterior»;
+si no llega a Lorca, quítalo en Ajustes del Sistema → Teclado → Atajos, o usa el menú
+Código.
 
 ## Compilar y ejecutar
 
@@ -147,6 +263,30 @@ cargo run --release -- notas.md main.rs # abre archivos en pestañas
 cargo test --workspace                  # pruebas
 ```
 
+### Paquetes
+
+Con [cargo-packager](https://github.com/crabnebula-dev/cargo-packager)
+(`cargo install cargo-packager --locked`):
+
+```bash
+cd crates/app
+cargo packager --release                     # formatos por defecto de la plataforma
+cargo packager --release --formats app,dmg   # macOS
+cargo packager --release --formats nsis,wix  # Windows (.exe y .msi)
+cargo packager --release --formats deb,appimage
+```
+
+Los paquetes quedan en `target/packages/`. No están firmados: en macOS, la primera vez
+abre la app con clic derecho → Abrir. El icono se genera con `python3
+assets/make_icon.py`.
+
+### Integración continua
+
+`.github/workflows/ci.yml` comprueba formato, clippy y tests en macOS, Windows y Linux en
+cada push. Al publicar una etiqueta (`git tag v0.1.0 && git push --tags`),
+`release.yml` genera los paquetes de los tres sistemas y los adjunta a una release en
+borrador.
+
 ## Arquitectura
 
 Workspace de Cargo:
@@ -156,8 +296,9 @@ Workspace de Cargo:
 | `crates/core` (`lorca-core`) | Buffer (ropey), selección, ediciones, deshacer/rehacer, codificaciones y finales de línea. Sin GUI. |
 | `crates/syntax` (`lorca-syntax`) | Detección de lenguaje y resaltado con tree-sitter. |
 | `crates/search` (`lorca-search`) | Buscar y reemplazar: modos, opciones, navegación y sustitución. |
-| `crates/formats` (`lorca-formats`) | Preview de Markdown y formateadores SQL/JSON (Fase 4). |
-| `crates/workspace` (`lorca-workspace`) | Documentos abiertos, pestañas, guardado, sesión y configuración. |
+| `crates/formats` (`lorca-formats`) | Formateadores JSON/SQL, mayúsculas, Markdown a HTML y a PDF. |
+| `crates/workspace` (`lorca-workspace`) | Documentos abiertos, pestañas, guardado, sesión, configuración y temas. |
+| `crates/lsp` (`lorca-lsp`) | Cliente del Language Server Protocol. Sin GUI. |
 | `crates/app` (`lorca`) | Binario con la GUI en iced: dibuja y traduce eventos a órdenes. |
 
 ## Hoja de ruta
@@ -175,7 +316,7 @@ Workspace de Cargo:
 5. **Productividad** ✅: multicursor, paleta de órdenes, búsqueda en carpeta, reordenar
    pestañas arrastrando, recarga si el archivo cambia en disco, menús nativos (macOS) y
    exportar Markdown a PDF.
-6. **Avanzado**: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),
+6. **Avanzado** ✅: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),
    configuración en TOML, empaquetado y CI para los tres sistemas.
 
 ## Licencia

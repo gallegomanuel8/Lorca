@@ -87,8 +87,28 @@ mensaje en español.
     modificados; solo reescribe si cambió la revisión; borra respaldos huérfanos).
     `Workspace::restore` reabre de disco los no modificados y de respaldo los modificados
     (estos quedan con `forced_modified`). Formato versionado con `SESSION_VERSION`.
-  - `config`: `Config` (`config.toml`), `ThemeMode` (auto/claro/oscuro). `theme = None`
-    significa primer arranque.
+  - `config`: `Config` (`config.toml`), `ThemeMode` (auto/claro/oscuro;
+    `ThemeMode::appearance`). `theme = None` significa primer arranque. También
+    `light_theme`/`dark_theme`, `font_size`, `tab_width`, `insert_spaces` (con métodos que
+    los limitan a rangos válidos) y `LspConfig` (`[lsp]`, servidores por `Language::id`).
+  - `theme`: `ThemeSpec` (TOML: `[palette]` de iced, `[editor]` opcional, `[syntax]` con
+    claves `HighlightKind::name`), `Rgba` (`#rrggbb[aa]`), `ThemeSet` (incluidos con
+    `include_str!` desde `crates/workspace/themes/` + `<datos>/themes/*.toml`;
+    `resolve(nombre, aspecto)` cae al primero del aspecto; `create_personal` copia uno).
+- `lsp` (Fase 6): cliente LSP sin GUI.
+  - `Client::spawn` (proceso) o `Client::connect` (cualquier `Read`/`Write`; las pruebas
+    usan `std::io::pipe` y un servidor falso). Hilo de escritura que retiene todo hasta la
+    respuesta a `initialize` y luego envía `initialized`; hilo de lectura que empareja
+    respuestas por id (`Pending`), contesta las peticiones del servidor y entrega `Event`
+    por una función de la aplicación.
+  - Sincronización siempre completa (`didChange` con todo el texto). Se negocia
+    `positionEncodings` utf-32/utf-16; `PositionEncoding::{to_server, to_chars}` convierte
+    columnas.
+  - `servers`: servidores conocidos por `Language`, búsqueda en `PATH` + carpetas
+    habituales (las apps del Finder no heredan el `PATH`), `find_root` (marcador más
+    cercano; en Rust el `Cargo.toml` más externo sin salir del repositorio).
+  - `snippet::expand` quita la sintaxis de snippet (se anuncia `snippetSupport: false`,
+    pero algunos servidores los mandan igual).
 - `app`
   - `app.rs`: estado `Lorca`, `Message`, `update`, `view`. Flujos de guardar/cerrar/salir
     encadenados con `Then` (`Nothing`, `CloseTab`, `ContinueQuit`).
@@ -150,11 +170,40 @@ mensaje en español.
     `watcher.rs` (notify, vigila carpetas; `Message::FileChanged`), `menu.rs` (muda, solo
     macOS, instalado con `Task::done(Message::InstallMenu)`), arrastre de pestañas con
     `mouse_area` + `Message::MouseReleased` global.
+  - Fase 6:
+    - `theme.rs`: `ActiveTheme` (tema de iced + `EditorColors`), reconstruido en
+      `refresh_theme` al final de cada `update` solo si cambió el aspecto o el nombre.
+      `editor/palette.rs`: `EditorColors::new(spec, theme)` resuelve los colores del editor
+      y del resaltado; el widget los recibe con `.colors(...)`.
+    - `Metrics` (tamaño de letra, alto de línea, tabulador) viaja en `ViewOptions` y en
+      `Viewport`; el widget vuelve a medir la celda si cambia el tamaño.
+    - `watcher::Watched` vigila archivos y carpetas: `config.toml` y `themes/` se recargan
+      solos (`reload_config`, `reload_themes`).
+    - `lsp_actions.rs` (submódulo de `app`): `LspState`. `sync_lsp` (al final de cada
+      `update`) abre/actualiza/cierra documentos en los servidores; un servidor por
+      (orden, raíz); las órdenes que fallan van a `broken` hasta «LSP: Reiniciar
+      servidores». Antes de cada petición se sincroniza el documento para que el servidor
+      vea el último texto. Diagnósticos convertidos a caracteres por (versión,
+      generación) en `refresh_diagnostics`.
+    - `lsp_view.rs`: suscripción `events()` (manda primero `LspConnected` con el canal
+      que usan los clientes) y desplegables (`stack` + `pin`) colocados con el punto que
+      publica el widget (`EditorAction::CursorPoint`). Con el desplegable abierto el widget
+      envía ↑/↓/Intro/Tab como `EditorAction::Completion`.
   - Probar la interfaz con osascript/clics simulados **roba el foco** al usuario: avisar
     antes y no hacerlo mientras pueda estar usando el ordenador.
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
-## Limitaciones conocidas (Fase 1)
+## Empaquetado y CI
+
+- `cargo packager --release` desde `crates/app` (configuración en su `Cargo.toml`);
+  salida en `target/packages/`. Iconos en `assets/icons/` generados por
+  `assets/make_icon.py` (el de 1024 debe llamarse `512x512@2x.png` para `.icns`).
+- `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
+  (paquetes al publicar una etiqueta `v*`).
+- Código solo para macOS: lo que no se use fuera necesita
+  `#[cfg_attr(not(target_os = "macos"), allow(dead_code))]` o la CI de Windows/Linux falla.
+
+## Limitaciones conocidas
 
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
 - La barra de desplazamiento es solo indicador (no se arrastra).
@@ -169,4 +218,9 @@ mensaje en español.
   (rápido gracias a la caché, pero no incremental).
 - Los resultados de «Buscar todo» son una foto: si el documento cambia, el clic lleva a la
   línea guardada en vez de al rango exacto.
-- Sin resaltado de sintaxis (Fase 2), ni búsqueda (Fase 3).
+- LSP: sin información al pasar el ratón (solo ⌘I), sin renombrar, referencias, acciones de
+  código ni formateo por servidor; los snippets se insertan como texto con el cursor en el
+  primer hueco. Solo archivos guardados. Sincroniza el documento completo en cada cambio.
+- Guardar preferencias desde la interfaz reescribe `config.toml` y borra sus comentarios.
+- Los paquetes no están firmados ni notarizados. Abrir un archivo desde el Finder («Abrir
+  con») no lo carga: iced no recibe ese evento de macOS.
