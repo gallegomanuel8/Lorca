@@ -14,13 +14,34 @@ pub use palette::{EditorColors, to_color};
 pub use view::{DocView, Viewport};
 pub use widget::{Decorations, ViewOptions, code_editor};
 
-/// Tamaño de la fuente del editor, en píxeles lógicos.
-pub const FONT_SIZE: f32 = 14.0;
-/// Altura de cada línea, en píxeles lógicos.
-pub const LINE_HEIGHT: f32 = 20.0;
-/// Anchura de un tabulador, en celdas.
-pub const TAB_WIDTH: usize = 4;
-/// Texto que inserta la tecla Tab.
+/// Medidas del texto del editor, derivadas de la configuración.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    /// Tamaño de la fuente, en píxeles lógicos.
+    pub font_size: f32,
+    /// Altura de cada línea, en píxeles lógicos.
+    pub line_height: f32,
+    /// Anchura de un tabulador, en celdas.
+    pub tab_width: usize,
+}
+
+impl Metrics {
+    pub fn new(font_size: f32, tab_width: usize) -> Self {
+        Self {
+            font_size,
+            line_height: (font_size * 1.43).round(),
+            tab_width,
+        }
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new(14.0, 4)
+    }
+}
+
+/// Texto que inserta la tecla Tab si la aplicación no indica otro.
 pub const INDENT: &str = "    ";
 /// Margen entre el canal de números de línea y el texto.
 pub const TEXT_PADDING: f32 = 6.0;

@@ -44,6 +44,11 @@ pub fn message_for(id: &str) -> Option<Message> {
         "whitespace" => Message::Context(ContextAction::ToggleWhitespace),
         "line_endings" => Message::Context(ContextAction::ToggleLineEndings),
         "guides" => Message::Context(ContextAction::ToggleIndentGuides),
+        "zoom_in" => Message::Zoom(1),
+        "zoom_out" => Message::Zoom(-1),
+        "zoom_reset" => Message::Zoom(0),
+        "open_config" => Message::OpenConfig,
+        "new_theme" => Message::NewTheme,
         _ => return None,
     };
     Some(message)
@@ -100,6 +105,8 @@ mod native {
             "Lorca",
             &[
                 &PredefinedMenuItem::about(Some("Acerca de Lorca"), Some(about)),
+                &separator(),
+                &item("open_config", "Ajustes…", Some("CmdOrCtrl+Comma")),
                 &separator(),
                 &PredefinedMenuItem::services(Some("Servicios")),
                 &separator(),
@@ -178,6 +185,12 @@ mod native {
                 &item("whitespace", "Mostrar espacios y tabuladores", None),
                 &item("line_endings", "Mostrar finales de línea", None),
                 &item("guides", "Guías de indentación", None),
+                &separator(),
+                &item("zoom_in", "Aumentar letra", None),
+                &item("zoom_out", "Reducir letra", None),
+                &item("zoom_reset", "Tamaño de letra normal", None),
+                &separator(),
+                &item("new_theme", "Crear tema a partir del actual", None),
             ],
         )?;
         let window = submenu(

@@ -155,6 +155,11 @@ mod tests {
         width: 400.0,
         height: 200.0,
         cell_width: 8.0,
+        metrics: super::super::Metrics {
+            font_size: 14.0,
+            line_height: 20.0,
+            tab_width: 4,
+        },
     };
 
     fn run(editor: &mut EditorState, actions: Vec<EditorAction>) -> DocView {

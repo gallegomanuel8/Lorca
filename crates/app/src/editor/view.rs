@@ -2,7 +2,7 @@
 
 use lorca_core::{Buffer, EditorState, display};
 
-use super::{LINE_HEIGHT, TAB_WIDTH};
+use super::Metrics;
 
 /// Dimensiones del área de texto que el widget comunica a la aplicación.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -12,6 +12,7 @@ pub struct Viewport {
     pub height: f32,
     /// Anchura de una celda de la fuente monoespaciada.
     pub cell_width: f32,
+    pub metrics: Metrics,
 }
 
 /// Vista de un documento: desplazamiento (en píxeles) y últimas medidas conocidas.
@@ -35,7 +36,7 @@ impl DocView {
     /// Limita el desplazamiento: verticalmente hasta que la última línea quede arriba;
     /// horizontalmente hasta el final de la línea más larga.
     pub fn clamp(&mut self, viewport: Viewport, buffer: &Buffer) {
-        let max_y = buffer.len_lines().saturating_sub(1) as f32 * LINE_HEIGHT;
+        let max_y = buffer.len_lines().saturating_sub(1) as f32 * viewport.metrics.line_height;
         self.scroll_y = self.scroll_y.clamp(0.0, max_y);
 
         let longest = (0..buffer.len_lines())
@@ -52,8 +53,9 @@ impl DocView {
         if viewport.height <= 0.0 {
             return false;
         }
-        let top = editor.cursor().line as f32 * LINE_HEIGHT;
-        top >= self.scroll_y && top + LINE_HEIGHT <= self.scroll_y + viewport.height
+        let top = editor.cursor().line as f32 * viewport.metrics.line_height;
+        top >= self.scroll_y
+            && top + viewport.metrics.line_height <= self.scroll_y + viewport.height
     }
 
     /// Para saltos (buscar, ir a línea…): si el cursor no está a la vista, lo coloca a un
@@ -63,7 +65,7 @@ impl DocView {
             return;
         }
         if !self.is_cursor_visible(editor, viewport) {
-            let top = editor.cursor().line as f32 * LINE_HEIGHT;
+            let top = editor.cursor().line as f32 * viewport.metrics.line_height;
             self.scroll_y = (top - viewport.height / 3.0).max(0.0);
         }
         self.reveal_cursor(editor, viewport);
@@ -76,15 +78,15 @@ impl DocView {
         }
         let position = editor.cursor();
 
-        let top = position.line as f32 * LINE_HEIGHT;
+        let top = position.line as f32 * viewport.metrics.line_height;
         if top < self.scroll_y {
             self.scroll_y = top;
-        } else if top + LINE_HEIGHT > self.scroll_y + viewport.height {
-            self.scroll_y = (top + LINE_HEIGHT - viewport.height).max(0.0);
+        } else if top + viewport.metrics.line_height > self.scroll_y + viewport.height {
+            self.scroll_y = (top + viewport.metrics.line_height - viewport.height).max(0.0);
         }
 
         let line = editor.buffer().line_text(position.line);
-        let cells = display::visual_column(&line, position.column, TAB_WIDTH);
+        let cells = display::visual_column(&line, position.column, viewport.metrics.tab_width);
         let x = cells as f32 * viewport.cell_width;
         let margin = viewport.cell_width * 4.0;
         if x < self.scroll_x {
@@ -104,7 +106,13 @@ mod tests {
         width: 80.0,
         height: 100.0,
         cell_width: 8.0,
+        metrics: Metrics {
+            font_size: 14.0,
+            line_height: LINE_HEIGHT,
+            tab_width: 4,
+        },
     };
+    const LINE_HEIGHT: f32 = 20.0;
 
     #[test]
     fn reveal_scrolls_down_and_up() {

@@ -24,7 +24,7 @@ use lorca_workspace::{
 
 use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
 use crate::dialogs::{self, SaveChoice};
-use crate::editor::{DocView, EditorAction, apply_action};
+use crate::editor::{DocView, EditorAction, Metrics, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::menu;
 use crate::palette::{self, Palette};
@@ -145,6 +145,12 @@ pub enum Message {
     /// El modo claro/oscuro del sistema ha cambiado (o se ha consultado al arrancar).
     SystemTheme(Mode),
     ThemeSelected(ThemeMode),
+    /// Cambia el tamaño de letra: +1, −1 o 0 para volver al de por defecto.
+    Zoom(i8),
+    /// Abre `config.toml` en una pestaña.
+    OpenConfig,
+    /// Crea una copia editable del tema actual y la abre.
+    NewTheme,
     /// Opción marcada en la pantalla de bienvenida (aún sin confirmar).
     WelcomeChoose(ThemeMode),
     WelcomeDone,
@@ -358,6 +364,11 @@ impl Lorca {
         self.active_theme.iced.clone()
     }
 
+    /// Medidas del texto del editor según la configuración.
+    pub(crate) fn metrics(&self) -> Metrics {
+        Metrics::new(f32::from(self.config.font_size()), self.config.tab_width())
+    }
+
     /// Aspecto (claro u oscuro) que toca mostrar ahora.
     fn appearance(&self) -> lorca_workspace::Appearance {
         self.welcome_choice
@@ -382,12 +393,7 @@ impl Lorca {
             system::theme_changes().map(Message::SystemTheme),
             menu::events(),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
-            watcher::watch(
-                self.workspace
-                    .documents()
-                    .filter_map(|d| d.path().map(PathBuf::from))
-                    .collect(),
-            ),
+            watcher::watch(self.watched()),
         ];
         if self.palette.is_some() {
             subscriptions.push(event::listen_with(palette_keys));
@@ -396,6 +402,24 @@ impl Lorca {
             subscriptions.push(iced::time::every(SESSION_TICK).map(|_| Message::Tick));
         }
         Subscription::batch(subscriptions)
+    }
+
+    /// Archivos abiertos, `config.toml` y la carpeta de temas.
+    fn watched(&self) -> watcher::Watched {
+        let mut files: Vec<PathBuf> = self
+            .workspace
+            .documents()
+            .filter_map(|d| d.path().map(PathBuf::from))
+            .collect();
+        let mut folders = Vec::new();
+        if let Some(dir) = &self.data_dir {
+            files.push(dir.join(Config::FILE_NAME));
+            let themes = dir.join(THEMES_DIR);
+            if themes.is_dir() {
+                folders.push(themes);
+            }
+        }
+        watcher::Watched { files, folders }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -717,6 +741,53 @@ impl Lorca {
                 self.save_config();
                 Task::none()
             }
+            Message::Zoom(delta) => {
+                self.config.font_size = match delta {
+                    0 => Config::DEFAULT_FONT_SIZE,
+                    _ => self
+                        .config
+                        .font_size()
+                        .saturating_add_signed(i16::from(delta))
+                        .clamp(*Config::FONT_SIZES.start(), *Config::FONT_SIZES.end()),
+                };
+                self.save_config();
+                self.show_info(format!("Tamaño de letra: {}", self.config.font_size));
+                Task::none()
+            }
+            Message::OpenConfig => {
+                let Some(dir) = self.data_dir.clone() else {
+                    return Task::none();
+                };
+                let path = dir.join(Config::FILE_NAME);
+                if !path.exists() {
+                    self.save_config();
+                }
+                self.open_paths(&[path]);
+                Task::none()
+            }
+            Message::NewTheme => {
+                let Some(dir) = self.data_dir.clone() else {
+                    return Task::none();
+                };
+                let current = self.active_theme.name();
+                match self.themes.create_personal(&current, &dir.join(THEMES_DIR)) {
+                    Ok((name, path)) => {
+                        let appearance = self.active_theme.appearance;
+                        match appearance {
+                            lorca_workspace::Appearance::Light => self.config.light_theme = name,
+                            lorca_workspace::Appearance::Dark => self.config.dark_theme = name,
+                        }
+                        self.save_config();
+                        self.reload_themes();
+                        self.open_paths(&[path]);
+                        self.show_info(
+                            "Tema creado: edítalo y guarda para ver los cambios".to_owned(),
+                        );
+                    }
+                    Err(error) => self.show_error(error.to_string()),
+                }
+                Task::none()
+            }
             Message::WelcomeChoose(mode) => {
                 self.welcome_choice = Some(mode);
                 Task::none()
@@ -809,6 +880,37 @@ impl Lorca {
         result.map_err(|error| self.show_error(format!("No se pudo guardar la sesión: {error}")))
     }
 
+    /// Vuelve a leer `config.toml` (lo ha cambiado el usuario u otro programa). Si tiene
+    /// errores se avisa y se mantiene la configuración actual.
+    fn reload_config(&mut self) {
+        let Some(dir) = &self.data_dir else { return };
+        match Config::load(&dir.join(Config::FILE_NAME)) {
+            // El primer arranque se decide en la bienvenida, no al leer el archivo.
+            Ok(config) if config.theme.is_none() && self.config.theme.is_some() => {
+                self.config = Config {
+                    theme: self.config.theme,
+                    ..config
+                };
+            }
+            Ok(config) => self.config = config,
+            Err(error) => self.show_error(error.to_string()),
+        }
+    }
+
+    /// Vuelve a leer los temas del usuario. El tema activo se reconstruye aunque conserve
+    /// el nombre, porque su archivo puede haber cambiado.
+    fn reload_themes(&mut self) {
+        let Some(dir) = &self.data_dir else { return };
+        let (themes, errors) = ThemeSet::load(&dir.join(THEMES_DIR));
+        self.themes = themes;
+        let appearance = self.appearance();
+        self.active_theme =
+            ActiveTheme::new(&self.themes, self.config.theme_name(appearance), appearance);
+        if let Some(error) = errors.first() {
+            self.show_error(error.to_string());
+        }
+    }
+
     fn save_config(&mut self) {
         let Some(dir) = &self.data_dir else { return };
         if let Err(error) = self.config.save(&dir.join(Config::FILE_NAME)) {
@@ -833,6 +935,11 @@ impl Lorca {
     // --- Edición ----------------------------------------------------------------------
 
     fn apply_editor_action(&mut self, id: DocumentId, action: EditorAction) {
+        // La tecla Tab inserta lo que diga la configuración (espacios o tabulador).
+        let action = match action {
+            EditorAction::Indent => EditorAction::Insert(self.config.indent_unit()),
+            other => other,
+        };
         if matches!(action, EditorAction::Click { .. }) {
             self.focus = Focus::Editor;
             self.context_menu = None;
@@ -1058,6 +1165,13 @@ impl Lorca {
 
     /// Reacciona a un cambio externo de un archivo abierto.
     fn file_changed(&mut self, path: &std::path::Path) -> Task<Message> {
+        if let Some(dir) = &self.data_dir {
+            if path == dir.join(Config::FILE_NAME) {
+                self.reload_config();
+            } else if path.parent() == Some(dir.join(THEMES_DIR).as_path()) {
+                self.reload_themes();
+            }
+        }
         let Some(id) = self.workspace.find_by_path(path) else {
             return Task::none();
         };

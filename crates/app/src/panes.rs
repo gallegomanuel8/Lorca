@@ -16,7 +16,7 @@ use lorca_workspace::DocumentId;
 
 use super::{Lorca, Message, Then};
 use crate::context_menu::{ContextAction, ContextMenu, MenuItem, MenuTarget};
-use crate::editor::{Decorations, INDENT, ViewOptions, code_editor};
+use crate::editor::{Decorations, ViewOptions, code_editor};
 use crate::find;
 use crate::palette::{self, Command};
 use crate::shortcut_labels as keys;
@@ -113,6 +113,7 @@ impl Lorca {
                 .show_line_endings
                 .then(|| document.format().line_ending),
             indent_guides: self.config.indent_guides,
+            metrics: self.metrics(),
         };
         let editor: Element<'_, Message> = code_editor(
             &document.editor,
@@ -351,6 +352,25 @@ impl Lorca {
                 Message::ThemeSelected(mode),
             ));
         }
+        commands.extend([
+            Command::new("Ver: Aumentar letra", keys::ZOOM_IN, Message::Zoom(1)),
+            Command::new("Ver: Reducir letra", keys::ZOOM_OUT, Message::Zoom(-1)),
+            Command::new(
+                "Ver: Tamaño de letra normal",
+                keys::ZOOM_RESET,
+                Message::Zoom(0),
+            ),
+            Command::new(
+                "Preferencias: Abrir configuración (config.toml)",
+                keys::SETTINGS,
+                Message::OpenConfig,
+            ),
+            Command::new(
+                "Preferencias: Crear tema a partir del actual",
+                "",
+                Message::NewTheme,
+            ),
+        ]);
         for (index, spec) in self.themes.iter().enumerate() {
             commands.push(Command::new(
                 format!("Tema: {}", spec.name),
@@ -903,7 +923,7 @@ impl Lorca {
         };
         let result = match (language, minify) {
             (Language::Json, true) => minify_json(&source),
-            (Language::Json, false) => format_json(&source, INDENT),
+            (Language::Json, false) => format_json(&source, &self.config.indent_unit()),
             (Language::Sql, false) => Ok(format_sql(&source)),
             _ => {
                 self.show_info("Formatear está disponible para JSON y SQL".to_owned());

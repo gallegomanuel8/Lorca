@@ -61,6 +61,19 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
     if modifiers.command() && !modifiers.alt() && physical_key == Physical::Code(Code::Backslash) {
         return Some(Message::ToggleSplit);
     }
+    // Tamaño de letra. «+» se acepta con o sin Mayús (en inglés está en la tecla «=»).
+    if modifiers.command()
+        && !modifiers.alt()
+        && let Key::Character(c) = key
+    {
+        match c.as_str() {
+            "+" | "=" => return Some(Message::Zoom(1)),
+            "-" => return Some(Message::Zoom(-1)),
+            "0" => return Some(Message::Zoom(0)),
+            "," => return Some(Message::OpenConfig),
+            _ => {}
+        }
+    }
     let letter = key.to_latin(physical_key)?.to_ascii_lowercase();
     if letter == 'g' && modifiers.control() && !modifiers.alt() {
         return Some(Message::GoToLine);
@@ -134,6 +147,28 @@ mod tests {
             char_key("w", Code::KeyW, cmd),
             Some(Message::CloseActive)
         ));
+    }
+
+    #[test]
+    fn zoom() {
+        let cmd = Modifiers::COMMAND;
+        assert!(matches!(
+            char_key("+", Code::BracketRight, cmd),
+            Some(Message::Zoom(1))
+        ));
+        assert!(matches!(
+            char_key("=", Code::Equal, cmd),
+            Some(Message::Zoom(1))
+        ));
+        assert!(matches!(
+            char_key("-", Code::Slash, cmd),
+            Some(Message::Zoom(-1))
+        ));
+        assert!(matches!(
+            char_key("0", Code::Digit0, cmd),
+            Some(Message::Zoom(0))
+        ));
+        assert!(char_key("+", Code::BracketRight, Modifiers::empty()).is_none());
     }
 
     #[test]

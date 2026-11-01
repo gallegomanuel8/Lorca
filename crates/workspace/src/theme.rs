@@ -326,6 +326,61 @@ impl ThemeSet {
         self.themes.iter().map(|(spec, _)| spec)
     }
 
+    /// Texto TOML del tema (el incluido o el de su archivo).
+    pub fn source_text(&self, name: &str) -> Option<String> {
+        match self.source(name)? {
+            ThemeSource::Builtin => BUILTIN
+                .iter()
+                .find(|source| ThemeSpec::parse(source).is_ok_and(|spec| spec.name == name))
+                .map(|source| (*source).to_owned()),
+            ThemeSource::File(path) => std::fs::read_to_string(path).ok(),
+        }
+    }
+
+    /// Crea en `dir` una copia editable del tema `name` con un nombre nuevo
+    /// («<nombre> (personal)», numerado si ya existe). Devuelve el nombre y la ruta.
+    pub fn create_personal(
+        &self,
+        name: &str,
+        dir: &Path,
+    ) -> Result<(String, PathBuf), WorkspaceError> {
+        let source = self
+            .source_text(name)
+            .ok_or_else(|| WorkspaceError::Parse {
+                path: dir.to_owned(),
+                message: format!("no se encontró el tema «{name}»"),
+            })?;
+        let base = format!("{name} (personal)");
+        let new_name = (1..)
+            .map(|n| {
+                if n == 1 {
+                    base.clone()
+                } else {
+                    format!("{name} (personal {n})")
+                }
+            })
+            .find(|candidate| {
+                self.get(candidate).is_none() && !dir.join(theme_file_name(candidate)).exists()
+            })
+            .unwrap_or(base);
+        let quoted = toml::Value::String(new_name.clone()).to_string();
+        let mut renamed = false;
+        let text: Vec<String> = source
+            .lines()
+            .map(|line| {
+                if !renamed && line.trim_start().starts_with("name") && line.contains('=') {
+                    renamed = true;
+                    format!("name = {quoted}")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect();
+        let path = dir.join(theme_file_name(&new_name));
+        crate::storage::write_atomic(&path, (text.join("\n") + "\n").as_bytes())?;
+        Ok((new_name, path))
+    }
+
     /// Temas de un aspecto, en orden de presentación.
     pub fn with_appearance(&self, appearance: Appearance) -> impl Iterator<Item = &ThemeSpec> {
         self.iter()
@@ -339,6 +394,29 @@ impl ThemeSet {
             .filter(|spec| spec.appearance == appearance)
             .or_else(|| self.with_appearance(appearance).next())
     }
+}
+
+/// Nombre de archivo para un tema: minúsculas, sin tildes y con guiones.
+pub fn theme_file_name(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        let c = match c {
+            'á' | 'à' | 'ä' | 'â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ñ' => 'n',
+            other => other,
+        };
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    format!("{}.toml", if slug.is_empty() { "tema" } else { slug })
 }
 
 #[cfg(test)]
@@ -441,6 +519,33 @@ mod tests {
         assert_eq!(set.get("Yerma").unwrap().description, "Otro");
         assert!(matches!(set.source("Yerma"), Some(ThemeSource::File(_))));
         assert_eq!(set.iter().count(), BUILTIN.len() + 1);
+    }
+
+    #[test]
+    fn file_names_are_slugs() {
+        assert_eq!(
+            theme_file_name("Doña Rosita la soltera (personal)"),
+            "dona-rosita-la-soltera-personal.toml"
+        );
+        assert_eq!(theme_file_name("¡¿?!"), "tema.toml");
+    }
+
+    #[test]
+    fn personal_copy_is_loadable_and_numbered() {
+        let dir = tempfile::tempdir().unwrap();
+        let set = ThemeSet::builtin();
+        let (name, path) = set.create_personal("Yerma", dir.path()).unwrap();
+        assert_eq!(name, "Yerma (personal)");
+        let (set, errors) = ThemeSet::load(dir.path());
+        assert!(errors.is_empty(), "{errors:?}");
+        let copy = set.get("Yerma (personal)").unwrap();
+        assert_eq!(copy.palette, set.get("Yerma").unwrap().palette);
+        assert_eq!(set.source(&name), Some(&ThemeSource::File(path)));
+        // Los comentarios del original se conservan.
+        assert!(set.source_text(&name).unwrap().starts_with("# Yerma"));
+
+        let (second, _) = set.create_personal("Yerma", dir.path()).unwrap();
+        assert_eq!(second, "Yerma (personal 2)");
     }
 
     #[test]

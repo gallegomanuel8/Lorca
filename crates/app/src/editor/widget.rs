@@ -20,9 +20,7 @@ use lorca_syntax::Highlights;
 
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
-use super::{
-    ClickKind, DocView, EditorAction, FONT_SIZE, LINE_HEIGHT, TAB_WIDTH, TEXT_PADDING, Viewport,
-};
+use super::{ClickKind, DocView, EditorAction, Metrics, TEXT_PADDING, Viewport};
 
 /// Periodo de parpadeo del cursor.
 const BLINK_MILLIS: u128 = 530;
@@ -52,13 +50,14 @@ pub fn code_editor<'a, Message>(
 }
 
 /// Qué elementos invisibles se dibujan.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ViewOptions {
     /// Espacios (·) y tabuladores (→).
     pub whitespace: bool,
     /// Etiqueta del final de línea del documento al final de cada línea.
     pub line_ending: Option<LineEnding>,
     pub indent_guides: bool,
+    pub metrics: Metrics,
 }
 
 /// Rangos (en caracteres, ordenados y sin solapes) que se resaltan bajo el texto.
@@ -100,6 +99,8 @@ impl<Message> std::fmt::Debug for CodeEditor<'_, Message> {
 #[derive(Debug)]
 struct State {
     cell_width: f32,
+    /// Tamaño de fuente con el que se midió `cell_width`.
+    measured_for: f32,
     last_click: Option<mouse::Click>,
     dragging: bool,
     modifiers: keyboard::Modifiers,
@@ -116,6 +117,7 @@ impl Default for State {
         let now = Instant::now();
         Self {
             cell_width: 0.0,
+            measured_for: 0.0,
             last_click: None,
             dragging: false,
             modifiers: keyboard::Modifiers::default(),
@@ -149,10 +151,11 @@ struct Geometry {
     gutter: Rectangle,
     text_area: Rectangle,
     cell: f32,
+    metrics: Metrics,
 }
 
 impl Geometry {
-    fn new(bounds: Rectangle, cell: f32, line_count: usize) -> Self {
+    fn new(bounds: Rectangle, cell: f32, line_count: usize, metrics: Metrics) -> Self {
         let digits = line_count.to_string().len().max(3);
         let gutter_width = (digits as f32 + 2.0) * cell;
         let gutter = Rectangle {
@@ -169,11 +172,12 @@ impl Geometry {
             gutter,
             text_area,
             cell,
+            metrics,
         }
     }
 
     fn line_y(&self, line: usize, view: DocView) -> f32 {
-        self.bounds.y + line as f32 * LINE_HEIGHT - view.scroll_y
+        self.bounds.y + line as f32 * self.metrics.line_height - view.scroll_y
     }
 
     fn cell_x(&self, cells: usize, view: DocView) -> f32 {
@@ -185,11 +189,12 @@ impl Geometry {
             width: (self.text_area.width - TEXT_PADDING - SCROLLBAR_WIDTH).max(0.0),
             height: self.bounds.height,
             cell_width: self.cell,
+            metrics: self.metrics,
         }
     }
 
     fn page_lines(&self) -> usize {
-        ((self.bounds.height / LINE_HEIGHT).floor() as usize)
+        ((self.bounds.height / self.metrics.line_height).floor() as usize)
             .saturating_sub(1)
             .max(1)
     }
@@ -209,13 +214,16 @@ impl<'a, Message> CodeEditor<'a, Message> {
         let line = if y <= 0.0 {
             0
         } else {
-            (y / LINE_HEIGHT) as usize
+            (y / geometry.metrics.line_height) as usize
         };
         let line = line.min(buffer.len_lines().saturating_sub(1));
         let cells =
             (point.x - geometry.text_area.x - TEXT_PADDING + self.view.scroll_x) / geometry.cell;
-        let column =
-            display::char_column_at_visual(&buffer.line_text(line), cells.max(0.0), TAB_WIDTH);
+        let column = display::char_column_at_visual(
+            &buffer.line_text(line),
+            cells.max(0.0),
+            geometry.metrics.tab_width,
+        );
         buffer.position_to_char(Position::new(line, column))
     }
 
@@ -229,12 +237,12 @@ impl<'a, Message> CodeEditor<'a, Message> {
         let buffer = self.editor.buffer();
         let position = buffer.char_to_position(head);
         let line = buffer.line_text(position.line);
-        let cells = display::visual_column(&line, position.column, TAB_WIDTH);
+        let cells = display::visual_column(&line, position.column, geometry.metrics.tab_width);
         Rectangle {
             x: geometry.cell_x(cells, self.view).floor(),
             y: geometry.line_y(position.line, self.view),
             width: 2.0,
-            height: LINE_HEIGHT,
+            height: geometry.metrics.line_height,
         }
     }
 
@@ -274,8 +282,10 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         limits: &layout::Limits,
     ) -> layout::Node {
         let state = tree.state.downcast_mut::<State>();
-        if state.cell_width <= 0.0 {
-            state.cell_width = measure_cell_width();
+        let metrics = self.options.metrics;
+        if state.cell_width <= 0.0 || state.measured_for != metrics.font_size {
+            state.cell_width = measure_cell_width(metrics);
+            state.measured_for = metrics.font_size;
         }
         layout::atomic(limits, Length::Fill, Length::Fill)
     }
@@ -296,6 +306,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             layout.bounds(),
             state.cell_width,
             self.editor.buffer().len_lines(),
+            self.options.metrics,
         );
 
         match event {
@@ -389,7 +400,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         state.preedit = Some(input_method::Preedit {
                             content: content.clone(),
                             selection: selection.clone(),
-                            text_size: Some(Pixels(FONT_SIZE)),
+                            text_size: Some(Pixels(geometry.metrics.font_size)),
                         });
                         shell.request_redraw();
                     }
@@ -454,9 +465,10 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 if cursor.is_over(geometry.bounds) =>
             {
                 let (mut dx, mut dy) = match delta {
-                    mouse::ScrollDelta::Lines { x, y } => {
-                        (-x * geometry.cell * 3.0, -y * LINE_HEIGHT * 3.0)
-                    }
+                    mouse::ScrollDelta::Lines { x, y } => (
+                        -x * geometry.cell * 3.0,
+                        -y * geometry.metrics.line_height * 3.0,
+                    ),
                     mouse::ScrollDelta::Pixels { x, y } => (-x, -y),
                 };
                 // Mayús + rueda desplaza en horizontal (Windows y Linux).
@@ -483,7 +495,12 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         let state = tree.state.downcast_ref::<State>();
         let buffer = self.editor.buffer();
         let line_count = buffer.len_lines();
-        let geometry = Geometry::new(layout.bounds(), state.cell_width, line_count);
+        let geometry = Geometry::new(
+            layout.bounds(),
+            state.cell_width,
+            line_count,
+            self.options.metrics,
+        );
         let derived;
         let colors = match self.colors {
             Some(colors) => colors,
@@ -497,8 +514,11 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         fill(renderer, geometry.text_area, colors.background);
         fill(renderer, geometry.gutter, colors.gutter);
 
-        let first_line = (view.scroll_y / LINE_HEIGHT).floor().max(0.0) as usize;
-        let last_line = (((view.scroll_y + geometry.bounds.height) / LINE_HEIGHT).ceil() as usize)
+        let first_line = (view.scroll_y / geometry.metrics.line_height)
+            .floor()
+            .max(0.0) as usize;
+        let last_line = (((view.scroll_y + geometry.bounds.height) / geometry.metrics.line_height)
+            .ceil() as usize)
             .min(line_count);
         let first_cell = (view.scroll_x / geometry.cell).floor().max(0.0) as usize;
         let visible_cells = (geometry.text_area.width / geometry.cell).ceil() as usize + 2;
@@ -516,13 +536,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     colors.line_number
                 };
                 if self.editor.bookmarks().contains(line) {
-                    let size = LINE_HEIGHT * 0.45;
+                    let size = geometry.metrics.line_height * 0.45;
                     renderer::Renderer::fill_quad(
                         renderer,
                         Quad {
                             bounds: Rectangle {
                                 x: geometry.gutter.x + geometry.cell * 0.4,
-                                y: geometry.line_y(line, view) + (LINE_HEIGHT - size) / 2.0,
+                                y: geometry.line_y(line, view)
+                                    + (geometry.metrics.line_height - size) / 2.0,
                                 width: size,
                                 height: size,
                             },
@@ -538,9 +559,9 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 renderer.fill_text(
                     Text {
                         content: (line + 1).to_string(),
-                        bounds: Size::new(geometry.gutter.width, LINE_HEIGHT),
+                        bounds: Size::new(geometry.gutter.width, geometry.metrics.line_height),
                         align_x: text::Alignment::Right,
-                        ..text_style()
+                        ..text_style(geometry.metrics)
                     },
                     Point::new(
                         geometry.gutter.x + geometry.gutter.width - geometry.cell,
@@ -553,7 +574,12 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         });
 
         let guides = if self.options.indent_guides {
-            indent_guides(self.editor, first_line, last_line)
+            indent_guides(
+                self.editor,
+                first_line,
+                last_line,
+                geometry.metrics.tab_width,
+            )
         } else {
             Vec::new()
         };
@@ -571,7 +597,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         renderer,
                         Rectangle {
                             y,
-                            height: LINE_HEIGHT,
+                            height: geometry.metrics.line_height,
                             ..geometry.text_area
                         },
                         colors.current_line,
@@ -615,12 +641,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     }
                     let start = selected.start.max(line_start) - line_start;
                     let end = selected.end.min(line_end) - line_start;
-                    let mut end_cells = display::visual_column(&text, end, TAB_WIDTH);
+                    let mut end_cells =
+                        display::visual_column(&text, end, geometry.metrics.tab_width);
                     // Si la selección incluye el salto de línea, se marca una celda más.
                     if selected.end > line_end {
                         end_cells += 1;
                     }
-                    let start_cells = display::visual_column(&text, start, TAB_WIDTH);
+                    let start_cells =
+                        display::visual_column(&text, start, geometry.metrics.tab_width);
                     let x = geometry.cell_x(start_cells, view);
                     fill(
                         renderer,
@@ -628,21 +656,21 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             x,
                             y,
                             width: (end_cells.saturating_sub(start_cells)) as f32 * geometry.cell,
-                            height: LINE_HEIGHT,
+                            height: geometry.metrics.line_height,
                         },
                         colors.selection,
                     );
                 }
 
                 if let Some(&indent) = guides.get(line - first_line) {
-                    for column in (0..indent).step_by(TAB_WIDTH) {
+                    for column in (0..indent).step_by(geometry.metrics.tab_width) {
                         fill(
                             renderer,
                             Rectangle {
                                 x: geometry.cell_x(column, view).floor(),
                                 y,
                                 width: 1.0,
-                                height: LINE_HEIGHT,
+                                height: geometry.metrics.line_height,
                             },
                             colors.guide,
                         );
@@ -663,7 +691,8 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 if let Some(ending) = self.options.line_ending
                     && line + 1 < line_count
                 {
-                    let cells = display::visual_column(&text, usize::MAX, TAB_WIDTH);
+                    let cells =
+                        display::visual_column(&text, usize::MAX, geometry.metrics.tab_width);
                     let label = ending.label();
                     let x = geometry.cell_x(cells, view) + 4.0;
                     let width = label.len() as f32 * 6.0 + 6.0;
@@ -674,7 +703,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                                 x,
                                 y: y + 4.0,
                                 width,
-                                height: LINE_HEIGHT - 8.0,
+                                height: geometry.metrics.line_height - 8.0,
                             },
                             border: iced::Border {
                                 radius: 3.0.into(),
@@ -690,9 +719,9 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             size: Pixels(9.0),
                             font: Font::default(),
                             align_y: alignment::Vertical::Center,
-                            ..text_style()
+                            ..text_style(geometry.metrics)
                         },
-                        Point::new(x + 3.0, y + LINE_HEIGHT / 2.0),
+                        Point::new(x + 3.0, y + geometry.metrics.line_height / 2.0),
                         colors.line_number,
                         geometry.text_area,
                     );
@@ -700,8 +729,12 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
 
                 let spans = self.highlights.map_or(&[][..], |h| h.line(line));
                 let mut next_span = 0;
-                let runs =
-                    display::visible_runs(&text, first_cell, visible_cells, TAB_WIDTH, |index| {
+                let runs = display::visible_runs(
+                    &text,
+                    first_cell,
+                    visible_cells,
+                    geometry.metrics.tab_width,
+                    |index| {
                         while spans.get(next_span).is_some_and(|s| s.end <= index) {
                             next_span += 1;
                         }
@@ -709,7 +742,8 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             .get(next_span)
                             .filter(|s| s.start <= index)
                             .map(|s| s.kind)
-                    });
+                    },
+                );
                 for run in runs {
                     if run.text.trim().is_empty() {
                         continue;
@@ -719,7 +753,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         Text {
                             content: run.text,
                             font: style.font,
-                            ..text_style()
+                            ..text_style(geometry.metrics)
                         },
                         Point::new(geometry.cell_x(run.start_cell, view), y),
                         style.color.unwrap_or(colors.text),
@@ -739,11 +773,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             }
 
             // Indicador de posición vertical.
-            let content_height = line_count as f32 * LINE_HEIGHT + geometry.bounds.height;
-            if line_count as f32 * LINE_HEIGHT > geometry.bounds.height {
+            let content_height =
+                line_count as f32 * geometry.metrics.line_height + geometry.bounds.height;
+            if line_count as f32 * geometry.metrics.line_height > geometry.bounds.height {
                 let height = geometry.bounds.height;
                 let thumb_height = (height * height / content_height).max(24.0);
-                let max_scroll = (line_count.saturating_sub(1)) as f32 * LINE_HEIGHT;
+                let max_scroll =
+                    (line_count.saturating_sub(1)) as f32 * geometry.metrics.line_height;
                 let progress = if max_scroll > 0.0 {
                     view.scroll_y / max_scroll
                 } else {
@@ -776,6 +812,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             layout.bounds(),
             state.cell_width,
             self.editor.buffer().len_lines(),
+            self.options.metrics,
         );
         if cursor.is_over(geometry.text_area) {
             mouse::Interaction::Text
@@ -793,11 +830,11 @@ impl<'a, Message: 'a> From<CodeEditor<'a, Message>> for Element<'a, Message, The
 
 /// Anchura (en celdas) de las guías de indentación de cada línea visible. Las líneas en
 /// blanco toman la menor indentación de la línea con texto anterior y la siguiente.
-fn indent_guides(editor: &EditorState, first: usize, last: usize) -> Vec<usize> {
+fn indent_guides(editor: &EditorState, first: usize, last: usize, tab_width: usize) -> Vec<usize> {
     /// Hasta dónde se buscan líneas con texto alrededor de una línea en blanco.
     const LOOKAROUND: usize = 200;
     let buffer = editor.buffer();
-    let indent_of = |line: usize| leading_indent(&buffer.line_text(line));
+    let indent_of = |line: usize| leading_indent(&buffer.line_text(line), tab_width);
     (first..last)
         .map(|line| {
             indent_of(line).unwrap_or_else(|| {
@@ -813,11 +850,11 @@ fn indent_guides(editor: &EditorState, first: usize, last: usize) -> Vec<usize> 
 }
 
 /// Celdas de sangría al principio de la línea, o `None` si está en blanco.
-fn leading_indent(text: &str) -> Option<usize> {
+fn leading_indent(text: &str, tab_width: usize) -> Option<usize> {
     let mut visual = 0;
     for c in text.chars() {
         match c {
-            ' ' | '\t' => visual += display::char_cells(c, visual, TAB_WIDTH),
+            ' ' | '\t' => visual += display::char_cells(c, visual, tab_width),
             _ => return Some(visual),
         }
     }
@@ -838,13 +875,13 @@ fn draw_whitespace(
 ) {
     let mut visual = 0;
     for c in text.chars() {
-        let width = display::char_cells(c, visual, TAB_WIDTH);
+        let width = display::char_cells(c, visual, geometry.metrics.tab_width);
         if visual >= first_cell + visible_cells {
             break;
         }
         if visual + width > first_cell {
             let x = geometry.cell_x(visual, view);
-            let middle = y + LINE_HEIGHT / 2.0;
+            let middle = y + geometry.metrics.line_height / 2.0;
             match c {
                 ' ' => fill(
                     renderer,
@@ -914,8 +951,8 @@ impl LineRanges<'_> {
             }
             let start = range.start.max(self.line_start) - self.line_start;
             let end = range.end.min(self.line_end) - self.line_start;
-            let start_cells = display::visual_column(self.text, start, TAB_WIDTH);
-            let mut end_cells = display::visual_column(self.text, end, TAB_WIDTH);
+            let start_cells = display::visual_column(self.text, start, geometry.metrics.tab_width);
+            let mut end_cells = display::visual_column(self.text, end, geometry.metrics.tab_width);
             if range.end > self.line_end {
                 end_cells += 1;
             }
@@ -925,7 +962,7 @@ impl LineRanges<'_> {
                     x: geometry.cell_x(start_cells, view),
                     y: self.y,
                     width: end_cells.saturating_sub(start_cells) as f32 * geometry.cell,
-                    height: LINE_HEIGHT,
+                    height: geometry.metrics.line_height,
                 },
                 color,
             );
@@ -945,12 +982,12 @@ fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {
 }
 
 /// Estilo común del texto del editor (el contenido se rellena en cada uso).
-fn text_style() -> Text<String, Font> {
+fn text_style(metrics: Metrics) -> Text<String, Font> {
     Text {
         content: String::new(),
-        bounds: Size::new(f32::INFINITY, LINE_HEIGHT),
-        size: Pixels(FONT_SIZE),
-        line_height: text::LineHeight::Absolute(Pixels(LINE_HEIGHT)),
+        bounds: Size::new(f32::INFINITY, metrics.line_height),
+        size: Pixels(metrics.font_size),
+        line_height: text::LineHeight::Absolute(Pixels(metrics.line_height)),
         font: Font::MONOSPACE,
         align_x: text::Alignment::Left,
         align_y: alignment::Vertical::Top,
@@ -960,14 +997,18 @@ fn text_style() -> Text<String, Font> {
 }
 
 /// Mide la anchura de una celda de la fuente monoespaciada.
-fn measure_cell_width() -> f32 {
+fn measure_cell_width(metrics: Metrics) -> f32 {
     const SAMPLE: &str = "MMMMMMMMMM";
-    let style = text_style();
+    let style = text_style(metrics);
     let paragraph = <Renderer as text::Renderer>::Paragraph::with_text(Text {
         content: SAMPLE,
         shaping: text::Shaping::Basic,
         ..style.with_content(SAMPLE)
     });
     let width = paragraph.min_bounds().width / SAMPLE.len() as f32;
-    if width > 0.0 { width } else { FONT_SIZE * 0.6 }
+    if width > 0.0 {
+        width
+    } else {
+        metrics.font_size * 0.6
+    }
 }

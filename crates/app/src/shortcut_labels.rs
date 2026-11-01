@@ -32,6 +32,10 @@ label!(SAVE, "⌘S", "Ctrl+S");
 label!(SAVE_AS, "⇧⌘S", "Ctrl+Mayús+S");
 label!(REPLACE, "⌥⌘F", "Ctrl+H");
 label!(FIND_IN_FOLDER, "⇧⌘F", "Ctrl+Mayús+F");
+label!(ZOOM_IN, "⌘+", "Ctrl++");
+label!(ZOOM_OUT, "⌘−", "Ctrl+−");
+label!(ZOOM_RESET, "⌘0", "Ctrl+0");
+label!(SETTINGS, "⌘,", "Ctrl+,");
 
 /// Texto de «mostrar el archivo» en el gestor de archivos del sistema.
 pub const REVEAL: &str = if cfg!(target_os = "macos") {

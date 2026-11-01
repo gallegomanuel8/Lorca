@@ -63,6 +63,12 @@ pub struct Config {
     pub light_theme: String,
     /// Tema que se usa con aspecto oscuro.
     pub dark_theme: String,
+    /// Tamaño de la fuente del editor, en puntos (de 8 a 40).
+    pub font_size: u16,
+    /// Anchura de un tabulador, en columnas (de 1 a 16).
+    pub tab_width: u8,
+    /// La tecla Tab inserta espacios (`true`) o un tabulador.
+    pub insert_spaces: bool,
 }
 
 impl Default for Config {
@@ -74,11 +80,41 @@ impl Default for Config {
             indent_guides: true,
             light_theme: DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: DEFAULT_DARK_THEME.to_owned(),
+            font_size: Self::DEFAULT_FONT_SIZE,
+            tab_width: 4,
+            insert_spaces: true,
         }
     }
 }
 
 impl Config {
+    pub const DEFAULT_FONT_SIZE: u16 = 14;
+    pub const FONT_SIZES: std::ops::RangeInclusive<u16> = 8..=40;
+    pub const TAB_WIDTHS: std::ops::RangeInclusive<u8> = 1..=16;
+
+    /// Tamaño de fuente dentro de los límites admitidos.
+    pub fn font_size(&self) -> u16 {
+        self.font_size
+            .clamp(*Self::FONT_SIZES.start(), *Self::FONT_SIZES.end())
+    }
+
+    /// Anchura del tabulador dentro de los límites admitidos.
+    pub fn tab_width(&self) -> usize {
+        usize::from(
+            self.tab_width
+                .clamp(*Self::TAB_WIDTHS.start(), *Self::TAB_WIDTHS.end()),
+        )
+    }
+
+    /// Lo que inserta la tecla Tab: `tab_width` espacios o un tabulador.
+    pub fn indent_unit(&self) -> String {
+        if self.insert_spaces {
+            " ".repeat(self.tab_width())
+        } else {
+            "\t".to_owned()
+        }
+    }
+
     /// Nombre del tema elegido para un aspecto.
     pub fn theme_name(&self, appearance: Appearance) -> &str {
         match appearance {
@@ -156,6 +192,18 @@ mod tests {
         assert_eq!(ThemeMode::Dark.appearance(Some(false)), Appearance::Dark);
         let config = Config::default();
         assert_eq!(config.theme_name(Appearance::Dark), DEFAULT_DARK_THEME);
+    }
+
+    #[test]
+    fn editor_settings_are_clamped() {
+        let mut config = Config::default();
+        assert_eq!(config.indent_unit(), "    ");
+        config.tab_width = 0;
+        config.font_size = 200;
+        assert_eq!(config.tab_width(), 1);
+        assert_eq!(config.font_size(), 40);
+        config.insert_spaces = false;
+        assert_eq!(config.indent_unit(), "\t");
     }
 
     #[test]
