@@ -1,124 +1,132 @@
 # Lorca
 
-> *Verde que te quiero verde.*
+<p align="center">
+  <img src="assets/icons/png/lorca-256.png" width="128" alt="Icono de Lorca: retrato de Federico García Lorca dibujado con caracteres de código">
+</p>
 
-Lorca es un editor de texto y código de escritorio para Windows, macOS y Linux, escrito en
-Rust. El nombre es un homenaje a Federico García Lorca.
+<p align="center"><em>Verde que te quiero verde.</em></p>
 
-Pensado para tomar notas y programar: resaltado de muchos lenguajes, búsqueda y sustitución
-con expresiones regulares, visualización de espacios, finales de línea y codificaciones, y
-gestión de documentos en pestañas.
+Lorca es un editor de texto y código de escritorio para macOS, Windows y Linux, escrito en
+Rust con [iced](https://iced.rs). El nombre es un homenaje a Federico García Lorca: sus
+temas de color llevan los títulos de sus obras.
 
-## Estado
+Pensado para tomar notas y programar: resaltado de sintaxis, autocompletado y
+diagnósticos con servidores de lenguaje (LSP), búsqueda al estilo Notepad++, multicursor,
+pantalla dividida, vista previa de Markdown y una sesión que nunca pierde lo que escribiste.
 
-**Fase 1 (MVP) completada:**
+![Lorca con el tema Romancero gitano editando un programa en Rust](docs/capturas/principal.png)
 
-- Pestañas horizontales con indicador ● de cambios sin guardar, botón de cerrar y clic
-  central para cerrar.
-- Editor con números de línea, fuente monoespaciada, selección con teclado y ratón
-  (doble clic: palabra; triple clic: línea), portapapeles e IME.
-- Deshacer/rehacer por transacciones: una palabra tecleada seguida se deshace de una vez.
-- Barra de estado con línea:columna, lenguaje (por extensión), codificación y LF/CRLF.
-- Abre UTF-8, UTF-8 con BOM, UTF-16 LE/BE y Windows-1252, y guarda conservando la
-  codificación y los finales de línea originales.
-- Confirmación al cerrar una pestaña con cambios sin guardar.
+## Funciones
 
-**Fase 1.5 completada:**
+### Programar con ayuda del servidor de lenguaje
 
-- **Sesión persistente**: al cerrar y volver a abrir, Lorca restaura las pestañas, la activa,
-  el cursor, el desplazamiento y los cambios sin guardar (incluidos los «Sin título»). Los
-  archivos originales no se tocan: el texto pendiente se guarda en copias de respaldo y la
-  app sale sin preguntar. Avisa si un archivo cambió o desapareció mientras estaba cerrada.
-- **Tema claro, oscuro o automático** (sigue al sistema en vivo). Se elige en la pantalla
-  de bienvenida del primer arranque y se cambia desde la barra de estado.
+Lorca habla el *Language Server Protocol*: con un servidor instalado (rust-analyzer,
+pyright, typescript-language-server…) ofrece **autocompletado** mientras escribes,
+**información** del símbolo con ⌘I, **ir a la definición** con F12 o ⌘+clic y
+**diagnósticos** subrayados, con el mensaje en la barra de estado y F8 para recorrerlos.
 
-**Fase 2 completada:**
+![Autocompletado de rust-analyzer: campos y métodos de una estructura con su tipo](docs/capturas/autocompletado.png)
 
-- **Resaltado de sintaxis** con tree-sitter para Markdown, SQL, Rust, Python, JavaScript,
-  TypeScript (incluido TSX), JSON, YAML, TOML, HTML, CSS y Bash, con colores adaptados al
-  tema claro u oscuro. Los bloques de código de Markdown (```` ```rust ````) y el JS/CSS
-  dentro de HTML se resaltan con su propio lenguaje.
-- **Detección del lenguaje** por extensión, nombre de archivo y shebang
-  (`#!/usr/bin/env python3`), también mientras escribes en un documento sin título.
-- **Selector manual de lenguaje** en la barra de estado; la elección se recuerda entre
-  sesiones.
-- El resaltado se calcula en segundo plano para no frenar la escritura en archivos grandes
-  (por encima de 4 MB se muestra sin colores).
+![Información de un método mostrada con ⌘I](docs/capturas/informacion.png)
 
-**Fase 3 completada** (búsqueda al estilo Notepad++):
+![Error de sintaxis subrayado y su mensaje en la barra de estado](docs/capturas/diagnosticos.png)
 
-- **Barra de búsqueda y sustitución** encima del texto, con las coincidencias resaltadas en
-  vivo y contador «3 de 17».
-- **Modos** Normal, **Extendido** (`\n`, `\t`, `\0`, `\xHH`, `\uHHHH`) y **Regex** (con
-  «. = \n»); mayúsculas/minúsculas, palabra completa, **en selección** y dar la vuelta.
-- **Reemplazar** y **Reemplazar todo** (se deshace de una vez). En modo regex, grupos con
-  `$1`, `${nombre}` o `\1`.
-- **Contar** y **Buscar todo** en el documento o en **todos los abiertos**, con un panel de
-  resultados abajo: clic en una línea para ir a ella.
-- **Marcar**: resalta todas las coincidencias y, opcionalmente, pone un **marcador** en cada
-  línea. Los marcadores (punto en el margen) se mueven con el texto; se pueden recorrer,
-  copiar o borrar sus líneas.
-- **Ir a línea** (`línea` o `línea:columna`).
+### Edición
 
-**Fase 3.5 completada:**
-
-- **Menú contextual** (clic derecho) sobre el texto —cortar, copiar, pegar, deshacer, buscar,
-  marcar, marcadores, ir a línea— y sobre las pestañas —cerrar, cerrar las demás o las de
-  la derecha, copiar la ruta, mostrar en Finder/Explorador, dividir—.
-- **Selección de varias pestañas** con ⌘/Ctrl+clic (o Mayús+clic para un rango): cerrar o
-  guardar las seleccionadas.
-- **Pantalla dividida**: con 2 a 4 pestañas seleccionadas, «Dividir pantalla» (⌘\) las
-  muestra lado a lado (si hay más de 4, las 4 primeras elegidas). Cada panel tiene su
-  cursor y desplazamiento, los separadores se arrastran y la división se recuerda entre
-  sesiones.
-
-**Fase 4 completada:**
-
-- **Caracteres invisibles**: espacios (·), tabuladores (→) y etiquetas de fin de línea
-  (LF/CRLF) como en Notepad++; **guías de indentación**. Se activan con «¶» en la barra de
-  estado y se recuerdan en `config.toml`.
-- **Finales de línea**: clic en «LF/CRLF» de la barra de estado para convertir al guardar.
-- **Codificaciones**: clic en «UTF-8» para guardar con otra codificación (UTF-8, UTF-8 con
-  BOM, UTF-16 LE/BE, Windows-1252) o reabrir el archivo interpretándolo con otra.
-- **Formatear** JSON (conserva el orden de las claves) y SQL, del documento o de la
-  selección; **minificar JSON**. Si el JSON no es válido, el cursor va al error.
-- **MAYÚSCULAS / minúsculas / Tipo Título** de la selección.
-- **Vista previa de Markdown** al lado del editor, actualizada en vivo (enlaces clicables).
-
-**Fase 5 completada:**
-
-- **Exportar a PDF** la vista previa de Markdown (botón en su cabecera o menú contextual),
-  con las fuentes del sistema.
-- **Multicursor**: ⌥+clic añade un cursor, ⌘D selecciona la palabra y añade la siguiente
-  aparición, ⌥⌘↑/↓ añade cursores en columna, Esc vuelve a uno. Copiar y pegar reparten
-  una línea por cursor.
+- **Pestañas** con indicador ● de cambios, reordenables arrastrando; selección de varias
+  con ⌘/Ctrl+clic para cerrarlas, guardarlas o verlas juntas.
+- **Pantalla dividida** de 2 a 4 documentos lado a lado (`⌘\`), cada uno con su cursor.
+- **Multicursor**: ⌥+clic, ⌘D para la siguiente aparición, ⌥⌘↑/↓ en columna.
+- **Deshacer por transacciones** (una palabra se deshace de una vez), números de línea,
+  guías de indentación, espacios y finales de línea visibles.
 - **Paleta de órdenes** (⇧⌘P) con búsqueda difusa sobre todas las acciones.
-- **Buscar en carpeta** (⇧⌘F): respeta `.gitignore`, ignora binarios; resultados
-  clicables en el panel.
-- **Reordenar pestañas** arrastrándolas.
-- **Recarga automática** si otro programa cambia un archivo abierto (pregunta si tienes
-  cambios sin guardar; avisa si se borró).
-- **Barra de menús nativa en macOS** (Archivo, Editar, Buscar, Ver, Ventana); ⌘Q guarda la
-  sesión antes de salir.
+- **Menú contextual** en el texto y las pestañas; **barra de menús nativa** en macOS.
 
-**Fase 6 completada:**
+### Lenguajes y formato
 
-- **Temas con nombres de obras de Lorca**: oscuros *Romancero gitano*, *Yerma*, *Bodas de
-  sangre* y *Poeta en Nueva York*; claros *Mariana Pineda*, *La casa de Bernarda Alba* y
-  *Doña Rosita la soltera*. Se elige un tema claro y otro oscuro; el modo automático
-  alterna entre ellos. Selector en la barra de estado y en la paleta («Tema: …»).
-- **Temas propios** en `themes/*.toml` (ver abajo); «Crear tema a partir del actual» copia
-  el tema activo para editarlo, y se recarga al guardar.
-- **Configuración en `config.toml`**: tamaño de letra (⌘+ / ⌘− / ⌘0), tabulador, espacios
-  o tabuladores, invisibles, temas y servidores de lenguaje. ⌘, la abre; los cambios se
-  aplican al guardar.
-- **Cliente LSP**: diagnósticos subrayados (mensaje en la barra de estado, F8 para
-  recorrerlos), autocompletado al escribir o con ⌃Espacio, información con ⌘I e ir a la
-  definición con F12 o ⌘+clic. Menú **Código** en macOS.
-- **Paquetes** `.app`/`.dmg`, `.msi`/`.exe` y `.deb`/AppImage con cargo-packager, y **CI**
-  en GitHub Actions para los tres sistemas.
+- **Resaltado** con tree-sitter para Rust, Python, JavaScript, TypeScript/TSX, JSON,
+  YAML, TOML, HTML, CSS, Bash, SQL y Markdown (incluidos los bloques de código).
+- **Detección** por extensión, nombre de archivo y shebang; selector manual en la barra
+  de estado.
+- **Formatear** JSON y SQL (⌥⌘L), minificar JSON, MAYÚSCULAS / minúsculas / Tipo Título.
+- **Vista previa de Markdown** en vivo junto al editor (⇧⌘V) y **exportación a PDF**.
 
-### Configuración
+![JSON formateado con ⌥⌘L](docs/capturas/formato.png)
+
+### Búsqueda
+
+- Barra de **buscar y reemplazar** con coincidencias resaltadas y contador, modos
+  **Normal**, **Extendido** (`\n`, `\t`, `\xHH`…) y **Regex** con grupos (`$1`).
+- **Buscar todo** en el documento, en todos los abiertos o **en una carpeta** (⇧⌘F,
+  respeta `.gitignore`), con panel de resultados clicables.
+- **Marcar** coincidencias y **marcadores** de línea (⌘F2, F2); **ir a línea** (⌃G).
+
+### Archivos y sesión
+
+- Al cerrar y volver a abrir, Lorca restaura **pestañas, cursores y cambios sin
+  guardar**, sin preguntar ni tocar los archivos originales.
+- Abre y guarda UTF-8 (con o sin BOM), UTF-16 y Windows-1252, y conserva LF o CRLF; ambos
+  se cambian desde la barra de estado.
+- **Recarga** los archivos que otro programa cambia (pregunta si tienes cambios).
+
+### Temas con nombres de obras de Lorca
+
+Cuatro oscuros —*Romancero gitano*, *Yerma*, *Bodas de sangre* y *Poeta en Nueva
+York*— y tres claros —*Mariana Pineda*, *La casa de Bernarda Alba* y *Doña Rosita la
+soltera*—. Se elige uno claro y otro oscuro, y el modo automático sigue al sistema. Se
+cambian desde la barra de estado o la paleta, y puedes crear los tuyos.
+
+![Pantalla de bienvenida: modo automático, claro (Mariana Pineda) u oscuro (Romancero gitano)](docs/capturas/bienvenida.png)
+
+## Instalación
+
+Cada versión publicada (etiqueta `vX.Y.Z`) deja en
+[releases](https://github.com/gallegomanuel8/Lorca/releases) los paquetes `.dmg`,
+`.msi`/`.exe` y `.deb`/AppImage. Mientras no haya ninguna, compílalo (abajo). Los
+paquetes no están firmados: en macOS, la primera vez abre la app con clic derecho →
+Abrir.
+
+Para el autocompletado y los diagnósticos instala el servidor de tu lenguaje, por
+ejemplo `brew install rust-analyzer` o `rustup component add rust-analyzer`.
+
+## Atajos
+
+| Acción | macOS | Windows / Linux |
+|---|---|---|
+| Nuevo | ⌘N | Ctrl+N |
+| Abrir | ⌘O | Ctrl+O |
+| Guardar / Guardar como | ⌘S / ⌘⇧S | Ctrl+S / Ctrl+Mayús+S |
+| Cerrar pestaña | ⌘W | Ctrl+W |
+| Deshacer / Rehacer | ⌘Z / ⌘⇧Z | Ctrl+Z / Ctrl+Mayús+Z (o Ctrl+Y) |
+| Pestaña siguiente / anterior | ⌃Tab / ⌃⇧Tab | Ctrl+Tab / Ctrl+Mayús+Tab |
+| Copiar / Cortar / Pegar / Seleccionar todo | ⌘C / ⌘X / ⌘V / ⌘A | Ctrl+C / X / V / A |
+| Buscar / Reemplazar | ⌘F / ⌥⌘F | Ctrl+F / Ctrl+H |
+| Siguiente / anterior | F3 / ⇧F3 (o ⌘G / ⇧⌘G) | F3 / Mayús+F3 |
+| Buscar la palabra del cursor | ⌘F3 | Ctrl+F3 |
+| Ir a línea | ⌃G | Ctrl+G |
+| Poner/quitar marcador · siguiente · anterior | ⌘F2 · F2 · ⇧F2 | Ctrl+F2 · F2 · Mayús+F2 |
+| Cerrar barra de búsqueda | Esc | Esc |
+| Seleccionar varias pestañas | ⌘+clic / ⇧+clic | Ctrl+clic / Mayús+clic |
+| Dividir pantalla / quitar división | ⌘\ (⌘ç en teclado español) | Ctrl+\ |
+| Palabra anterior / siguiente | ⌥← / ⌥→ | Ctrl+← / Ctrl+→ |
+| Inicio / fin de línea | ⌘← / ⌘→ | Inicio / Fin |
+| Paleta de órdenes | ⇧⌘P | Ctrl+Mayús+P |
+| Buscar en carpeta | ⇧⌘F | Ctrl+Mayús+F |
+| Añadir cursor · siguiente aparición · en columna | ⌥+clic · ⌘D · ⌥⌘↑/↓ | Alt+clic · Ctrl+D · Ctrl+Alt+↑/↓ |
+| Vista previa de Markdown | ⇧⌘V | Ctrl+Mayús+V |
+| Formatear JSON/SQL | ⌥⌘L | Ctrl+Alt+L |
+| Tamaño de letra mayor · menor · normal | ⌘+ · ⌘− · ⌘0 | Ctrl++ · Ctrl+− · Ctrl+0 |
+| Ajustes (`config.toml`) | ⌘, | Ctrl+, |
+| Autocompletar | ⌃Espacio | Ctrl+Espacio |
+| Información del símbolo | ⌘I | Ctrl+I |
+| Ir a la definición | F12 o ⌘+clic | F12 o Ctrl+clic |
+| Siguiente / anterior problema | F8 / ⇧F8 | F8 / Mayús+F8 |
+
+En macOS, ⌃Espacio suele estar asignado a «Seleccionar la fuente de entrada anterior»;
+si no llega a Lorca, quítalo en Ajustes del Sistema → Teclado → Atajos, o usa el menú
+Código.
+
+## Configuración
 
 `config.toml` (en la carpeta de datos, abajo) se crea al cambiar cualquier preferencia.
 Todos los campos son opcionales:
@@ -202,7 +210,7 @@ Se buscan en el `PATH` y en las carpetas habituales (`~/.cargo/bin`, `/opt/homeb
 `PATH` de la terminal. Solo funcionan con archivos guardados (el servidor necesita la
 ruta). Por ejemplo, `brew install rust-analyzer` o `rustup component add rust-analyzer`.
 
-### Datos de usuario
+## Datos de usuario
 
 | Sistema | Carpeta |
 |---|---|
@@ -212,43 +220,6 @@ ruta). Por ejemplo, `brew install rust-analyzer` o `rustup component add rust-an
 
 Contiene `config.toml` (preferencias), `themes/` (temas propios), `session.toml`
 (pestañas) y `backups/` (texto sin guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
-
-### Atajos
-
-| Acción | macOS | Windows / Linux |
-|---|---|---|
-| Nuevo | ⌘N | Ctrl+N |
-| Abrir | ⌘O | Ctrl+O |
-| Guardar / Guardar como | ⌘S / ⌘⇧S | Ctrl+S / Ctrl+Mayús+S |
-| Cerrar pestaña | ⌘W | Ctrl+W |
-| Deshacer / Rehacer | ⌘Z / ⌘⇧Z | Ctrl+Z / Ctrl+Mayús+Z (o Ctrl+Y) |
-| Pestaña siguiente / anterior | ⌃Tab / ⌃⇧Tab | Ctrl+Tab / Ctrl+Mayús+Tab |
-| Copiar / Cortar / Pegar / Seleccionar todo | ⌘C / ⌘X / ⌘V / ⌘A | Ctrl+C / X / V / A |
-| Buscar / Reemplazar | ⌘F / ⌥⌘F | Ctrl+F / Ctrl+H |
-| Siguiente / anterior | F3 / ⇧F3 (o ⌘G / ⇧⌘G) | F3 / Mayús+F3 |
-| Buscar la palabra del cursor | ⌘F3 | Ctrl+F3 |
-| Ir a línea | ⌃G | Ctrl+G |
-| Poner/quitar marcador · siguiente · anterior | ⌘F2 · F2 · ⇧F2 | Ctrl+F2 · F2 · Mayús+F2 |
-| Cerrar barra de búsqueda | Esc | Esc |
-| Seleccionar varias pestañas | ⌘+clic / ⇧+clic | Ctrl+clic / Mayús+clic |
-| Dividir pantalla / quitar división | ⌘\ (⌘ç en teclado español) | Ctrl+\ |
-| Palabra anterior / siguiente | ⌥← / ⌥→ | Ctrl+← / Ctrl+→ |
-| Inicio / fin de línea | ⌘← / ⌘→ | Inicio / Fin |
-| Paleta de órdenes | ⇧⌘P | Ctrl+Mayús+P |
-| Buscar en carpeta | ⇧⌘F | Ctrl+Mayús+F |
-| Añadir cursor · siguiente aparición · en columna | ⌥+clic · ⌘D · ⌥⌘↑/↓ | Alt+clic · Ctrl+D · Ctrl+Alt+↑/↓ |
-| Vista previa de Markdown | ⇧⌘V | Ctrl+Mayús+V |
-| Formatear JSON/SQL | ⌥⌘L | Ctrl+Alt+L |
-| Tamaño de letra mayor · menor · normal | ⌘+ · ⌘− · ⌘0 | Ctrl++ · Ctrl+− · Ctrl+0 |
-| Ajustes (`config.toml`) | ⌘, | Ctrl+, |
-| Autocompletar | ⌃Espacio | Ctrl+Espacio |
-| Información del símbolo | ⌘I | Ctrl+I |
-| Ir a la definición | F12 o ⌘+clic | F12 o Ctrl+clic |
-| Siguiente / anterior problema | F8 / ⇧F8 | F8 / Mayús+F8 |
-
-En macOS, ⌃Espacio suele estar asignado a «Seleccionar la fuente de entrada anterior»;
-si no llega a Lorca, quítalo en Ajustes del Sistema → Teclado → Atajos, o usa el menú
-Código.
 
 ## Compilar y ejecutar
 
