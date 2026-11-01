@@ -3,10 +3,12 @@
 //! Uso: `lorca [ARCHIVO...]` abre los archivos indicados en pestañas.
 
 mod app;
+mod context_menu;
 mod dialogs;
 mod editor;
 mod find;
 mod key_filter;
+mod shortcut_labels;
 mod shortcuts;
 mod welcome;
 
@@ -18,7 +20,7 @@ fn main() -> anyhow::Result<()> {
         .subscription(Lorca::subscription)
         .theme(Lorca::theme)
         .exit_on_close_request(false)
-        .window_size((1100.0, 720.0))
+        .window_size(app::WINDOW_SIZE)
         .centered()
         .run()?;
     Ok(())

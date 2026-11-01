@@ -400,6 +400,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     self.publish(shell, EditorAction::Drag { index });
                 }
             }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                let Some(position) = cursor.position_over(geometry.bounds) else {
+                    return;
+                };
+                let index = self.index_at(position, &geometry);
+                self.publish(shell, EditorAction::ContextMenu { index, position });
+                shell.capture_event();
+            }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.dragging = false;
             }

@@ -5,7 +5,7 @@
 //! combinaciones que ningún control usa para escribir.
 
 use iced::event::{self, Event};
-use iced::keyboard::{self, Key, Modifiers, key::Named, key::Physical};
+use iced::keyboard::{self, Key, Modifiers, key::Code, key::Named, key::Physical};
 use iced::window;
 
 use crate::app::{BookmarkAction, Message};
@@ -50,6 +50,11 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         };
     }
 
+    // ⌘\ divide la pantalla. Se reconoce por la tecla física para que funcione también en
+    // teclados donde esa tecla tiene otro carácter (en español es «ç»).
+    if modifiers.command() && !modifiers.alt() && physical_key == Physical::Code(Code::Backslash) {
+        return Some(Message::ToggleSplit);
+    }
     let letter = key.to_latin(physical_key)?.to_ascii_lowercase();
     if letter == 'g' && modifiers.control() && !modifiers.alt() {
         return Some(Message::GoToLine);
@@ -72,6 +77,7 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         'y' if !is_mac => Some(Message::Redo),
         'f' if !shift => Some(Message::OpenFind),
         'h' if !is_mac && !shift => Some(Message::OpenReplace),
+        '\\' => Some(Message::ToggleSplit),
         'g' if is_mac && shift => Some(Message::FindPrevious),
         'g' if is_mac => Some(Message::FindNext),
         _ => None,
@@ -81,7 +87,6 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::keyboard::key::Code;
 
     fn char_key(c: &str, code: Code, modifiers: Modifiers) -> Option<Message> {
         key_shortcut(&Key::Character(c.into()), Physical::Code(code), modifiers)
@@ -174,6 +179,19 @@ mod tests {
             char_key("h", Code::KeyH, cmd)
         };
         assert!(matches!(replace, Some(Message::OpenReplace)));
+    }
+
+    #[test]
+    fn split_shortcut_by_physical_key() {
+        let cmd = Modifiers::COMMAND;
+        assert!(matches!(
+            char_key("ç", Code::Backslash, cmd),
+            Some(Message::ToggleSplit)
+        ));
+        assert!(matches!(
+            char_key("\\", Code::Backslash, cmd),
+            Some(Message::ToggleSplit)
+        ));
     }
 
     #[test]

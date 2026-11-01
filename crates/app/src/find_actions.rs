@@ -221,15 +221,7 @@ impl Lorca {
         let Some(document) = self.workspace.active_mut() else {
             return;
         };
-        if document.editor.selection().is_empty() {
-            let head = document.editor.selection().head;
-            document.editor.select_word_at(head);
-        }
-        let Some(word) = document
-            .editor
-            .selected_text()
-            .filter(|w| !w.trim().is_empty())
-        else {
+        let Some(word) = select_word_near_cursor(&mut document.editor) else {
             return;
         };
         self.find.pattern = word;
@@ -277,10 +269,8 @@ impl Lorca {
         let Some(document) = self.workspace.active() else {
             return;
         };
-        self.views
-            .entry(document.id())
-            .or_default()
-            .jump_to_cursor(&document.editor, self.viewport);
+        let view = self.views.entry(document.id()).or_default();
+        view.jump_to_cursor(&document.editor, view.viewport);
     }
 
     pub(super) fn handle_find(&mut self, message: FindMessage) -> Task<Message> {
@@ -528,10 +518,58 @@ impl Lorca {
     }
 }
 
+/// Texto seleccionado o, si no hay selección, la palabra bajo el cursor (o justo antes,
+/// si el cursor está tras ella). Si no hay palabra, no toca la selección.
+pub fn select_word_near_cursor(editor: &mut lorca_core::EditorState) -> Option<String> {
+    if editor.selection().is_empty() {
+        let head = editor.selection().head;
+        let is_word = |c: char| c.is_alphanumeric() || c == '_';
+        let buffer = editor.buffer();
+        let index = if buffer.char_at(head).is_some_and(is_word) {
+            head
+        } else if head > 0 && buffer.char_at(head - 1).is_some_and(is_word) {
+            head - 1
+        } else {
+            return None;
+        };
+        editor.select_word_at(index);
+    }
+    editor
+        .selected_text()
+        .filter(|text| !text.trim().is_empty())
+}
+
 /// Órdenes de marcadores de línea desde atajos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BookmarkAction {
     Toggle,
     Next,
     Previous,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lorca_core::EditorState;
+
+    #[test]
+    fn word_near_cursor() {
+        let mut editor = EditorState::from_text("bodas de sangre");
+        editor.set_cursor(2, false);
+        assert_eq!(
+            select_word_near_cursor(&mut editor).as_deref(),
+            Some("bodas")
+        );
+        // Justo después de una palabra: se toma esa palabra.
+        editor.set_cursor(8, false);
+        assert_eq!(select_word_near_cursor(&mut editor).as_deref(), Some("de"));
+    }
+
+    #[test]
+    fn no_word_keeps_cursor() {
+        let mut editor = EditorState::from_text("a  b");
+        editor.set_cursor(2, false);
+        assert_eq!(select_word_near_cursor(&mut editor), None);
+        assert!(editor.selection().is_empty());
+    }
 }

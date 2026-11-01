@@ -7,17 +7,20 @@ use std::sync::Arc;
 use iced::theme::Mode;
 use iced::time::{Duration, Instant};
 use iced::widget::{
-    button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip,
+    button, column, container, mouse_area, pane_grid, pick_list, row, scrollable, space, text,
+    tooltip,
 };
 use iced::{
-    Alignment, Element, Length, Subscription, Task, Theme, event, keyboard, system, window,
+    Alignment, Element, Length, Point, Size, Subscription, Task, Theme, event, keyboard, system,
+    window,
 };
-use lorca_search::{SearchQuery, match_index};
+use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
 
+use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, context_area};
 use crate::dialogs::{self, SaveChoice};
-use crate::editor::{Decorations, DocView, EditorAction, Viewport, apply_action, code_editor};
+use crate::editor::{DocView, EditorAction, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::shortcuts::shortcut;
 use crate::welcome;
@@ -27,6 +30,14 @@ mod find_actions;
 
 pub use find_actions::BookmarkAction;
 use find_actions::{Focus, MatchCache};
+
+#[path = "panes.rs"]
+mod panes;
+
+use panes::PaneLayout;
+
+/// Tamaño inicial de la ventana.
+pub const WINDOW_SIZE: Size = Size::new(1100.0, 720.0);
 
 /// Pausa sin cambios tras la que se guarda la sesión.
 ///
@@ -47,11 +58,13 @@ pub enum Then {
     CloseTab,
     /// Seguir con el siguiente documento antes de salir.
     ContinueQuit,
+    /// Cerrar la pestaña y seguir con la siguiente de `close_queue`.
+    CloseAndContinue,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Editor(EditorAction),
+    Editor(DocumentId, EditorAction),
     NewDocument,
     Open,
     FilesPicked(Vec<PathBuf>),
@@ -69,7 +82,16 @@ pub enum Message {
         choice: SaveChoice,
         then: Then,
     },
-    ActivateTab(DocumentId),
+    /// Clic en una pestaña (con Cmd/Ctrl o Mayús, selecciona).
+    TabPressed(DocumentId),
+    TabContextMenu(DocumentId, Point),
+    Context(ContextAction),
+    CloseContextMenu,
+    Paste(Option<String>),
+    PaneClicked(pane_grid::Pane),
+    PaneResized(pane_grid::ResizeEvent),
+    ToggleSplit,
+    WindowResized(Size),
     NextTab,
     PreviousTab,
     Undo,
@@ -124,7 +146,6 @@ struct Notice {
 pub struct Lorca {
     workspace: Workspace,
     views: HashMap<DocumentId, DocView>,
-    viewport: Viewport,
     notice: Option<Notice>,
     /// Hay un diálogo nativo abierto: se ignoran las órdenes que abrirían otro.
     dialog_open: bool,
@@ -151,6 +172,11 @@ pub struct Lorca {
     find_cache: Option<MatchCache>,
     mark_cache: HashMap<DocumentId, MatchCache>,
     modifiers: keyboard::Modifiers,
+    context_menu: Option<ContextMenu>,
+    /// Pestañas pendientes de cerrar (Cerrar las demás, seleccionadas…).
+    close_queue: VecDeque<DocumentId>,
+    pane_layout: Option<PaneLayout>,
+    window_size: Size,
 }
 
 impl Lorca {
@@ -182,7 +208,14 @@ impl Lorca {
                 Ok(Some(saved)) => {
                     let report = workspace.restore(&saved, |name| store.read_backup(name));
                     for (id, scroll_x, scroll_y) in report.scrolls {
-                        views.insert(id, DocView { scroll_x, scroll_y });
+                        views.insert(
+                            id,
+                            DocView {
+                                scroll_x,
+                                scroll_y,
+                                ..DocView::default()
+                            },
+                        );
                     }
                     problems.extend(report.warnings);
                 }
@@ -194,7 +227,6 @@ impl Lorca {
         let mut app = Self {
             workspace,
             views,
-            viewport: Viewport::default(),
             notice: None,
             dialog_open: false,
             quit_queue: None,
@@ -213,6 +245,10 @@ impl Lorca {
             find_cache: None,
             mark_cache: HashMap::new(),
             modifiers: keyboard::Modifiers::default(),
+            context_menu: None,
+            close_queue: VecDeque::new(),
+            pane_layout: None,
+            window_size: WINDOW_SIZE,
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -220,6 +256,7 @@ impl Lorca {
         let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
         app.open_paths(&paths);
         app.ensure_document();
+        app.sync_panes();
         let highlight = app.schedule_highlight();
         (
             app,
@@ -250,6 +287,7 @@ impl Lorca {
             event::listen_with(shortcut),
             window::close_requests().map(|_| Message::CloseRequested),
             system::theme_changes().map(Message::SystemTheme),
+            window::resize_events().map(|(_, size)| Message::WindowResized(size)),
         ];
         if self.session_dirty.is_some() {
             subscriptions.push(iced::time::every(SESSION_TICK).map(|_| Message::Tick));
@@ -259,6 +297,7 @@ impl Lorca {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        self.sync_panes();
         self.refresh_search();
         Task::batch([task, self.schedule_highlight()])
     }
@@ -271,8 +310,11 @@ impl Lorca {
         }
 
         match message {
-            Message::Editor(action) => {
-                self.apply_editor_action(action);
+            Message::Editor(id, action) => {
+                if let EditorAction::ContextMenu { position, .. } = action {
+                    self.open_context_menu(position, MenuTarget::Text(id));
+                }
+                self.apply_editor_action(id, action);
                 Task::none()
             }
             Message::NewDocument => {
@@ -303,6 +345,7 @@ impl Lorca {
                 self.dialog_open = false;
                 let Some(path) = path else {
                     self.quit_queue = None;
+                    self.close_queue.clear();
                     return Task::none();
                 };
                 match self.workspace.save_as(id, &path) {
@@ -325,12 +368,57 @@ impl Lorca {
                     SaveChoice::Discard => self.finish(id, then),
                     SaveChoice::Cancel => {
                         self.quit_queue = None;
+                        self.close_queue.clear();
                         Task::none()
                     }
                 }
             }
-            Message::ActivateTab(id) => {
-                self.workspace.activate(id);
+            Message::TabPressed(id) => {
+                self.tab_pressed(id);
+                Task::none()
+            }
+            Message::TabContextMenu(id, position) => {
+                self.open_context_menu(position, MenuTarget::Tab(id));
+                Task::none()
+            }
+            Message::Context(action) => self.handle_context(action),
+            Message::CloseContextMenu => {
+                self.context_menu = None;
+                Task::none()
+            }
+            Message::Paste(contents) => {
+                if let Some(contents) = contents
+                    && let Some(document) = self.workspace.active_mut()
+                    && let Err(error) = document.editor.insert_text(&contents)
+                {
+                    self.show_error(error.to_string());
+                }
+                Task::none()
+            }
+            Message::PaneClicked(pane) => {
+                let id = self
+                    .pane_layout
+                    .as_ref()
+                    .and_then(|layout| layout.state.get(pane))
+                    .copied();
+                if let Some(id) = id {
+                    self.workspace.activate(id);
+                    self.focus = Focus::Editor;
+                }
+                Task::none()
+            }
+            Message::PaneResized(event) => {
+                if let Some(layout) = &mut self.pane_layout {
+                    layout.state.resize(event.split, event.ratio);
+                }
+                Task::none()
+            }
+            Message::ToggleSplit => {
+                self.toggle_split();
+                Task::none()
+            }
+            Message::WindowResized(size) => {
+                self.window_size = size;
                 Task::none()
             }
             Message::NextTab => {
@@ -422,7 +510,9 @@ impl Lorca {
             }
             Message::GoToLine => self.open_goto(),
             Message::Escape => {
-                self.escape();
+                if self.context_menu.take().is_none() {
+                    self.escape();
+                }
                 Task::none()
             }
             Message::Bookmark(action) => {
@@ -478,36 +568,36 @@ impl Lorca {
         });
     }
 
+    fn show_info(&mut self, text: String) {
+        self.notice = Some(Notice {
+            text,
+            is_error: false,
+        });
+    }
+
     // --- Edición ----------------------------------------------------------------------
 
-    fn apply_editor_action(&mut self, action: EditorAction) {
-        // Si la vista cambia de tamaño (p. ej. al abrir o cerrar una barra) y el cursor
-        // estaba visible, se mantiene visible con las nuevas medidas.
-        let mut keep_cursor_visible = false;
-        match action {
-            EditorAction::Viewport(viewport) => {
-                keep_cursor_visible = self.workspace.active().is_some_and(|document| {
-                    self.views
-                        .get(&document.id())
-                        .copied()
-                        .unwrap_or_default()
-                        .is_cursor_visible(&document.editor, self.viewport)
-                });
-                self.viewport = viewport;
-            }
-            EditorAction::Click { .. } => self.focus = Focus::Editor,
-            _ => {}
+    fn apply_editor_action(&mut self, id: DocumentId, action: EditorAction) {
+        if matches!(action, EditorAction::Click { .. }) {
+            self.focus = Focus::Editor;
+            self.context_menu = None;
+            self.workspace.clear_selection();
+            self.workspace.activate(id);
         }
-        let Some(id) = self.workspace.active_id() else {
-            return;
-        };
         let Some(document) = self.workspace.document_mut(id) else {
             return;
         };
         let view = self.views.entry(id).or_default();
-        let result = apply_action(action, &mut document.editor, view, self.viewport);
+        // Si la vista cambia de tamaño (p. ej. al abrir o cerrar una barra) y el cursor
+        // estaba visible, se mantiene visible con las nuevas medidas.
+        let mut keep_cursor_visible = false;
+        if let EditorAction::Viewport(viewport) = action {
+            keep_cursor_visible = view.is_cursor_visible(&document.editor, view.viewport);
+            view.viewport = viewport;
+        }
+        let result = apply_action(action, &mut document.editor, view, view.viewport);
         if keep_cursor_visible {
-            view.reveal_cursor(&document.editor, self.viewport);
+            view.reveal_cursor(&document.editor, view.viewport);
         }
         document.refresh_language();
         if let Err(error) = result {
@@ -515,23 +605,29 @@ impl Lorca {
         }
     }
 
-    /// Lanza el resaltado del documento activo si está desactualizado y no hay otro en
-    /// marcha. Se ejecuta fuera del hilo de la interfaz; mientras tanto se pinta el
-    /// resaltado anterior.
+    /// Lanza el resaltado de los documentos visibles que estén desactualizados y sin otro
+    /// cálculo en marcha. Se ejecuta fuera del hilo de la interfaz; mientras tanto se pinta
+    /// el resaltado anterior.
     fn schedule_highlight(&mut self) -> Task<Message> {
-        let Some(document) = self.workspace.active() else {
-            return Task::none();
-        };
-        let id = document.id();
+        let tasks: Vec<_> = self
+            .visible_documents()
+            .into_iter()
+            .filter_map(|id| self.schedule_highlight_for(id))
+            .collect();
+        Task::batch(tasks)
+    }
+
+    fn schedule_highlight_for(&mut self, id: DocumentId) -> Option<Task<Message>> {
+        let document = self.workspace.document(id)?;
         let revision = document.editor.revision();
         let language = document.language();
         let state = self.highlights.entry(id).or_default();
         if state.pending || state.done == Some((revision, language)) {
-            return Task::none();
+            return None;
         }
         state.pending = true;
         let text = document.editor.text();
-        Task::perform(
+        Some(Task::perform(
             async move {
                 lorca_syntax::highlight(language, &text)
                     .map(|highlights| highlights.map(Arc::new))
@@ -543,7 +639,7 @@ impl Lorca {
                 language,
                 result,
             },
-        )
+        ))
     }
 
     fn undo_redo(&mut self, undo: bool) {
@@ -560,11 +656,10 @@ impl Lorca {
         };
         document.refresh_language();
         match result {
-            Ok(_) => self
-                .views
-                .entry(id)
-                .or_default()
-                .reveal_cursor(&document.editor, self.viewport),
+            Ok(_) => {
+                let view = self.views.entry(id).or_default();
+                view.reveal_cursor(&document.editor, view.viewport);
+            }
             Err(error) => {
                 self.notice = Some(Notice {
                     text: error.to_string(),
@@ -643,6 +738,7 @@ impl Lorca {
             is_error: true,
         });
         self.quit_queue = None;
+        self.close_queue.clear();
         Task::none()
     }
 
@@ -671,13 +767,12 @@ impl Lorca {
         match then {
             Then::Nothing => Task::none(),
             Then::CloseTab => {
-                self.workspace.close(id);
-                self.views.remove(&id);
-                self.highlights.remove(&id);
-                self.marks.remove(&id);
-                self.mark_cache.remove(&id);
-                self.ensure_document();
+                self.close_now(id);
                 Task::none()
+            }
+            Then::CloseAndContinue => {
+                self.close_now(id);
+                self.process_close_queue()
             }
             Then::ContinueQuit => self.process_quit(),
         }
@@ -692,6 +787,16 @@ impl Lorca {
             Some(id) => self.request_close(id, Then::ContinueQuit),
             None => iced::exit(),
         }
+    }
+
+    /// Cierra la pestaña sin preguntar y limpia su estado de vista.
+    fn close_now(&mut self, id: DocumentId) {
+        self.workspace.close(id);
+        self.views.remove(&id);
+        self.highlights.remove(&id);
+        self.marks.remove(&id);
+        self.mark_cache.remove(&id);
+        self.ensure_document();
     }
 
     /// Mantiene siempre al menos una pestaña abierta.
@@ -725,7 +830,13 @@ impl Lorca {
         if let Some(results) = &self.results {
             layout = layout.push(find::results_panel(results));
         }
-        layout.push(self.status_bar()).into()
+        let base: Element<'_, Message> = layout.push(self.status_bar()).into();
+        match &self.context_menu {
+            Some(menu) => {
+                context_menu::layer(base, menu, self.menu_items(menu.target), self.window_size)
+            }
+            None => base,
+        }
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -746,6 +857,7 @@ impl Lorca {
     fn tab<'a>(&self, document: &'a Document) -> Element<'a, Message> {
         let id = document.id();
         let is_active = self.workspace.active_id() == Some(id);
+        let is_selected = self.workspace.is_selected(id);
 
         let mut content: Vec<Element<'a, Message>> =
             vec![text(document.display_name()).size(13).into()];
@@ -762,9 +874,12 @@ impl Lorca {
 
         let tab = button(row(content).spacing(6).align_y(Alignment::Center))
             .padding([5, 10])
-            .on_press(Message::ActivateTab(id))
-            .style(move |theme: &Theme, status| tab_style(theme, status, is_active));
-        let tab = mouse_area(tab).on_middle_press(Message::CloseTab(id));
+            .on_press(Message::TabPressed(id))
+            .style(move |theme: &Theme, status| tab_style(theme, status, is_active, is_selected));
+        let tab = context_area(
+            mouse_area(tab).on_middle_press(Message::CloseTab(id)),
+            move |position| Message::TabContextMenu(id, position),
+        );
 
         match document.path() {
             Some(path) => tooltip(
@@ -775,40 +890,8 @@ impl Lorca {
                 tooltip::Position::Bottom,
             )
             .into(),
-            None => tab.into(),
+            None => tab,
         }
-    }
-
-    fn editor_area(&self) -> Element<'_, Message> {
-        let Some(document) = self.workspace.active() else {
-            return space().into();
-        };
-        let view = self.views.get(&document.id()).copied().unwrap_or_default();
-        let highlights = self
-            .highlights
-            .get(&document.id())
-            .and_then(|state| state.highlights.as_deref());
-        let matches = self
-            .find_cache
-            .as_ref()
-            .map_or(&[][..], |c| c.matches.as_slice());
-        let decorations = Decorations {
-            matches,
-            current: match_index(matches, &document.editor.selection().range()),
-            marks: self
-                .mark_cache
-                .get(&document.id())
-                .map_or(&[][..], |c| c.matches.as_slice()),
-        };
-        code_editor(
-            &document.editor,
-            view,
-            self.focus == Focus::Editor && !self.dialog_open,
-            highlights,
-            decorations,
-            Message::Editor,
-        )
-        .into()
     }
 
     fn status_bar(&self) -> Element<'_, Message> {
@@ -876,8 +959,20 @@ impl Lorca {
     }
 }
 
-fn tab_style(theme: &Theme, status: button::Status, is_active: bool) -> button::Style {
+fn tab_style(
+    theme: &Theme,
+    status: button::Status,
+    is_active: bool,
+    is_selected: bool,
+) -> button::Style {
     let palette = theme.extended_palette();
+    if is_selected {
+        return button::Style {
+            background: Some(palette.primary.weak.color.into()),
+            text_color: palette.primary.weak.text,
+            ..button::Style::default()
+        };
+    }
     let background = if is_active {
         palette.background.base.color
     } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
@@ -918,6 +1013,8 @@ fn affects_session(message: &Message) -> bool {
             | Message::WelcomeDone
             | Message::Highlighted { .. }
             | Message::ModifiersChanged(_)
+            | Message::WindowResized(_)
+            | Message::CloseContextMenu
     )
 }
 
@@ -943,6 +1040,11 @@ mod tests {
         assert!(!affects_session(&Message::Tick));
         assert!(!affects_session(&Message::SystemTheme(Mode::Dark)));
         assert!(affects_session(&Message::NewDocument));
-        assert!(affects_session(&Message::Editor(EditorAction::SelectAll)));
+        let mut workspace = Workspace::new();
+        let id = workspace.new_document();
+        assert!(affects_session(&Message::Editor(
+            id,
+            EditorAction::SelectAll
+        )));
     }
 }

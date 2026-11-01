@@ -1,5 +1,6 @@
 //! Acciones que el widget pide a la aplicación y su aplicación sobre el núcleo.
 
+use iced::Point;
 use lorca_core::{CoreError, EditorState, Motion};
 
 use super::{DocView, INDENT, Viewport};
@@ -43,6 +44,11 @@ pub enum EditorAction {
         dy: f32,
     },
     Viewport(Viewport),
+    /// Clic derecho en `index`; `position` es el punto de la ventana donde abrir el menú.
+    ContextMenu {
+        index: usize,
+        position: Point,
+    },
 }
 
 /// Aplica una acción al documento y a su vista. Tras mover el cursor o editar, desplaza
@@ -61,6 +67,14 @@ pub fn apply_action(
         // La aplicación guarda el viewport; aquí solo se reajusta el desplazamiento.
         EditorAction::Viewport(viewport) => {
             view.clamp(viewport, editor.buffer());
+            return Ok(());
+        }
+        // Como en Notepad++: si el clic derecho cae fuera de la selección, mueve el cursor.
+        EditorAction::ContextMenu { index, .. } => {
+            let selection = editor.selection();
+            if selection.is_empty() || !(selection.start()..=selection.end()).contains(&index) {
+                editor.set_cursor(index, false);
+            }
             return Ok(());
         }
         EditorAction::Move { motion, extend } => editor.move_cursor(motion, extend),
@@ -186,6 +200,23 @@ mod tests {
             }],
         );
         assert!(view.scroll_y > 0.0);
+    }
+
+    #[test]
+    fn context_menu_moves_cursor_only_outside_selection() {
+        let mut e = EditorState::from_text("bodas de sangre");
+        e.set_selection(lorca_core::Selection::new(6, 8));
+        let position = Point::ORIGIN;
+        run(
+            &mut e,
+            vec![EditorAction::ContextMenu { index: 7, position }],
+        );
+        assert_eq!(e.selected_text().as_deref(), Some("de"));
+        run(
+            &mut e,
+            vec![EditorAction::ContextMenu { index: 2, position }],
+        );
+        assert_eq!(e.selection(), lorca_core::Selection::cursor(2));
     }
 
     #[test]

@@ -113,6 +113,18 @@ mensaje en español.
     ⌥⌘F → «ƒ»); `filter_command_keys` envuelve los campos de la barra para evitarlo.
   - Saltos (buscar, ir a línea, resultados, marcadores) usan `DocView::jump_to_cursor`,
     que deja contexto; al cambiar el tamaño del editor se mantiene visible el cursor.
+  - Pantalla dividida: `Workspace::panes()` (2–4 ids, el activo siempre dentro) es el
+    modelo; `panes.rs` (submódulo de `app`) lo refleja en un `pane_grid` con anchos iguales
+    (`PaneLayout`) y lo sincroniza con `sync_panes` tras cada `update`. Cada documento
+    tiene su `DocView` con su propio `Viewport`; los mensajes del editor llevan el
+    `DocumentId` (`Message::Editor(id, acción)`). El resaltado se lanza para todos los
+    documentos visibles.
+  - Menús contextuales: `context_menu.rs` dibuja el menú con `stack` + `pin` sobre un
+    fondo que lo cierra al hacer clic fuera; `context_area` es un envoltorio que publica
+    el clic derecho con su posición. Los elementos y acciones están en `panes.rs`
+    (`menu_items`, `handle_context`). Textos de atajos por plataforma en
+    `shortcut_labels.rs`.
+  - Cerrar varias pestañas usa `close_queue` con `Then::CloseAndContinue`.
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)

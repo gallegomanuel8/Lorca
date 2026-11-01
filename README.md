@@ -60,6 +60,18 @@ gestión de documentos en pestañas.
   copiar o borrar sus líneas.
 - **Ir a línea** (`línea` o `línea:columna`).
 
+**Fase 3.5 completada:**
+
+- **Menú contextual** (clic derecho) sobre el texto —cortar, copiar, pegar, deshacer, buscar,
+  marcar, marcadores, ir a línea— y sobre las pestañas —cerrar, cerrar las demás o las de
+  la derecha, copiar la ruta, mostrar en Finder/Explorador, dividir—.
+- **Selección de varias pestañas** con ⌘/Ctrl+clic (o Mayús+clic para un rango): cerrar o
+  guardar las seleccionadas.
+- **Pantalla dividida**: con 2 a 4 pestañas seleccionadas, «Dividir pantalla» (⌘\) las
+  muestra lado a lado (si hay más de 4, las 4 primeras elegidas). Cada panel tiene su
+  cursor y desplazamiento, los separadores se arrastran y la división se recuerda entre
+  sesiones.
+
 ### Datos de usuario
 
 | Sistema | Carpeta |
@@ -88,6 +100,8 @@ guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
 | Ir a línea | ⌃G | Ctrl+G |
 | Poner/quitar marcador · siguiente · anterior | ⌘F2 · F2 · ⇧F2 | Ctrl+F2 · F2 · Mayús+F2 |
 | Cerrar barra de búsqueda | Esc | Esc |
+| Seleccionar varias pestañas | ⌘+clic / ⇧+clic | Ctrl+clic / Mayús+clic |
+| Dividir pantalla / quitar división | ⌘\ (⌘ç en teclado español) | Ctrl+\ |
 | Palabra anterior / siguiente | ⌥← / ⌥→ | Ctrl+← / Ctrl+→ |
 | Inicio / fin de línea | ⌘← / ⌘→ | Inicio / Fin |
 
@@ -126,6 +140,7 @@ Workspace de Cargo:
 3. **Búsqueda** ✅: barra buscar/reemplazar con modos Normal/Extendido/Regex, resaltado de
    coincidencias, siguiente/anterior, reemplazar todo, buscar todo con panel de
    resultados, marcar y marcadores de línea; ir a línea.
+   - **3.5** ✅: menú contextual, selección de varias pestañas y pantalla dividida (2–4).
 4. **Formato**: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
    codificaciones, preview de Markdown en panel dividido, formatear SQL y JSON.
 5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta,

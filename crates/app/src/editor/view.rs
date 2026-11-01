@@ -14,11 +14,14 @@ pub struct Viewport {
     pub cell_width: f32,
 }
 
-/// Desplazamiento de la vista de un documento, en píxeles.
+/// Vista de un documento: desplazamiento (en píxeles) y últimas medidas conocidas.
+///
+/// Cada documento tiene la suya porque, con la pantalla dividida, cada panel mide distinto.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DocView {
     pub scroll_x: f32,
     pub scroll_y: f32,
+    pub viewport: Viewport,
 }
 
 impl DocView {
@@ -168,13 +171,15 @@ mod tests {
         let mut view = DocView {
             scroll_x: 5.0,
             scroll_y: 5.0,
+            ..DocView::default()
         };
         view.reveal_cursor(&editor, Viewport::default());
         assert_eq!(
             view,
             DocView {
                 scroll_x: 5.0,
-                scroll_y: 5.0
+                scroll_y: 5.0,
+                ..DocView::default()
             }
         );
     }
