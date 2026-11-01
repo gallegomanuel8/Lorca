@@ -12,6 +12,8 @@ use crate::app::{BookmarkAction, Message};
 use crate::context_menu::ContextAction;
 
 /// Mensaje de la aplicación para el identificador de una opción de menú.
+// Fuera de macOS no hay barra de menús: solo lo usan las pruebas.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn message_for(id: &str) -> Option<Message> {
     use lorca_formats::Case;
     let message = match id {
@@ -305,6 +307,17 @@ mod tests {
             "whitespace",
             "line_endings",
             "guides",
+            "zoom_in",
+            "zoom_out",
+            "zoom_reset",
+            "open_config",
+            "new_theme",
+            "complete",
+            "hover",
+            "definition",
+            "next_problem",
+            "previous_problem",
+            "lsp_restart",
         ] {
             assert!(message_for(id).is_some(), "sin mensaje: {id}");
         }
