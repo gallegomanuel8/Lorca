@@ -25,6 +25,7 @@ use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_ar
 use crate::dialogs::{self, SaveChoice};
 use crate::editor::{DocView, EditorAction, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
+use crate::menu;
 use crate::palette::{self, Palette};
 use crate::shortcuts::shortcut;
 use crate::watcher;
@@ -123,6 +124,10 @@ pub enum Message {
     },
     /// Exportar la vista previa de un Markdown a PDF: pedir ruta, generar y avisar.
     ExportPdf(DocumentId),
+    /// Exportar el documento activo (desde el menú).
+    ExportActivePdf,
+    /// Instala la barra de menús nativa (tras arrancar, en el hilo principal).
+    InstallMenu,
     ExportPdfPath(DocumentId, Option<PathBuf>),
     PdfExported(Result<PathBuf, String>),
     PaneClicked(pane_grid::Pane),
@@ -221,6 +226,8 @@ pub struct Lorca {
     /// Pestaña que se está arrastrando para reordenarla.
     dragging_tab: Option<DocumentId>,
     palette: Option<Palette>,
+    /// Barra de menús nativa; se conserva para que siga viva.
+    native_menu: Option<menu::NativeMenu>,
 }
 
 impl Lorca {
@@ -298,6 +305,7 @@ impl Lorca {
             hovered_tab: None,
             dragging_tab: None,
             palette: None,
+            native_menu: None,
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -309,7 +317,11 @@ impl Lorca {
         let highlight = app.schedule_highlight();
         (
             app,
-            Task::batch([system::theme().map(Message::SystemTheme), highlight]),
+            Task::batch([
+                system::theme().map(Message::SystemTheme),
+                highlight,
+                Task::done(Message::InstallMenu),
+            ]),
         )
     }
 
@@ -336,6 +348,7 @@ impl Lorca {
             event::listen_with(shortcut),
             window::close_requests().map(|_| Message::CloseRequested),
             system::theme_changes().map(Message::SystemTheme),
+            menu::events(),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
             watcher::watch(
                 self.workspace
@@ -524,6 +537,17 @@ impl Lorca {
                 self.context_menu = Some(ContextMenu { position, target });
                 Task::none()
             }
+            Message::InstallMenu => {
+                match menu::install() {
+                    Ok(installed) => self.native_menu = Some(installed),
+                    Err(error) => self.show_error(format!("No se pudo crear el menú: {error}")),
+                }
+                Task::none()
+            }
+            Message::ExportActivePdf => match self.workspace.active_id() {
+                Some(id) => self.update(Message::ExportPdf(id)),
+                None => Task::none(),
+            },
             Message::ExportPdf(id) => {
                 if self.dialog_open {
                     return Task::none();
@@ -1303,6 +1327,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::WelcomeDone
             | Message::Highlighted { .. }
             | Message::PdfExported(_)
+            | Message::InstallMenu
             | Message::ModifiersChanged(_)
             | Message::TabUnhovered(_)
             | Message::MouseReleased

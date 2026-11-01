@@ -16,5 +16,8 @@ lorca-workspace = { version = "0.1.0", path = "../workspace" }
 notify = "8.2.1"
 rfd = "0.17.2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21.2", default-features = false }
+
 [lints]
 workspace = true
