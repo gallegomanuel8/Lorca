@@ -5,9 +5,13 @@
 //! son índices de **carácter**, igual que en `lorca-core`.
 
 mod escape;
+mod folder;
+mod hits;
 mod navigate;
 mod query;
 
 pub use escape::unescape_extended;
+pub use folder::{FileMatches, FolderLimits, FolderSearch, search_folder};
+pub use hits::{Hit, build_hits};
 pub use navigate::{match_index, next_match, previous_match};
 pub use query::{SearchError, SearchMode, SearchOptions, SearchQuery};

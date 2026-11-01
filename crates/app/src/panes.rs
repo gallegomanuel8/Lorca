@@ -18,6 +18,7 @@ use super::{Lorca, Message, Then};
 use crate::context_menu::{ContextAction, ContextMenu, MenuItem, MenuTarget};
 use crate::editor::{Decorations, INDENT, ViewOptions, code_editor};
 use crate::find;
+use crate::palette::{self, Command};
 use crate::shortcut_labels as keys;
 
 /// Paneles de iced y su orden de izquierda a derecha.
@@ -103,7 +104,8 @@ impl Lorca {
         let focused = is_active
             && self.focus == super::Focus::Editor
             && !self.dialog_open
-            && self.context_menu.is_none();
+            && self.context_menu.is_none()
+            && self.palette.is_none();
         let options = ViewOptions {
             whitespace: self.config.show_whitespace,
             line_ending: self
@@ -223,6 +225,146 @@ impl Lorca {
         .on_click(Message::PaneClicked)
         .on_resize(8, Message::PaneResized)
         .into()
+    }
+
+    // --- Paleta de órdenes -------------------------------------------------------------
+
+    /// Órdenes de la paleta que encajan con lo escrito.
+    pub(super) fn palette_matches(&self) -> Vec<Command> {
+        let query = self.palette.as_ref().map_or("", |p| p.query.as_str());
+        palette::filter(self.palette_commands(), query)
+    }
+
+    /// Todas las órdenes disponibles ahora mismo.
+    fn palette_commands(&self) -> Vec<Command> {
+        use super::BookmarkAction;
+        let context = Message::Context;
+        let mut commands = vec![
+            Command::new("Archivo: Nuevo documento", keys::NEW, Message::NewDocument),
+            Command::new("Archivo: Abrir…", keys::OPEN, Message::Open),
+            Command::new("Archivo: Guardar", keys::SAVE, Message::Save),
+            Command::new("Archivo: Guardar como…", keys::SAVE_AS, Message::SaveAs),
+            Command::new("Archivo: Cerrar pestaña", keys::CLOSE, Message::CloseActive),
+            Command::new("Editar: Deshacer", keys::UNDO, Message::Undo),
+            Command::new("Editar: Rehacer", keys::REDO, Message::Redo),
+            Command::new(
+                "Editar: Seleccionar todo",
+                keys::SELECT_ALL,
+                context(ContextAction::SelectAll),
+            ),
+            Command::new(
+                "Editar: MAYÚSCULAS",
+                keys::UPPER,
+                context(ContextAction::ChangeCase(Case::Upper)),
+            ),
+            Command::new(
+                "Editar: minúsculas",
+                keys::LOWER,
+                context(ContextAction::ChangeCase(Case::Lower)),
+            ),
+            Command::new(
+                "Editar: Tipo Título",
+                "",
+                context(ContextAction::ChangeCase(Case::Title)),
+            ),
+            Command::new(
+                "Editar: Formatear documento (JSON/SQL)",
+                keys::FORMAT,
+                context(ContextAction::FormatDocument),
+            ),
+            Command::new(
+                "Editar: Minificar JSON",
+                "",
+                context(ContextAction::MinifyJson),
+            ),
+            Command::new("Buscar: Buscar…", keys::FIND, Message::OpenFind),
+            Command::new("Buscar: Reemplazar…", keys::REPLACE, Message::OpenReplace),
+            Command::new(
+                "Buscar: Buscar en carpeta…",
+                keys::FIND_IN_FOLDER,
+                Message::FindInFolder,
+            ),
+            Command::new("Buscar: Ir a línea…", keys::GOTO, Message::GoToLine),
+            Command::new(
+                "Marcadores: Poner o quitar",
+                keys::BOOKMARK,
+                Message::Bookmark(BookmarkAction::Toggle),
+            ),
+            Command::new(
+                "Marcadores: Siguiente",
+                "F2",
+                Message::Bookmark(BookmarkAction::Next),
+            ),
+            Command::new(
+                "Marcadores: Anterior",
+                "⇧F2",
+                Message::Bookmark(BookmarkAction::Previous),
+            ),
+            Command::new(
+                "Ver: Dividir pantalla / quitar división",
+                keys::SPLIT,
+                Message::ToggleSplit,
+            ),
+            Command::new(
+                "Ver: Vista previa de Markdown",
+                keys::PREVIEW,
+                context(ContextAction::TogglePreview),
+            ),
+            Command::new(
+                "Ver: Mostrar espacios y tabuladores",
+                "",
+                context(ContextAction::ToggleWhitespace),
+            ),
+            Command::new(
+                "Ver: Mostrar finales de línea",
+                "",
+                context(ContextAction::ToggleLineEndings),
+            ),
+            Command::new(
+                "Ver: Guías de indentación",
+                "",
+                context(ContextAction::ToggleIndentGuides),
+            ),
+            Command::new(
+                "Finales de línea: LF",
+                "",
+                context(ContextAction::SetLineEnding(LineEnding::Lf)),
+            ),
+            Command::new(
+                "Finales de línea: CRLF",
+                "",
+                context(ContextAction::SetLineEnding(LineEnding::CrLf)),
+            ),
+        ];
+        if let Some(id) = self.workspace.active_id() {
+            commands.push(Command::new(
+                "Archivo: Exportar a PDF…",
+                "",
+                Message::ExportPdf(id),
+            ));
+        }
+        for mode in lorca_workspace::ThemeMode::ALL {
+            commands.push(Command::new(
+                format!("Tema: {}", mode.label()),
+                "",
+                Message::ThemeSelected(mode),
+            ));
+        }
+        for language in Language::ALL {
+            commands.push(Command::new(
+                format!("Lenguaje: {}", language.name()),
+                "",
+                Message::LanguageSelected(language),
+            ));
+        }
+        for document in self.workspace.documents() {
+            commands.push(Command::new(
+                format!("Ir a pestaña: {}", document.display_name()),
+                "",
+                Message::ActivateTab(document.id()),
+            ));
+        }
+        commands
     }
 
     // --- Pestañas ---------------------------------------------------------------------

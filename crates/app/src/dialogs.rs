@@ -37,6 +37,15 @@ pub async fn pick_save_path(file_name: String, directory: Option<PathBuf>) -> Op
     dialog.save_file().await.map(|f| f.path().to_path_buf())
 }
 
+/// Pide una carpeta para buscar en ella.
+pub async fn pick_folder(directory: Option<PathBuf>) -> Option<PathBuf> {
+    let mut dialog = AsyncFileDialog::new().set_title("Buscar en carpeta");
+    if let Some(directory) = directory {
+        dialog = dialog.set_directory(directory);
+    }
+    dialog.pick_folder().await.map(|f| f.path().to_path_buf())
+}
+
 /// Pide dónde exportar un PDF, proponiendo `file_name`.
 pub async fn pick_pdf_path(file_name: String, directory: Option<PathBuf>) -> Option<PathBuf> {
     let mut dialog = AsyncFileDialog::new()

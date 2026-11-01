@@ -26,6 +26,12 @@ label!(FORMAT, "⌥⌘L", "Ctrl+Alt+L");
 label!(UPPER, "⇧⌘U", "Ctrl+Mayús+U");
 label!(LOWER, "⌘U", "Ctrl+U");
 label!(PREVIEW, "⇧⌘V", "Ctrl+Mayús+V");
+label!(NEW, "⌘N", "Ctrl+N");
+label!(OPEN, "⌘O", "Ctrl+O");
+label!(SAVE, "⌘S", "Ctrl+S");
+label!(SAVE_AS, "⇧⌘S", "Ctrl+Mayús+S");
+label!(REPLACE, "⌥⌘F", "Ctrl+H");
+label!(FIND_IN_FOLDER, "⇧⌘F", "Ctrl+Mayús+F");
 
 /// Texto de «mostrar el archivo» en el gestor de archivos del sistema.
 pub const REVEAL: &str = if cfg!(target_os = "macos") {

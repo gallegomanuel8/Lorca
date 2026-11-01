@@ -8,12 +8,15 @@ use std::sync::Arc;
 use iced::Task;
 use iced::widget::operation;
 use lorca_core::{Position, Selection};
-use lorca_search::{SearchOptions, SearchQuery, match_index, next_match, previous_match};
+use lorca_search::{
+    FolderLimits, FolderSearch, SearchOptions, SearchQuery, build_hits, match_index, next_match,
+    previous_match, search_folder,
+};
 use lorca_workspace::DocumentId;
 
 use super::{Lorca, Message};
 use crate::find::{
-    self, FindMessage, MAX_MATCHES, ResultGroup, SearchResults, build_hits, parse_goto,
+    self, FindMessage, MAX_MATCHES, ResultGroup, ResultTarget, SearchResults, parse_goto,
 };
 
 /// Qué control recibe el teclado.
@@ -452,20 +455,21 @@ impl Lorca {
             }
             total += matches.len();
             groups.push(ResultGroup {
-                id,
+                target: ResultTarget::Document {
+                    id,
+                    version: document.editor.version(),
+                },
                 name: document.display_name(),
-                revision: document.editor.version(),
-                hits: build_hits(document.editor.buffer(), &matches),
+                hits: build_hits(&document.editor.text(), &matches),
             });
         }
-        self.find.status = Some(format!(
-            "{total} coincidencias en {} documentos",
-            groups.len()
-        ));
+        // El encabezado del panel ya da el resumen.
+        self.find.status = None;
         self.results = Some(SearchResults {
             pattern: self.find.pattern.clone(),
             groups,
             total,
+            scanned: None,
         });
     }
 
@@ -477,25 +481,104 @@ impl Lorca {
         let Some(hit) = group.hits.get(hit).cloned() else {
             return;
         };
-        let revision = group.revision;
-        if !self.workspace.activate(group.id) {
-            self.find.status = Some("El documento ya no está abierto".to_owned());
-            return;
-        }
-        let Some(document) = self.workspace.active_mut() else {
+        let (id, exact) = match group.target.clone() {
+            ResultTarget::Document { id, version } => {
+                if !self.workspace.activate(id) {
+                    self.find.status = Some("El documento ya no está abierto".to_owned());
+                    return;
+                }
+                let exact = self
+                    .workspace
+                    .document(id)
+                    .is_some_and(|d| d.editor.version() == version);
+                (id, exact)
+            }
+            ResultTarget::File(path) => match self.workspace.open_file(&path) {
+                Ok(id) => {
+                    // Recién abierto coincide con lo buscado, salvo que ya estuviera
+                    // abierto con cambios.
+                    let exact = self
+                        .workspace
+                        .document(id)
+                        .is_some_and(|d| !d.is_modified());
+                    (id, exact)
+                }
+                Err(error) => {
+                    self.find.status = Some(error.to_string());
+                    return;
+                }
+            },
+        };
+        let Some(document) = self.workspace.document_mut(id) else {
             return;
         };
-        if document.editor.version() == revision {
+        if exact {
             document
                 .editor
                 .set_selection(Selection::new(hit.range.start, hit.range.end));
         } else {
-            // El documento cambió desde la búsqueda: al menos se va a la línea.
+            // El texto cambió desde la búsqueda: al menos se va a la línea.
             let start = document.editor.buffer().line_start(hit.line);
             document.editor.set_cursor(start, false);
         }
         self.focus = Focus::Editor;
         self.reveal_active_cursor();
+    }
+
+    /// Busca el texto de la barra en una carpeta: primero pide la carpeta.
+    pub(super) fn find_in_folder(&mut self) -> Task<Message> {
+        if self.find_query().is_none() {
+            let task = self.open_find(find::PATTERN_ID);
+            self.find.status = Some("Escribe qué buscar y pulsa «En carpeta…»".to_owned());
+            return task;
+        }
+        if self.dialog_open {
+            return Task::none();
+        }
+        self.dialog_open = true;
+        let start = self
+            .workspace
+            .active()
+            .and_then(|d| d.path())
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf);
+        Task::perform(crate::dialogs::pick_folder(start), Message::FolderPicked)
+    }
+
+    /// Lanza la búsqueda en la carpeta elegida, fuera del hilo de la interfaz.
+    pub(super) fn search_in_folder(&mut self, root: std::path::PathBuf) -> Task<Message> {
+        let Some(query) = self.find_query() else {
+            return Task::none();
+        };
+        self.find.status = Some(format!("Buscando en «{}»…", root.display()));
+        let pattern = self.find.pattern.clone();
+        Task::perform(
+            async move { search_folder(&root, &query, FolderLimits::default()) },
+            move |result| Message::FolderSearched {
+                pattern: pattern.clone(),
+                result,
+            },
+        )
+    }
+
+    pub(super) fn show_folder_results(&mut self, pattern: String, result: FolderSearch) {
+        self.find.status = None;
+        let total = result.total();
+        let groups = result
+            .files
+            .into_iter()
+            .map(|file| ResultGroup {
+                name: file.path.display().to_string(),
+                target: ResultTarget::File(file.path),
+                hits: file.hits,
+            })
+            .collect();
+        self.results = Some(SearchResults {
+            pattern,
+            groups,
+            total,
+            scanned: Some((result.files_searched, result.truncated)),
+        });
     }
 
     fn submit_goto(&mut self) {

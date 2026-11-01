@@ -10,8 +10,7 @@ use iced::widget::{
     tooltip,
 };
 use iced::{Alignment, Element, Font, Length, Theme};
-use lorca_core::Buffer;
-use lorca_search::{SearchMode, SearchOptions};
+use lorca_search::{Hit, SearchMode, SearchOptions};
 use lorca_workspace::DocumentId;
 
 use crate::app::Message;
@@ -25,8 +24,6 @@ pub const GOTO_ID: &str = "goto-line";
 pub const MAX_MATCHES: usize = 100_000;
 /// Máximo de filas que muestra el panel de resultados.
 const MAX_RESULT_ROWS: usize = 2_000;
-/// Longitud máxima de la vista previa de cada resultado.
-const PREVIEW_CHARS: usize = 160;
 
 /// Estado de la barra de búsqueda. Es global (no por documento), como en Notepad++.
 #[derive(Debug, Clone)]
@@ -105,52 +102,27 @@ pub struct SearchResults {
     pub pattern: String,
     pub groups: Vec<ResultGroup>,
     pub total: usize,
+    /// En búsquedas en carpeta: archivos analizados y si se cortó por algún límite.
+    pub scanned: Option<(usize, bool)>,
 }
 
 /// Coincidencias de un documento.
 #[derive(Debug, Clone)]
 pub struct ResultGroup {
-    pub id: DocumentId,
+    pub target: ResultTarget,
     pub name: String,
-    /// Revisión del documento al buscar: si cambia, se salta a la línea en vez de al rango.
-    pub revision: u64,
     pub hits: Vec<Hit>,
 }
 
-/// Una coincidencia lista para mostrar.
+/// A qué corresponde un grupo de resultados.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hit {
-    pub line: usize,
-    /// Rango en el documento (caracteres).
-    pub range: Range<usize>,
-    /// Texto de la línea (recortado) y la parte que coincide dentro de él.
-    pub preview: String,
-    pub highlight: Range<usize>,
+pub enum ResultTarget {
+    /// Documento abierto y su versión al buscar (si cambia, se salta a la línea en vez de
+    /// al rango exacto).
+    Document { id: DocumentId, version: u64 },
+    /// Archivo de una búsqueda en carpeta (se abre al hacer clic).
+    File(std::path::PathBuf),
 }
-
-/// Prepara las filas de resultados a partir de las coincidencias de un documento.
-pub fn build_hits(buffer: &Buffer, matches: &[Range<usize>]) -> Vec<Hit> {
-    matches
-        .iter()
-        .map(|range| {
-            let position = buffer.char_to_position(range.start);
-            let line: Vec<char> = buffer.line_text(position.line).chars().collect();
-            let match_len = range.len().min(line.len().saturating_sub(position.column));
-            // Ventana de texto alrededor de la coincidencia.
-            let first = position.column.saturating_sub(PREVIEW_CHARS / 3);
-            let last = (position.column + match_len + PREVIEW_CHARS).min(line.len());
-            let preview: String = line.get(first..last).unwrap_or_default().iter().collect();
-            let start = position.column - first;
-            Hit {
-                line: position.line,
-                range: range.clone(),
-                preview: preview.replace('\t', " "),
-                highlight: start..start + match_len,
-            }
-        })
-        .collect()
-}
-
 /// Interpreta «línea» o «línea:columna» (desde 1). Devuelve índices desde cero.
 pub fn parse_goto(input: &str) -> Option<(usize, usize)> {
     let mut parts = input.trim().splitn(2, [':', ',']);
@@ -264,6 +236,13 @@ pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Eleme
             ),
             "Buscar todo en todos los documentos abiertos"
         ),
+        with_tip(
+            button(text("En carpeta…").size(12))
+                .padding([3, 8])
+                .style(button::secondary)
+                .on_press(Message::FindInFolder),
+            "Buscar en todos los archivos de una carpeta (⇧⌘F)"
+        ),
         button(text("×").size(14))
             .padding([0, 6])
             .style(button::text)
@@ -334,25 +313,34 @@ pub fn goto_bar<'a>(input: &'a str, line_count: usize) -> Element<'a, Message> {
 
 /// Panel inferior con los resultados de «Buscar todo».
 pub fn results_panel(results: &SearchResults) -> Element<'_, Message> {
-    let documents = results.groups.len();
+    let places = results.groups.len();
+    let noun = match (results.scanned.is_some(), places == 1) {
+        (true, true) => "archivo",
+        (true, false) => "archivos",
+        (false, true) => "documento",
+        (false, false) => "documentos",
+    };
+    let matches = if results.total == 1 {
+        "coincidencia"
+    } else {
+        "coincidencias"
+    };
+    let mut summary = format!(
+        "Buscar «{}»: {} {matches} en {places} {noun}",
+        results.pattern, results.total
+    );
+    if let Some((scanned, truncated)) = results.scanned {
+        summary.push_str(&format!(
+            " ({scanned} analizados{})",
+            if truncated {
+                ", búsqueda cortada por límite"
+            } else {
+                ""
+            }
+        ));
+    }
     let header = row![
-        text(format!(
-            "Buscar «{}»: {} {} en {} {}",
-            results.pattern,
-            results.total,
-            if results.total == 1 {
-                "coincidencia"
-            } else {
-                "coincidencias"
-            },
-            documents,
-            if documents == 1 {
-                "documento"
-            } else {
-                "documentos"
-            },
-        ))
-        .size(12),
+        text(summary).size(12),
         space::horizontal(),
         button(text("×").size(14))
             .padding([0, 6])
@@ -466,43 +454,5 @@ mod tests {
         assert_eq!(parse_goto("0"), None);
         assert_eq!(parse_goto("abc"), None);
         assert_eq!(parse_goto(""), None);
-    }
-
-    #[test]
-    fn hits_have_line_and_highlight() {
-        let buffer = Buffer::from_text("uno\n\tdos verde tres");
-        let hits = build_hits(&buffer, &[9..14]);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].line, 1);
-        assert_eq!(hits[0].preview, " dos verde tres");
-        let matched: String = hits[0]
-            .preview
-            .chars()
-            .skip(hits[0].highlight.start)
-            .take(hits[0].highlight.len())
-            .collect();
-        assert_eq!(matched, "verde");
-    }
-
-    #[test]
-    fn long_lines_are_trimmed_around_the_match() {
-        let line = format!("{}aguja{}", "x".repeat(1000), "y".repeat(1000));
-        let buffer = Buffer::from_text(&line);
-        let hits = build_hits(&buffer, &[1000..1005]);
-        assert!(hits[0].preview.chars().count() <= PREVIEW_CHARS + PREVIEW_CHARS / 3 + 5);
-        let matched: String = hits[0]
-            .preview
-            .chars()
-            .skip(hits[0].highlight.start)
-            .take(5)
-            .collect();
-        assert_eq!(matched, "aguja");
-    }
-
-    #[test]
-    fn multiline_match_highlight_stops_at_line_end() {
-        let buffer = Buffer::from_text("ab\ncd");
-        let hits = build_hits(&buffer, &[1..4]);
-        assert_eq!(hits[0].highlight, 1..2);
     }
 }

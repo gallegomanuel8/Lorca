@@ -25,6 +25,7 @@ use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_ar
 use crate::dialogs::{self, SaveChoice};
 use crate::editor::{DocView, EditorAction, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
+use crate::palette::{self, Palette};
 use crate::shortcuts::shortcut;
 use crate::watcher;
 use crate::welcome;
@@ -89,6 +90,19 @@ pub enum Message {
     /// Clic en una pestaña (con Cmd/Ctrl o Mayús, selecciona).
     TabPressed(DocumentId),
     TabContextMenu(DocumentId, Point),
+    ActivateTab(DocumentId),
+    FindInFolder,
+    FolderPicked(Option<PathBuf>),
+    FolderSearched {
+        pattern: String,
+        result: lorca_search::FolderSearch,
+    },
+    OpenPalette,
+    PaletteInput(String),
+    PaletteMove(i32),
+    /// Ejecuta la orden indicada (o la resaltada si es `None`).
+    PaletteRun(Option<usize>),
+    ClosePalette,
     /// El ratón entra en una pestaña (resaltado y arrastre).
     TabHovered(DocumentId),
     TabUnhovered(DocumentId),
@@ -206,6 +220,7 @@ pub struct Lorca {
     hovered_tab: Option<DocumentId>,
     /// Pestaña que se está arrastrando para reordenarla.
     dragging_tab: Option<DocumentId>,
+    palette: Option<Palette>,
 }
 
 impl Lorca {
@@ -282,6 +297,7 @@ impl Lorca {
             window_size: WINDOW_SIZE,
             hovered_tab: None,
             dragging_tab: None,
+            palette: None,
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -328,6 +344,9 @@ impl Lorca {
                     .collect(),
             ),
         ];
+        if self.palette.is_some() {
+            subscriptions.push(event::listen_with(palette_keys));
+        }
         if self.session_dirty.is_some() {
             subscriptions.push(iced::time::every(SESSION_TICK).map(|_| Message::Tick));
         }
@@ -416,6 +435,60 @@ impl Lorca {
             Message::TabPressed(id) => {
                 self.tab_pressed(id);
                 self.dragging_tab = Some(id);
+                Task::none()
+            }
+            Message::FindInFolder => self.find_in_folder(),
+            Message::FolderPicked(folder) => {
+                self.dialog_open = false;
+                match folder {
+                    Some(root) => self.search_in_folder(root),
+                    None => Task::none(),
+                }
+            }
+            Message::FolderSearched { pattern, result } => {
+                self.show_folder_results(pattern, result);
+                Task::none()
+            }
+            Message::ActivateTab(id) => {
+                self.workspace.clear_selection();
+                self.workspace.activate(id);
+                Task::none()
+            }
+            Message::OpenPalette => {
+                self.context_menu = None;
+                self.palette = Some(Palette::default());
+                iced::widget::operation::focus(palette::INPUT_ID)
+            }
+            Message::PaletteInput(query) => {
+                if let Some(palette) = &mut self.palette {
+                    palette.query = query;
+                    palette.selected = 0;
+                }
+                Task::none()
+            }
+            Message::PaletteMove(delta) => {
+                let count = self.palette_matches().len();
+                if let Some(palette) = &mut self.palette {
+                    palette.selected = palette::move_selection(palette.selected, delta, count);
+                }
+                Task::none()
+            }
+            Message::PaletteRun(index) => {
+                let Some(selected) = self.palette.as_ref().map(|p| p.selected) else {
+                    return Task::none();
+                };
+                let command = self
+                    .palette_matches()
+                    .into_iter()
+                    .nth(index.unwrap_or(selected));
+                self.palette = None;
+                match command {
+                    Some(command) => self.update(command.message),
+                    None => Task::none(),
+                }
+            }
+            Message::ClosePalette => {
+                self.palette = None;
                 Task::none()
             }
             Message::TabHovered(id) => {
@@ -635,7 +708,7 @@ impl Lorca {
             }
             Message::GoToLine => self.open_goto(),
             Message::Escape => {
-                if self.context_menu.take().is_none() {
+                if self.palette.take().is_none() && self.context_menu.take().is_none() {
                     self.escape();
                 }
                 Task::none()
@@ -1010,10 +1083,14 @@ impl Lorca {
             layout = layout.push(find::results_panel(results));
         }
         let base: Element<'_, Message> = layout.push(self.status_bar()).into();
-        match &self.context_menu {
+        let base = match &self.context_menu {
             Some(menu) => {
                 context_menu::layer(base, menu, self.menu_items(menu.target), self.window_size)
             }
+            None => base,
+        };
+        match &self.palette {
+            Some(state) => palette::layer(base, state, &self.palette_matches()),
             None => base,
         }
     }
@@ -1190,6 +1267,26 @@ pub fn resolve_theme(mode: ThemeMode, system: Mode) -> Theme {
     }
 }
 
+/// Flechas arriba/abajo mientras la paleta está abierta (el campo de texto no las usa).
+fn palette_keys(
+    event: iced::Event,
+    _status: event::Status,
+    _window: window::Id,
+) -> Option<Message> {
+    use iced::keyboard::key::Named;
+    match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::ArrowUp),
+            ..
+        }) => Some(Message::PaletteMove(-1)),
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(Named::ArrowDown),
+            ..
+        }) => Some(Message::PaletteMove(1)),
+        _ => None,
+    }
+}
+
 /// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
 fn affects_session(message: &Message) -> bool {
     !matches!(
@@ -1206,6 +1303,10 @@ fn affects_session(message: &Message) -> bool {
             | Message::ModifiersChanged(_)
             | Message::TabUnhovered(_)
             | Message::MouseReleased
+            | Message::OpenPalette
+            | Message::PaletteInput(_)
+            | Message::PaletteMove(_)
+            | Message::ClosePalette
             | Message::WindowResized(_)
             | Message::CloseContextMenu
     )
