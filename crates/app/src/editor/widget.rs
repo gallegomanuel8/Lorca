@@ -15,7 +15,7 @@ use iced::{
 };
 use std::ops::Range;
 
-use lorca_core::{EditorState, Position, display};
+use lorca_core::{EditorState, LineEnding, Position, display};
 use lorca_syntax::Highlights;
 
 use super::keymap::{KeyCommand, map_key};
@@ -36,6 +36,7 @@ pub fn code_editor<'a, Message>(
     focused: bool,
     highlights: Option<&'a Highlights>,
     decorations: Decorations<'a>,
+    options: ViewOptions,
     on_action: impl Fn(EditorAction) -> Message + 'a,
 ) -> CodeEditor<'a, Message> {
     CodeEditor {
@@ -44,8 +45,19 @@ pub fn code_editor<'a, Message>(
         focused,
         highlights,
         decorations,
+        options,
         on_action: Box::new(on_action),
     }
+}
+
+/// Qué elementos invisibles se dibujan.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ViewOptions {
+    /// Espacios (·) y tabuladores (→).
+    pub whitespace: bool,
+    /// Etiqueta del final de línea del documento al final de cada línea.
+    pub line_ending: Option<LineEnding>,
+    pub indent_guides: bool,
 }
 
 /// Rangos (en caracteres, ordenados y sin solapes) que se resaltan bajo el texto.
@@ -67,6 +79,7 @@ pub struct CodeEditor<'a, Message> {
     /// Resaltado del documento; puede ir una revisión por detrás mientras se recalcula.
     highlights: Option<&'a Highlights>,
     decorations: Decorations<'a>,
+    options: ViewOptions,
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -506,6 +519,12 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             }
         });
 
+        let guides = if self.options.indent_guides {
+            indent_guides(self.editor, first_line, last_line)
+        } else {
+            Vec::new()
+        };
+
         // Texto, selección y cursor.
         renderer.with_layer(geometry.text_area, |renderer| {
             for line in first_line..last_line {
@@ -565,6 +584,70 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             height: LINE_HEIGHT,
                         },
                         colors.selection,
+                    );
+                }
+
+                if let Some(&indent) = guides.get(line - first_line) {
+                    for column in (0..indent).step_by(TAB_WIDTH) {
+                        fill(
+                            renderer,
+                            Rectangle {
+                                x: geometry.cell_x(column, view).floor(),
+                                y,
+                                width: 1.0,
+                                height: LINE_HEIGHT,
+                            },
+                            colors.guide,
+                        );
+                    }
+                }
+                if self.options.whitespace {
+                    draw_whitespace(
+                        renderer,
+                        &geometry,
+                        view,
+                        &text,
+                        y,
+                        first_cell,
+                        visible_cells,
+                        colors.whitespace,
+                    );
+                }
+                if let Some(ending) = self.options.line_ending
+                    && line + 1 < line_count
+                {
+                    let cells = display::visual_column(&text, usize::MAX, TAB_WIDTH);
+                    let label = ending.label();
+                    let x = geometry.cell_x(cells, view) + 4.0;
+                    let width = label.len() as f32 * 6.0 + 6.0;
+                    renderer::Renderer::fill_quad(
+                        renderer,
+                        Quad {
+                            bounds: Rectangle {
+                                x,
+                                y: y + 4.0,
+                                width,
+                                height: LINE_HEIGHT - 8.0,
+                            },
+                            border: iced::Border {
+                                radius: 3.0.into(),
+                                ..iced::Border::default()
+                            },
+                            ..Quad::default()
+                        },
+                        Background::Color(colors.guide),
+                    );
+                    renderer.fill_text(
+                        Text {
+                            content: label.to_owned(),
+                            size: Pixels(9.0),
+                            font: Font::default(),
+                            align_y: alignment::Vertical::Center,
+                            ..text_style()
+                        },
+                        Point::new(x + 3.0, y + LINE_HEIGHT / 2.0),
+                        colors.line_number,
+                        geometry.text_area,
                     );
                 }
 
@@ -670,6 +753,8 @@ struct Colors {
     found_current: Color,
     mark: Color,
     bookmark: Color,
+    whitespace: Color,
+    guide: Color,
     is_dark: bool,
 }
 
@@ -703,11 +788,115 @@ impl Colors {
                 ..palette.success.base.color
             },
             bookmark: palette.primary.base.color,
+            whitespace: Color {
+                a: 0.7,
+                ..palette.background.strong.color
+            },
+            guide: Color {
+                a: 0.35,
+                ..palette.background.strong.color
+            },
             scrollbar: Color {
                 a: 0.5,
                 ..palette.background.strong.color
             },
         }
+    }
+}
+
+/// Anchura (en celdas) de las guías de indentación de cada línea visible. Las líneas en
+/// blanco toman la menor indentación de la línea con texto anterior y la siguiente.
+fn indent_guides(editor: &EditorState, first: usize, last: usize) -> Vec<usize> {
+    /// Hasta dónde se buscan líneas con texto alrededor de una línea en blanco.
+    const LOOKAROUND: usize = 200;
+    let buffer = editor.buffer();
+    let indent_of = |line: usize| leading_indent(&buffer.line_text(line));
+    (first..last)
+        .map(|line| {
+            indent_of(line).unwrap_or_else(|| {
+                let previous = (line.saturating_sub(LOOKAROUND)..line)
+                    .rev()
+                    .find_map(&indent_of);
+                let next =
+                    (line + 1..(line + LOOKAROUND).min(buffer.len_lines())).find_map(&indent_of);
+                previous.unwrap_or(0).min(next.unwrap_or(0))
+            })
+        })
+        .collect()
+}
+
+/// Celdas de sangría al principio de la línea, o `None` si está en blanco.
+fn leading_indent(text: &str) -> Option<usize> {
+    let mut visual = 0;
+    for c in text.chars() {
+        match c {
+            ' ' | '\t' => visual += display::char_cells(c, visual, TAB_WIDTH),
+            _ => return Some(visual),
+        }
+    }
+    None
+}
+
+/// Dibuja un punto en cada espacio y una flecha en cada tabulador de la parte visible.
+#[allow(clippy::too_many_arguments)] // Son las coordenadas de la línea; agruparlas no aclara.
+fn draw_whitespace(
+    renderer: &mut Renderer,
+    geometry: &Geometry,
+    view: DocView,
+    text: &str,
+    y: f32,
+    first_cell: usize,
+    visible_cells: usize,
+    color: Color,
+) {
+    let mut visual = 0;
+    for c in text.chars() {
+        let width = display::char_cells(c, visual, TAB_WIDTH);
+        if visual >= first_cell + visible_cells {
+            break;
+        }
+        if visual + width > first_cell {
+            let x = geometry.cell_x(visual, view);
+            let middle = y + LINE_HEIGHT / 2.0;
+            match c {
+                ' ' => fill(
+                    renderer,
+                    Rectangle {
+                        x: (x + geometry.cell / 2.0 - 1.0).round(),
+                        y: (middle - 1.0).round(),
+                        width: 2.0,
+                        height: 2.0,
+                    },
+                    color,
+                ),
+                '\t' => {
+                    let end = geometry.cell_x(visual + width, view) - 3.0;
+                    let start = x + 2.0;
+                    fill(
+                        renderer,
+                        Rectangle {
+                            x: start,
+                            y: middle.round(),
+                            width: (end - start).max(1.0),
+                            height: 1.0,
+                        },
+                        color,
+                    );
+                    fill(
+                        renderer,
+                        Rectangle {
+                            x: end - 1.0,
+                            y: middle.round() - 3.0,
+                            width: 1.0,
+                            height: 7.0,
+                        },
+                        color,
+                    );
+                }
+                _ => {}
+            }
+        }
+        visual += width;
     }
 }
 

@@ -7,8 +7,9 @@ repository.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-iced = { version = "0.14.0", features = ["advanced", "smol"] }
+iced = { version = "0.14.0", features = ["advanced", "markdown", "smol"] }
 lorca-core = { version = "0.1.0", path = "../core" }
+lorca-formats = { version = "0.1.0", path = "../formats" }
 lorca-search = { version = "0.1.0", path = "../search" }
 lorca-syntax = { version = "0.1.0", path = "../syntax" }
 lorca-workspace = { version = "0.1.0", path = "../workspace" }

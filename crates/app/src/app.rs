@@ -1,6 +1,6 @@
 //! Estado de la aplicación, mensajes y vista principal.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -18,7 +18,7 @@ use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
 
-use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, context_area};
+use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
 use crate::dialogs::{self, SaveChoice};
 use crate::editor::{DocView, EditorAction, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
@@ -88,6 +88,9 @@ pub enum Message {
     Context(ContextAction),
     CloseContextMenu,
     Paste(Option<String>),
+    /// Abre el menú de la barra de estado («UTF-8», «LF», «¶»).
+    StatusMenu(MenuTarget, Point),
+    OpenUrl(String),
     PaneClicked(pane_grid::Pane),
     PaneResized(pane_grid::ResizeEvent),
     ToggleSplit,
@@ -176,6 +179,9 @@ pub struct Lorca {
     /// Pestañas pendientes de cerrar (Cerrar las demás, seleccionadas…).
     close_queue: VecDeque<DocumentId>,
     pane_layout: Option<PaneLayout>,
+    /// Documentos Markdown con vista previa y su contenido analizado por revisión.
+    previews: HashSet<DocumentId>,
+    preview_cache: HashMap<DocumentId, (u64, iced::widget::markdown::Content)>,
     window_size: Size,
 }
 
@@ -248,6 +254,8 @@ impl Lorca {
             context_menu: None,
             close_queue: VecDeque::new(),
             pane_layout: None,
+            previews: HashSet::new(),
+            preview_cache: HashMap::new(),
             window_size: WINDOW_SIZE,
         };
         if !problems.is_empty() {
@@ -299,6 +307,7 @@ impl Lorca {
         let task = self.handle(message);
         self.sync_panes();
         self.refresh_search();
+        self.refresh_previews();
         Task::batch([task, self.schedule_highlight()])
     }
 
@@ -384,6 +393,16 @@ impl Lorca {
             Message::Context(action) => self.handle_context(action),
             Message::CloseContextMenu => {
                 self.context_menu = None;
+                Task::none()
+            }
+            Message::StatusMenu(target, position) => {
+                self.context_menu = Some(ContextMenu { position, target });
+                Task::none()
+            }
+            Message::OpenUrl(url) => {
+                if let Err(error) = panes::open_url(&url) {
+                    self.show_error(format!("No se pudo abrir «{url}»: {error}"));
+                }
                 Task::none()
             }
             Message::Paste(contents) => {
@@ -796,6 +815,8 @@ impl Lorca {
         self.highlights.remove(&id);
         self.marks.remove(&id);
         self.mark_cache.remove(&id);
+        self.previews.remove(&id);
+        self.preview_cache.remove(&id);
         self.ensure_document();
     }
 
@@ -934,9 +955,19 @@ impl Lorca {
                 .padding([0, 6])
                 .into(),
             );
-            items.push(text(format.encoding.label()).size(12).into());
-            items.push(text(format.line_ending.label()).size(12).into());
+            let id = document.id();
+            items.push(click_area(
+                text(format.encoding.label()).size(12),
+                move |position| Message::StatusMenu(MenuTarget::Encoding(id), position),
+            ));
+            items.push(click_area(
+                text(format.line_ending.label()).size(12),
+                move |position| Message::StatusMenu(MenuTarget::LineEnding(id), position),
+            ));
         }
+        items.push(click_area(text("¶").size(13), |position| {
+            Message::StatusMenu(MenuTarget::View, position)
+        }));
         items.push(
             pick_list(
                 ThemeMode::ALL,

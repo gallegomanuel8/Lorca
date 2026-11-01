@@ -116,7 +116,11 @@ pub fn map_key(
     }
 
     // Combinaciones con Cmd/Ctrl. Ctrl+Alt es AltGr en Windows y produce texto.
+    // Con Mayús son atajos de la aplicación (⇧⌘V = vista previa), no del editor.
     if modifiers.command() && !modifiers.alt() {
+        if modifiers.shift() {
+            return None;
+        }
         return match key.to_latin(physical_key) {
             Some('a') => edit(EditorAction::SelectAll),
             Some('c') => Some(KeyCommand::Copy),
@@ -124,6 +128,11 @@ pub fn map_key(
             Some('v') => Some(KeyCommand::Paste),
             _ => None,
         };
+    }
+
+    // En macOS, con ⌘ pulsado nunca se escribe: ⌥⌘L, por ejemplo, produciría «¬».
+    if cfg!(target_os = "macos") && modifiers.logo() {
+        return None;
     }
 
     let text: String = text?.chars().filter(|c| !c.is_control()).collect();
@@ -198,6 +207,12 @@ mod tests {
             character("a", Modifiers::COMMAND),
             Some(KeyCommand::Edit(EditorAction::SelectAll))
         );
+    }
+
+    #[test]
+    fn shifted_clipboard_combos_are_not_captured() {
+        assert_eq!(character("V", Modifiers::COMMAND | Modifiers::SHIFT), None);
+        assert_eq!(character("C", Modifiers::COMMAND | Modifiers::SHIFT), None);
     }
 
     #[test]

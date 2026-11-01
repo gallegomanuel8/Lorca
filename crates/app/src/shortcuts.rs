@@ -8,7 +8,10 @@ use iced::event::{self, Event};
 use iced::keyboard::{self, Key, Modifiers, key::Code, key::Named, key::Physical};
 use iced::window;
 
+use lorca_formats::Case;
+
 use crate::app::{BookmarkAction, Message};
+use crate::context_menu::ContextAction;
 
 /// Traduce un evento en un mensaje de la aplicación (firma de `event::listen_with`).
 pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Option<Message> {
@@ -64,7 +67,11 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
     }
     // ⌘H oculta la aplicación en macOS: allí sustituir es ⌥⌘F, como en Xcode o VS Code.
     if modifiers.alt() {
-        return (is_mac && letter == 'f').then_some(Message::OpenReplace);
+        return match letter {
+            'f' if is_mac => Some(Message::OpenReplace),
+            'l' => Some(Message::Context(ContextAction::FormatDocument)),
+            _ => None,
+        };
     }
     match letter {
         'n' if !shift => Some(Message::NewDocument),
@@ -78,6 +85,9 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         'f' if !shift => Some(Message::OpenFind),
         'h' if !is_mac && !shift => Some(Message::OpenReplace),
         '\\' => Some(Message::ToggleSplit),
+        'u' if shift => Some(Message::Context(ContextAction::ChangeCase(Case::Upper))),
+        'u' => Some(Message::Context(ContextAction::ChangeCase(Case::Lower))),
+        'v' if shift => Some(Message::Context(ContextAction::TogglePreview)),
         'g' if is_mac && shift => Some(Message::FindPrevious),
         'g' if is_mac => Some(Message::FindNext),
         _ => None,
@@ -191,6 +201,27 @@ mod tests {
         assert!(matches!(
             char_key("\\", Code::Backslash, cmd),
             Some(Message::ToggleSplit)
+        ));
+    }
+
+    #[test]
+    fn format_and_case_shortcuts() {
+        let cmd = Modifiers::COMMAND;
+        assert!(matches!(
+            char_key("l", Code::KeyL, cmd | Modifiers::ALT),
+            Some(Message::Context(ContextAction::FormatDocument))
+        ));
+        assert!(matches!(
+            char_key("U", Code::KeyU, cmd | Modifiers::SHIFT),
+            Some(Message::Context(ContextAction::ChangeCase(Case::Upper)))
+        ));
+        assert!(matches!(
+            char_key("u", Code::KeyU, cmd),
+            Some(Message::Context(ContextAction::ChangeCase(Case::Lower)))
+        ));
+        assert!(matches!(
+            char_key("V", Code::KeyV, cmd | Modifiers::SHIFT),
+            Some(Message::Context(ContextAction::TogglePreview))
         ));
     }
 

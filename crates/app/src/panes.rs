@@ -4,14 +4,17 @@
 
 use std::path::Path;
 
-use iced::widget::{column, container, pane_grid, text};
+use iced::widget::{column, container, markdown, pane_grid, row, rule, scrollable, text};
 use iced::{Element, Length, Point, Task, Theme};
+use lorca_core::{Buffer, LineEnding, Position, Selection, TextEncoding, TextFormat};
+use lorca_formats::{Case, change_case, format_json, format_sql, minify_json};
 use lorca_search::match_index;
+use lorca_syntax::Language;
 use lorca_workspace::DocumentId;
 
 use super::{Lorca, Message, Then};
 use crate::context_menu::{ContextAction, ContextMenu, MenuItem, MenuTarget};
-use crate::editor::{Decorations, code_editor};
+use crate::editor::{Decorations, INDENT, ViewOptions, code_editor};
 use crate::find;
 use crate::shortcut_labels as keys;
 
@@ -99,15 +102,70 @@ impl Lorca {
             && self.focus == super::Focus::Editor
             && !self.dialog_open
             && self.context_menu.is_none();
-        code_editor(
+        let options = ViewOptions {
+            whitespace: self.config.show_whitespace,
+            line_ending: self
+                .config
+                .show_line_endings
+                .then(|| document.format().line_ending),
+            indent_guides: self.config.indent_guides,
+        };
+        let editor: Element<'_, Message> = code_editor(
             &document.editor,
             view,
             focused,
             highlights,
             decorations,
+            options,
             move |action| Message::Editor(id, action),
         )
-        .into()
+        .into();
+        match self.preview_for(id) {
+            Some(preview) => row![editor, rule::vertical(1), preview].into(),
+            None => editor,
+        }
+    }
+
+    /// Vista previa de Markdown del documento, si está activada.
+    fn preview_for(&self, id: DocumentId) -> Option<Element<'_, Message>> {
+        if !self.previews.contains(&id) {
+            return None;
+        }
+        let (_, content) = self.preview_cache.get(&id)?;
+        let settings = markdown::Settings::with_text_size(15, self.theme());
+        let rendered = markdown::view(content.items(), settings).map(Message::OpenUrl);
+        Some(
+            scrollable(container(rendered).padding([16, 22]).width(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
+
+    /// Vuelve a analizar el Markdown de las vistas previas visibles que hayan cambiado.
+    pub(super) fn refresh_previews(&mut self) {
+        let workspace = &self.workspace;
+        self.previews.retain(|id| workspace.document(*id).is_some());
+        let previews = &self.previews;
+        self.preview_cache.retain(|id, _| previews.contains(id));
+        for id in self.visible_documents() {
+            if !self.previews.contains(&id) {
+                continue;
+            }
+            let Some(document) = self.workspace.document(id) else {
+                continue;
+            };
+            let revision = document.editor.revision();
+            if self
+                .preview_cache
+                .get(&id)
+                .is_some_and(|(cached, _)| *cached == revision)
+            {
+                continue;
+            }
+            let content = markdown::Content::parse(&document.editor.text());
+            self.preview_cache.insert(id, (revision, content));
+        }
     }
 
     /// Área de edición: un editor o, con la pantalla dividida, varios lado a lado.
@@ -200,7 +258,8 @@ impl Lorca {
                 };
                 let editor = &document.editor;
                 let has_selection = !editor.selection().is_empty();
-                vec![
+                let language = document.language();
+                let mut items = vec![
                     MenuItem::new("Cortar", keys::CUT, some(has_selection, ContextAction::Cut)),
                     MenuItem::new(
                         "Copiar",
@@ -230,6 +289,58 @@ impl Lorca {
                         some(editor.can_redo(), ContextAction::Redo),
                     ),
                     MenuItem::Separator,
+                ];
+                let format_label = match language {
+                    Language::Json => "Formatear JSON",
+                    Language::Sql => "Formatear SQL",
+                    _ => "Formatear (JSON o SQL)",
+                };
+                items.push(MenuItem::new(
+                    format_label,
+                    keys::FORMAT,
+                    some(
+                        matches!(language, Language::Json | Language::Sql),
+                        ContextAction::FormatDocument,
+                    ),
+                ));
+                if language == Language::Json {
+                    items.push(MenuItem::new(
+                        "Minificar JSON",
+                        "",
+                        Some(ContextAction::MinifyJson),
+                    ));
+                }
+                items.extend([
+                    MenuItem::new(
+                        "MAYÚSCULAS",
+                        keys::UPPER,
+                        some(has_selection, ContextAction::ChangeCase(Case::Upper)),
+                    ),
+                    MenuItem::new(
+                        "minúsculas",
+                        keys::LOWER,
+                        some(has_selection, ContextAction::ChangeCase(Case::Lower)),
+                    ),
+                    MenuItem::new(
+                        "Tipo Título",
+                        "",
+                        some(has_selection, ContextAction::ChangeCase(Case::Title)),
+                    ),
+                ]);
+                if language == Language::Markdown {
+                    let label = if self.previews.contains(&id) {
+                        "Ocultar vista previa"
+                    } else {
+                        "Vista previa de Markdown"
+                    };
+                    items.push(MenuItem::new(
+                        label,
+                        keys::PREVIEW,
+                        Some(ContextAction::TogglePreview),
+                    ));
+                }
+                items.extend([
+                    MenuItem::Separator,
                     MenuItem::new("Buscar…", keys::FIND, Some(ContextAction::FindSelection)),
                     MenuItem::new("Buscar todo", "", Some(ContextAction::FindAll)),
                     MenuItem::new("Marcar todo", "", Some(ContextAction::MarkAll)),
@@ -240,8 +351,74 @@ impl Lorca {
                         Some(ContextAction::ToggleBookmark),
                     ),
                     MenuItem::new("Ir a línea…", keys::GOTO, Some(ContextAction::GoToLine)),
+                ]);
+                items
+            }
+            MenuTarget::Encoding(id) => {
+                let Some(document) = self.workspace.document(id) else {
+                    return Vec::new();
+                };
+                let current = document.format().encoding;
+                let can_reopen = document.path().is_some() && !document.is_modified();
+                let mut items = vec![MenuItem::Header("Guardar con la codificación".to_owned())];
+                items.extend(TextEncoding::ALL.map(|encoding| {
+                    MenuItem::check(
+                        encoding.label(),
+                        encoding == current,
+                        Some(ContextAction::SaveWithEncoding(encoding)),
+                    )
+                }));
+                items.push(MenuItem::Separator);
+                items.push(MenuItem::Header(if can_reopen {
+                    "Reabrir con la codificación".to_owned()
+                } else if document.path().is_none() {
+                    "Reabrir (no está guardado en disco)".to_owned()
+                } else {
+                    "Reabrir (guarda antes)".to_owned()
+                }));
+                items.extend(TextEncoding::ALL.map(|encoding| {
+                    MenuItem::check(
+                        encoding.label(),
+                        false,
+                        some(can_reopen, ContextAction::ReopenWithEncoding(encoding)),
+                    )
+                }));
+                items
+            }
+            MenuTarget::LineEnding(id) => {
+                let current = self.workspace.document(id).map(|d| d.format().line_ending);
+                vec![
+                    MenuItem::Header("Finales de línea al guardar".to_owned()),
+                    MenuItem::check(
+                        "LF (Unix, macOS)",
+                        current == Some(LineEnding::Lf),
+                        Some(ContextAction::SetLineEnding(LineEnding::Lf)),
+                    ),
+                    MenuItem::check(
+                        "CRLF (Windows)",
+                        current == Some(LineEnding::CrLf),
+                        Some(ContextAction::SetLineEnding(LineEnding::CrLf)),
+                    ),
                 ]
             }
+            MenuTarget::View => vec![
+                MenuItem::Header("Mostrar".to_owned()),
+                MenuItem::check(
+                    "Espacios y tabuladores",
+                    self.config.show_whitespace,
+                    Some(ContextAction::ToggleWhitespace),
+                ),
+                MenuItem::check(
+                    "Finales de línea",
+                    self.config.show_line_endings,
+                    Some(ContextAction::ToggleLineEndings),
+                ),
+                MenuItem::check(
+                    "Guías de indentación",
+                    self.config.indent_guides,
+                    Some(ContextAction::ToggleIndentGuides),
+                ),
+            ],
             MenuTarget::Tab(id) => {
                 let selected = self.workspace.selected();
                 let tabs = self.workspace.tabs();
@@ -408,6 +585,157 @@ impl Lorca {
                 self.workspace.unsplit();
                 Task::none()
             }
+            ContextAction::SetLineEnding(line_ending) => {
+                if let Some(document) = self.workspace.active_mut() {
+                    let format = document.format();
+                    document.set_format(TextFormat {
+                        line_ending,
+                        ..format
+                    });
+                }
+                Task::none()
+            }
+            ContextAction::SaveWithEncoding(encoding) => {
+                if let Some(document) = self.workspace.active_mut() {
+                    let format = document.format();
+                    document.set_format(TextFormat { encoding, ..format });
+                }
+                Task::none()
+            }
+            ContextAction::ReopenWithEncoding(encoding) => {
+                if let Some(id) = self.workspace.active_id() {
+                    match self.workspace.reload_with_encoding(id, encoding) {
+                        Ok(()) => {
+                            // El texto es otro: se descarta todo lo calculado sobre él.
+                            self.highlights.remove(&id);
+                            self.mark_cache.remove(&id);
+                            self.preview_cache.remove(&id);
+                            self.find_cache = None;
+                            self.show_info(format!("Reabierto como {}", encoding.label()));
+                        }
+                        Err(error) => self.show_error(error.to_string()),
+                    }
+                }
+                Task::none()
+            }
+            ContextAction::ToggleWhitespace => {
+                self.config.show_whitespace = !self.config.show_whitespace;
+                self.save_config();
+                Task::none()
+            }
+            ContextAction::ToggleLineEndings => {
+                self.config.show_line_endings = !self.config.show_line_endings;
+                self.save_config();
+                Task::none()
+            }
+            ContextAction::ToggleIndentGuides => {
+                self.config.indent_guides = !self.config.indent_guides;
+                self.save_config();
+                Task::none()
+            }
+            ContextAction::FormatDocument => {
+                self.format_document(false);
+                Task::none()
+            }
+            ContextAction::MinifyJson => {
+                self.format_document(true);
+                Task::none()
+            }
+            ContextAction::ChangeCase(case) => {
+                self.change_selection_case(case);
+                Task::none()
+            }
+            ContextAction::TogglePreview => {
+                self.toggle_preview();
+                Task::none()
+            }
+        }
+    }
+
+    /// Formatea (o minifica) el JSON/SQL de la selección o de todo el documento.
+    fn format_document(&mut self, minify: bool) {
+        let Some(document) = self.workspace.active_mut() else {
+            return;
+        };
+        let language = document.language();
+        let selection = document.editor.selection();
+        let (range, source) = if selection.is_empty() {
+            (
+                0..document.editor.buffer().len_chars(),
+                document.editor.text(),
+            )
+        } else {
+            (
+                selection.range(),
+                document.editor.selected_text().unwrap_or_default(),
+            )
+        };
+        let result = match (language, minify) {
+            (Language::Json, true) => minify_json(&source),
+            (Language::Json, false) => format_json(&source, INDENT),
+            (Language::Sql, false) => Ok(format_sql(&source)),
+            _ => {
+                self.show_info("Formatear está disponible para JSON y SQL".to_owned());
+                return;
+            }
+        };
+        match result {
+            Ok(formatted) if formatted == source => {
+                self.show_info("Ya estaba formateado".to_owned());
+            }
+            Ok(formatted) => {
+                if let Err(error) = document.editor.replace_ranges(&[(range, formatted)]) {
+                    self.show_error(error.to_string());
+                }
+            }
+            Err(error) => {
+                // Lleva el cursor al punto del error.
+                let offset = Buffer::from_text(&source).position_to_char(Position::new(
+                    error.line.saturating_sub(1),
+                    error.column.saturating_sub(1),
+                ));
+                document.editor.set_cursor(range.start + offset, false);
+                self.show_error(error.to_string());
+            }
+        }
+    }
+
+    /// Cambia mayúsculas/minúsculas de la selección y la mantiene seleccionada.
+    fn change_selection_case(&mut self, case: Case) {
+        let Some(document) = self.workspace.active_mut() else {
+            return;
+        };
+        let Some(selected) = document.editor.selected_text() else {
+            self.show_info("Selecciona primero el texto".to_owned());
+            return;
+        };
+        let range = document.editor.selection().range();
+        let converted = change_case(&selected, case);
+        let length = converted.chars().count();
+        if let Err(error) = document
+            .editor
+            .replace_ranges(&[(range.clone(), converted)])
+        {
+            self.show_error(error.to_string());
+            return;
+        }
+        document
+            .editor
+            .set_selection(Selection::new(range.start, range.start + length));
+    }
+
+    pub(super) fn toggle_preview(&mut self) {
+        let Some(document) = self.workspace.active() else {
+            return;
+        };
+        let id = document.id();
+        if self.previews.remove(&id) {
+            return;
+        }
+        if document.language() == Language::Markdown {
+            self.previews.insert(id);
+        } else {
+            self.show_info("La vista previa es para documentos Markdown".to_owned());
         }
     }
 
@@ -478,6 +806,21 @@ fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
         command
     };
     command.spawn().map(|_| ())
+}
+
+/// Abre un enlace de la vista previa con la aplicación predeterminada del sistema.
+pub fn open_url(url: &str) -> std::io::Result<()> {
+    use std::process::Command;
+    let mut command = if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", ""]);
+        command
+    } else {
+        Command::new("xdg-open")
+    };
+    command.arg(url).spawn().map(|_| ())
 }
 
 #[cfg(test)]

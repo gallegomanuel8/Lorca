@@ -66,6 +66,9 @@ mensaje en español.
     vecinos (el crate `regex` no tiene lookaround).
   - `replacement()` / `replace_all()` expanden `$1`, `${n}` y `\1` (`regex_template`).
   - `next_match` / `previous_match` / `match_index` trabajan sobre rangos ordenados.
+- `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
+  (sqlformat), `change_case`, `markdown_to_html` (pulldown-cmark; para exportar). La vista
+  previa en pantalla usa el widget `markdown` de iced (que también usa pulldown-cmark).
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje, `DiskStamp`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
@@ -125,6 +128,14 @@ mensaje en español.
     (`menu_items`, `handle_context`). Textos de atajos por plataforma en
     `shortcut_labels.rs`.
   - Cerrar varias pestañas usa `close_queue` con `Then::CloseAndContinue`.
+  - Fase 4: `ViewOptions` (espacios, finales de línea, guías) llega al widget desde
+    `Config`; las marcas se dibujan con quads (exactas en la rejilla) y las etiquetas
+    LF/CRLF con texto. Los menús de la barra de estado usan `click_area` y los destinos
+    `MenuTarget::{Encoding, LineEnding, View}`. Formatear/mayúsculas usan
+    `replace_ranges` (una transacción). La vista previa (`previews`, `preview_cache` por
+    revisión) se muestra junto al editor en `editor_for`.
+  - Atajos y teclado en macOS: el editor no escribe nunca con ⌘ pulsado (⌥⌘L daría «¬») y
+    solo trata ⌘C/X/V/A sin Mayús (⇧⌘V es la vista previa).
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)
@@ -136,6 +147,8 @@ mensaje en español.
   (crate `muda`) que enrute «Salir» por `Message::CloseRequested`.
 - Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
 - El historial de deshacer no se conserva entre sesiones.
+- La vista previa de Markdown no sincroniza el desplazamiento con el editor ni se guarda en
+  la sesión.
 - La búsqueda trabaja sobre una copia `String` del documento y se recalcula al editar
   (rápido gracias a la caché, pero no incremental).
 - Los resultados de «Buscar todo» son una foto: si el documento cambia, el clic lleva a la

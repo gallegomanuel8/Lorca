@@ -72,6 +72,19 @@ gestión de documentos en pestañas.
   cursor y desplazamiento, los separadores se arrastran y la división se recuerda entre
   sesiones.
 
+**Fase 4 completada:**
+
+- **Caracteres invisibles**: espacios (·), tabuladores (→) y etiquetas de fin de línea
+  (LF/CRLF) como en Notepad++; **guías de indentación**. Se activan con «¶» en la barra de
+  estado y se recuerdan en `config.toml`.
+- **Finales de línea**: clic en «LF/CRLF» de la barra de estado para convertir al guardar.
+- **Codificaciones**: clic en «UTF-8» para guardar con otra codificación (UTF-8, UTF-8 con
+  BOM, UTF-16 LE/BE, Windows-1252) o reabrir el archivo interpretándolo con otra.
+- **Formatear** JSON (conserva el orden de las claves) y SQL, del documento o de la
+  selección; **minificar JSON**. Si el JSON no es válido, el cursor va al error.
+- **MAYÚSCULAS / minúsculas / Tipo Título** de la selección.
+- **Vista previa de Markdown** al lado del editor, actualizada en vivo (enlaces clicables).
+
 ### Datos de usuario
 
 | Sistema | Carpeta |
@@ -141,8 +154,8 @@ Workspace de Cargo:
    coincidencias, siguiente/anterior, reemplazar todo, buscar todo con panel de
    resultados, marcar y marcadores de línea; ir a línea.
    - **3.5** ✅: menú contextual, selección de varias pestañas y pantalla dividida (2–4).
-4. **Formato**: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
-   codificaciones, preview de Markdown en panel dividido, formatear SQL y JSON.
+4. **Formato** ✅: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
+   codificaciones, vista previa de Markdown, formatear SQL y JSON, mayúsculas/minúsculas.
 5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta,
    reordenar pestañas arrastrando, recarga si el archivo cambia en disco.
 6. **Avanzado**: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),

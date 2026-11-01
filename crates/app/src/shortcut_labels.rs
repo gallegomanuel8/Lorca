@@ -22,6 +22,10 @@ label!(BOOKMARK, "⌘F2", "Ctrl+F2");
 label!(GOTO, "⌃G", "Ctrl+G");
 label!(CLOSE, "⌘W", "Ctrl+W");
 label!(SPLIT, "⌘\\", "Ctrl+\\");
+label!(FORMAT, "⌥⌘L", "Ctrl+Alt+L");
+label!(UPPER, "⇧⌘U", "Ctrl+Mayús+U");
+label!(LOWER, "⌘U", "Ctrl+U");
+label!(PREVIEW, "⇧⌘V", "Ctrl+Mayús+V");
 
 /// Texto de «mostrar el archivo» en el gestor de archivos del sistema.
 pub const REVEAL: &str = if cfg!(target_os = "macos") {

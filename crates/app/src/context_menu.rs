@@ -7,6 +7,8 @@ use iced::widget::{
     button, column, container, mouse_area, opaque, pin, row, rule, space, stack, text,
 };
 use iced::{Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme, Vector};
+use lorca_core::{LineEnding, TextEncoding};
+use lorca_formats::Case;
 use lorca_workspace::DocumentId;
 
 use crate::app::Message;
@@ -14,6 +16,7 @@ use crate::app::Message;
 const MENU_WIDTH: f32 = 250.0;
 const ITEM_HEIGHT: f32 = 26.0;
 const SEPARATOR_HEIGHT: f32 = 9.0;
+const HEADER_HEIGHT: f32 = 22.0;
 const MENU_PADDING: f32 = 5.0;
 
 /// Sobre qué se abrió el menú.
@@ -21,6 +24,12 @@ const MENU_PADDING: f32 = 5.0;
 pub enum MenuTarget {
     Text(DocumentId),
     Tab(DocumentId),
+    /// «UTF-8» de la barra de estado.
+    Encoding(DocumentId),
+    /// «LF/CRLF» de la barra de estado.
+    LineEnding(DocumentId),
+    /// «¶» de la barra de estado: caracteres invisibles y guías.
+    View,
 }
 
 /// Menú abierto: posición (en la ventana) y objetivo.
@@ -54,6 +63,16 @@ pub enum ContextAction {
     Reveal(DocumentId),
     Split,
     Unsplit,
+    SetLineEnding(LineEnding),
+    SaveWithEncoding(TextEncoding),
+    ReopenWithEncoding(TextEncoding),
+    ToggleWhitespace,
+    ToggleLineEndings,
+    ToggleIndentGuides,
+    FormatDocument,
+    MinifyJson,
+    ChangeCase(Case),
+    TogglePreview,
 }
 
 /// Elemento de un menú.
@@ -65,6 +84,8 @@ pub enum MenuItem {
         shortcut: &'static str,
         action: Option<ContextAction>,
     },
+    /// Título de una sección (no se puede pulsar).
+    Header(String),
     Separator,
 }
 
@@ -80,6 +101,12 @@ impl MenuItem {
             action,
         }
     }
+
+    /// Opción con marca de verificación delante si `checked`.
+    pub fn check(label: &str, checked: bool, action: Option<ContextAction>) -> Self {
+        let mark = if checked { "✓  " } else { "     " };
+        Self::new(format!("{mark}{label}"), "", action)
+    }
 }
 
 /// Altura que ocupará un menú con estos elementos.
@@ -88,6 +115,7 @@ pub fn menu_height(items: &[MenuItem]) -> f32 {
         .iter()
         .map(|item| match item {
             MenuItem::Action { .. } => ITEM_HEIGHT,
+            MenuItem::Header(_) => HEADER_HEIGHT,
             MenuItem::Separator => SEPARATOR_HEIGHT,
         })
         .sum();
@@ -115,6 +143,13 @@ pub fn layer<'a>(
     let position = clamp_position(menu.position, menu_height(&items), window);
     let entries = items.into_iter().map(|item| match item {
         MenuItem::Separator => container(rule::horizontal(1)).padding([4, 6]).into(),
+        MenuItem::Header(label) => container(text(label).size(11))
+            .height(HEADER_HEIGHT)
+            .padding([4, 10])
+            .style(|theme: &Theme| {
+                container::Style::default().color(theme.extended_palette().background.strong.color)
+            })
+            .into(),
         MenuItem::Action {
             label,
             shortcut,
@@ -182,13 +217,27 @@ pub fn context_area<'a>(
 ) -> Element<'a, Message> {
     Element::new(ContextArea {
         content: content.into(),
-        on_right_click: Box::new(on_right_click),
+        button: mouse::Button::Right,
+        on_click: Box::new(on_right_click),
+    })
+}
+
+/// Como [`context_area`], pero con el clic izquierdo (p. ej. para la barra de estado).
+pub fn click_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_click: impl Fn(Point) -> Message + 'a,
+) -> Element<'a, Message> {
+    Element::new(ContextArea {
+        content: content.into(),
+        button: mouse::Button::Left,
+        on_click: Box::new(on_click),
     })
 }
 
 struct ContextArea<'a> {
     content: Element<'a, Message>,
-    on_right_click: Box<dyn Fn(Point) -> Message + 'a>,
+    button: mouse::Button,
+    on_click: Box<dyn Fn(Point) -> Message + 'a>,
 }
 
 impl Widget<Message, Theme, Renderer> for ContextArea<'_> {
@@ -270,10 +319,11 @@ impl Widget<Message, Theme, Renderer> for ContextArea<'_> {
         if shell.is_event_captured() {
             return;
         }
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) = event
+        if let Event::Mouse(mouse::Event::ButtonPressed(button)) = event
+            && *button == self.button
             && let Some(position) = cursor.position_over(layout.bounds())
         {
-            shell.publish((self.on_right_click)(position));
+            shell.publish((self.on_click)(position));
             shell.capture_event();
         }
     }
@@ -286,13 +336,23 @@ impl Widget<Message, Theme, Renderer> for ContextArea<'_> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        tree.children
+        let inner = tree
+            .children
             .first()
             .map_or(mouse::Interaction::default(), |child| {
                 self.content
                     .as_widget()
                     .mouse_interaction(child, layout, cursor, viewport, renderer)
-            })
+            });
+        // Las zonas de clic izquierdo (barra de estado) muestran la mano al pasar.
+        if self.button == mouse::Button::Left
+            && inner == mouse::Interaction::default()
+            && cursor.is_over(layout.bounds())
+        {
+            mouse::Interaction::Pointer
+        } else {
+            inner
+        }
     }
 
     fn overlay<'b>(
