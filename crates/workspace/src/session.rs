@@ -132,7 +132,7 @@ impl SessionStore {
             let id = document.id();
             let backup = if document.is_modified() {
                 let name = format!("doc-{}.txt", id.get());
-                let revision = document.editor.revision();
+                let revision = document.editor.version();
                 let path = backups_dir.join(&name);
                 if self.written.get(&id) != Some(&revision) || !path.exists() {
                     write_atomic(&path, document.editor.text().as_bytes())?;
@@ -492,6 +492,22 @@ mod tests {
         let doc = restored.active().unwrap();
         assert_eq!(doc.language(), Language::Sql);
         assert!(doc.is_language_manual());
+    }
+
+    #[test]
+    fn backup_follows_typing_within_the_same_word() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new();
+        ws.new_document();
+        ws.active_mut().unwrap().editor.insert_text("a").unwrap();
+        let mut store = SessionStore::new(dir.path().to_owned());
+        store.save(&ws, scroll_of).unwrap();
+        // «b» se agrupa con «a» en la misma transacción de deshacer.
+        ws.active_mut().unwrap().editor.insert_text("b").unwrap();
+        store.save(&ws, scroll_of).unwrap();
+        let session = store.load().unwrap().unwrap();
+        let name = session.documents[0].backup.clone().unwrap();
+        assert_eq!(store.read_backup(&name).unwrap(), "ab");
     }
 
     #[test]

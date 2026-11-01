@@ -4,8 +4,10 @@
 
 use std::path::Path;
 
-use iced::widget::{column, container, markdown, pane_grid, row, rule, scrollable, text};
-use iced::{Element, Length, Point, Task, Theme};
+use iced::widget::{
+    button, column, container, markdown, pane_grid, row, rule, scrollable, space, text,
+};
+use iced::{Alignment, Element, Length, Point, Task, Theme};
 use lorca_core::{Buffer, LineEnding, Position, Selection, TextEncoding, TextFormat};
 use lorca_formats::{Case, change_case, format_json, format_sql, minify_json};
 use lorca_search::match_index;
@@ -134,12 +136,26 @@ impl Lorca {
         let (_, content) = self.preview_cache.get(&id)?;
         let settings = markdown::Settings::with_text_size(15, self.theme());
         let rendered = markdown::view(content.items(), settings).map(Message::OpenUrl);
-        Some(
-            scrollable(container(rendered).padding([16, 22]).width(Length::Fill))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        )
+        let header = row![
+            text("Vista previa").size(12),
+            space::horizontal(),
+            button(text("Exportar PDF").size(12))
+                .padding([3, 10])
+                .style(button::secondary)
+                .on_press(Message::ExportPdf(id)),
+        ]
+        .align_y(Alignment::Center);
+        let header = container(header)
+            .padding([4, 10])
+            .width(Length::Fill)
+            .style(|theme: &Theme| {
+                container::Style::default()
+                    .background(theme.extended_palette().background.weakest.color)
+            });
+        let body = scrollable(container(rendered).padding([16, 22]).width(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        Some(column![header, body].width(Length::Fill).into())
     }
 
     /// Vuelve a analizar el Markdown de las vistas previas visibles que hayan cambiado.
@@ -155,7 +171,7 @@ impl Lorca {
             let Some(document) = self.workspace.document(id) else {
                 continue;
             };
-            let revision = document.editor.revision();
+            let revision = document.editor.version();
             if self
                 .preview_cache
                 .get(&id)
@@ -337,6 +353,11 @@ impl Lorca {
                         label,
                         keys::PREVIEW,
                         Some(ContextAction::TogglePreview),
+                    ));
+                    items.push(MenuItem::new(
+                        "Exportar a PDF…",
+                        "",
+                        Some(ContextAction::ExportPdf(id)),
                     ));
                 }
                 items.extend([
@@ -649,6 +670,7 @@ impl Lorca {
                 self.toggle_preview();
                 Task::none()
             }
+            ContextAction::ExportPdf(id) => self.update(Message::ExportPdf(id)),
         }
     }
 

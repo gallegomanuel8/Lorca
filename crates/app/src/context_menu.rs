@@ -73,6 +73,7 @@ pub enum ContextAction {
     MinifyJson,
     ChangeCase(Case),
     TogglePreview,
+    ExportPdf(DocumentId),
 }
 
 /// Elemento de un menú.

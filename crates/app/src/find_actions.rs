@@ -76,7 +76,7 @@ impl Lorca {
     pub(super) fn find_matches(&mut self) -> Option<Arc<Vec<Range<usize>>>> {
         let query = self.find_query()?;
         let document = self.workspace.active()?;
-        let (id, revision) = (document.id(), document.editor.revision());
+        let (id, revision) = (document.id(), document.editor.version());
         let scope = self.find.scope.clone();
         if let Some(cache) = &self.find_cache
             && cache.is_for(id, revision, &self.find.pattern, self.find.options, &scope)
@@ -112,7 +112,7 @@ impl Lorca {
         let Some(document) = self.workspace.active() else {
             return;
         };
-        let (id, revision) = (document.id(), document.editor.revision());
+        let (id, revision) = (document.id(), document.editor.version());
         let Some(query) = self.marks.get(&id) else {
             self.mark_cache.remove(&id);
             return;
@@ -454,7 +454,7 @@ impl Lorca {
             groups.push(ResultGroup {
                 id,
                 name: document.display_name(),
-                revision: document.editor.revision(),
+                revision: document.editor.version(),
                 hits: build_hits(document.editor.buffer(), &matches),
             });
         }
@@ -485,7 +485,7 @@ impl Lorca {
         let Some(document) = self.workspace.active_mut() else {
             return;
         };
-        if document.editor.revision() == revision {
+        if document.editor.version() == revision {
             document
                 .editor
                 .set_selection(Selection::new(hit.range.start, hit.range.end));

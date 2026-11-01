@@ -14,6 +14,7 @@ use iced::{
     Alignment, Element, Length, Point, Size, Subscription, Task, Theme, event, keyboard, system,
     window,
 };
+use lorca_formats::{PdfFonts, markdown_to_pdf};
 use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
@@ -91,6 +92,10 @@ pub enum Message {
     /// Abre el menú de la barra de estado («UTF-8», «LF», «¶»).
     StatusMenu(MenuTarget, Point),
     OpenUrl(String),
+    /// Exportar la vista previa de un Markdown a PDF: pedir ruta, generar y avisar.
+    ExportPdf(DocumentId),
+    ExportPdfPath(DocumentId, Option<PathBuf>),
+    PdfExported(Result<PathBuf, String>),
     PaneClicked(pane_grid::Pane),
     PaneResized(pane_grid::ResizeEvent),
     ToggleSplit,
@@ -399,6 +404,50 @@ impl Lorca {
                 self.context_menu = Some(ContextMenu { position, target });
                 Task::none()
             }
+            Message::ExportPdf(id) => {
+                if self.dialog_open {
+                    return Task::none();
+                }
+                let Some(document) = self.workspace.document(id) else {
+                    return Task::none();
+                };
+                let name = document.display_name();
+                let stem = name
+                    .rsplit_once('.')
+                    .map_or(name.as_str(), |(stem, _)| stem);
+                let directory = document.path().and_then(|p| p.parent()).map(PathBuf::from);
+                self.dialog_open = true;
+                Task::perform(
+                    dialogs::pick_pdf_path(format!("{stem}.pdf"), directory),
+                    move |path| Message::ExportPdfPath(id, path),
+                )
+            }
+            Message::ExportPdfPath(id, path) => {
+                self.dialog_open = false;
+                let (Some(path), Some(document)) = (path, self.workspace.document(id)) else {
+                    return Task::none();
+                };
+                let text = document.editor.text();
+                let title = document.display_name();
+                self.show_info("Generando el PDF…".to_owned());
+                Task::perform(
+                    async move {
+                        let fonts = PdfFonts::system().map_err(|e| e.to_string())?;
+                        let pdf =
+                            markdown_to_pdf(&text, &title, &fonts).map_err(|e| e.to_string())?;
+                        std::fs::write(&path, pdf).map_err(|e| e.to_string())?;
+                        Ok(path)
+                    },
+                    Message::PdfExported,
+                )
+            }
+            Message::PdfExported(result) => {
+                match result {
+                    Ok(path) => self.show_info(format!("PDF guardado en «{}»", path.display())),
+                    Err(error) => self.show_error(format!("No se pudo exportar el PDF: {error}")),
+                }
+                Task::none()
+            }
             Message::OpenUrl(url) => {
                 if let Err(error) = panes::open_url(&url) {
                     self.show_error(format!("No se pudo abrir «{url}»: {error}"));
@@ -638,7 +687,7 @@ impl Lorca {
 
     fn schedule_highlight_for(&mut self, id: DocumentId) -> Option<Task<Message>> {
         let document = self.workspace.document(id)?;
-        let revision = document.editor.revision();
+        let revision = document.editor.version();
         let language = document.language();
         let state = self.highlights.entry(id).or_default();
         if state.pending || state.done == Some((revision, language)) {
@@ -1043,6 +1092,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::WelcomeChoose(_)
             | Message::WelcomeDone
             | Message::Highlighted { .. }
+            | Message::PdfExported(_)
             | Message::ModifiersChanged(_)
             | Message::WindowResized(_)
             | Message::CloseContextMenu

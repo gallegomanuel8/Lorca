@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+genpdf = "0.2.0"
 pulldown-cmark = "0.13.6"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

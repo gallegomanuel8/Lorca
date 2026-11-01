@@ -37,6 +37,18 @@ pub async fn pick_save_path(file_name: String, directory: Option<PathBuf>) -> Op
     dialog.save_file().await.map(|f| f.path().to_path_buf())
 }
 
+/// Pide dónde exportar un PDF, proponiendo `file_name`.
+pub async fn pick_pdf_path(file_name: String, directory: Option<PathBuf>) -> Option<PathBuf> {
+    let mut dialog = AsyncFileDialog::new()
+        .set_title("Exportar a PDF")
+        .set_file_name(file_name)
+        .add_filter("PDF", &["pdf"]);
+    if let Some(directory) = directory {
+        dialog = dialog.set_directory(directory);
+    }
+    dialog.save_file().await.map(|f| f.path().to_path_buf())
+}
+
 /// Pregunta si se guardan los cambios del documento `name`.
 pub async fn confirm_save(name: String) -> SaveChoice {
     // En Windows los botones personalizados requieren common-controls v6 y un manifiesto;

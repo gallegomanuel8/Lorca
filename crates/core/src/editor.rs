@@ -1,6 +1,7 @@
 //! Estado de edición de un documento: buffer, selección e historial.
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     Bookmarks, Buffer, CoreError, Edit, EditKind, History, LineEnding, Position, Selection,
@@ -30,7 +31,7 @@ pub enum Motion {
 ///
 /// Cada operación que modifica el texto se registra en el historial como una
 /// transacción, de modo que deshacer/rehacer restaura texto y selección.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EditorState {
     buffer: Buffer,
     selection: Selection,
@@ -38,6 +39,28 @@ pub struct EditorState {
     /// Columna que se intenta mantener en movimientos verticales consecutivos.
     preferred_column: Option<usize>,
     bookmarks: Bookmarks,
+    /// Versión del contenido; ver [`EditorState::version`].
+    version: u64,
+}
+
+impl Default for EditorState {
+    fn default() -> Self {
+        Self {
+            buffer: Buffer::default(),
+            selection: Selection::default(),
+            history: History::default(),
+            preferred_column: None,
+            bookmarks: Bookmarks::default(),
+            version: next_version(),
+        }
+    }
+}
+
+/// Contador global de versiones: así dos estados distintos nunca comparten versión.
+static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
+
+fn next_version() -> u64 {
+    NEXT_VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
 impl EditorState {
@@ -70,9 +93,20 @@ impl EditorState {
         self.buffer.char_to_position(self.selection.head)
     }
 
-    /// Identificador del estado del texto; ver [`History::revision`].
+    /// Identificador del estado del texto según el historial; ver [`History::revision`].
+    ///
+    /// Sirve para saber si el texto coincide con lo guardado (deshacer hasta ahí lo
+    /// recupera), pero **no** cambia con cada pulsación: las teclas agrupadas en una
+    /// transacción comparten revisión. Para cachés, usa [`EditorState::version`].
     pub fn revision(&self) -> u64 {
         self.history.revision()
+    }
+
+    /// Versión del contenido: cambia con cada modificación del texto (incluidas las que
+    /// se agrupan en la misma transacción, deshacer y rehacer) y es única entre todos los
+    /// estados. Clave adecuada para cachés de resaltado, búsqueda, vistas previas…
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     pub fn can_undo(&self) -> bool {
@@ -308,6 +342,7 @@ impl EditorState {
         self.selection = transaction
             .selection_before
             .clamped(self.buffer.len_chars());
+        self.version = next_version();
         Ok(true)
     }
 
@@ -321,6 +356,7 @@ impl EditorState {
             apply_edit(&mut self.buffer, &mut self.bookmarks, edit)?;
         }
         self.selection = transaction.selection_after.clamped(self.buffer.len_chars());
+        self.version = next_version();
         Ok(true)
     }
 
@@ -501,6 +537,7 @@ impl EditorState {
         self.selection = after;
         self.preferred_column = None;
         self.history.record(edits, before, after, kind);
+        self.version = next_version();
         Ok(())
     }
 
@@ -890,6 +927,33 @@ mod tests {
         assert_ne!(s.revision(), saved);
         s.undo().unwrap();
         assert_eq!(s.revision(), saved);
+    }
+
+    #[test]
+    fn version_changes_on_every_edit_even_when_grouped() {
+        let mut s = EditorState::new();
+        let initial = s.version();
+        s.insert_text("a").unwrap();
+        let after_a = s.version();
+        s.insert_text("b").unwrap();
+        // Misma transacción (misma revisión) pero distinta versión.
+        assert_ne!(s.version(), after_a);
+        assert_ne!(after_a, initial);
+        let before_undo = s.version();
+        s.undo().unwrap();
+        assert_ne!(s.version(), before_undo);
+        // Mover el cursor no cambia el contenido.
+        let version = s.version();
+        s.move_cursor(Motion::Right, false);
+        assert_eq!(s.version(), version);
+    }
+
+    #[test]
+    fn versions_are_unique_between_states() {
+        assert_ne!(
+            EditorState::from_text("a").version(),
+            EditorState::from_text("a").version()
+        );
     }
 
     #[test]
