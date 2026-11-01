@@ -19,6 +19,9 @@ pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Op
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
         }
+        Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+            Some(Message::MouseReleased)
+        }
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
             physical_key,

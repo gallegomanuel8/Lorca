@@ -86,6 +86,11 @@ pub enum Message {
     /// Clic en una pestaña (con Cmd/Ctrl o Mayús, selecciona).
     TabPressed(DocumentId),
     TabContextMenu(DocumentId, Point),
+    /// El ratón entra en una pestaña (resaltado y arrastre).
+    TabHovered(DocumentId),
+    TabUnhovered(DocumentId),
+    /// Botón izquierdo soltado en cualquier sitio: termina el arrastre de pestañas.
+    MouseReleased,
     Context(ContextAction),
     CloseContextMenu,
     Paste(Option<String>),
@@ -188,6 +193,9 @@ pub struct Lorca {
     previews: HashSet<DocumentId>,
     preview_cache: HashMap<DocumentId, (u64, iced::widget::markdown::Content)>,
     window_size: Size,
+    hovered_tab: Option<DocumentId>,
+    /// Pestaña que se está arrastrando para reordenarla.
+    dragging_tab: Option<DocumentId>,
 }
 
 impl Lorca {
@@ -262,6 +270,8 @@ impl Lorca {
             previews: HashSet::new(),
             preview_cache: HashMap::new(),
             window_size: WINDOW_SIZE,
+            hovered_tab: None,
+            dragging_tab: None,
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -389,6 +399,27 @@ impl Lorca {
             }
             Message::TabPressed(id) => {
                 self.tab_pressed(id);
+                self.dragging_tab = Some(id);
+                Task::none()
+            }
+            Message::TabHovered(id) => {
+                self.hovered_tab = Some(id);
+                if let Some(dragged) = self.dragging_tab
+                    && dragged != id
+                    && let Some(index) = self.workspace.tabs().iter().position(|t| *t == id)
+                {
+                    self.workspace.move_tab(dragged, index);
+                }
+                Task::none()
+            }
+            Message::TabUnhovered(id) => {
+                if self.hovered_tab == Some(id) {
+                    self.hovered_tab = None;
+                }
+                Task::none()
+            }
+            Message::MouseReleased => {
+                self.dragging_tab = None;
                 Task::none()
             }
             Message::TabContextMenu(id, position) => {
@@ -942,14 +973,21 @@ impl Lorca {
                 .into(),
         );
 
-        let tab = button(row(content).spacing(6).align_y(Alignment::Center))
+        let is_hovered = self.hovered_tab == Some(id);
+        let is_dragged = self.dragging_tab == Some(id);
+        // Contenedor (no botón) para recibir la pulsación al momento y poder arrastrar.
+        let tab = container(row(content).spacing(6).align_y(Alignment::Center))
             .padding([5, 10])
+            .style(move |theme: &Theme| {
+                tab_style(theme, is_active, is_selected, is_hovered || is_dragged)
+            });
+        let tab = mouse_area(tab)
             .on_press(Message::TabPressed(id))
-            .style(move |theme: &Theme, status| tab_style(theme, status, is_active, is_selected));
-        let tab = context_area(
-            mouse_area(tab).on_middle_press(Message::CloseTab(id)),
-            move |position| Message::TabContextMenu(id, position),
-        );
+            .on_middle_press(Message::CloseTab(id))
+            .on_enter(Message::TabHovered(id))
+            .on_exit(Message::TabUnhovered(id))
+            .interaction(iced::mouse::Interaction::Pointer);
+        let tab = context_area(tab, move |position| Message::TabContextMenu(id, position));
 
         match document.path() {
             Some(path) => tooltip(
@@ -1041,35 +1079,29 @@ impl Lorca {
 
 fn tab_style(
     theme: &Theme,
-    status: button::Status,
     is_active: bool,
     is_selected: bool,
-) -> button::Style {
+    is_hovered: bool,
+) -> container::Style {
     let palette = theme.extended_palette();
-    if is_selected {
-        return button::Style {
-            background: Some(palette.primary.weak.color.into()),
-            text_color: palette.primary.weak.text,
-            ..button::Style::default()
-        };
-    }
-    let background = if is_active {
-        palette.background.base.color
-    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        palette.background.weak.color
+    let (background, text_color) = if is_selected {
+        (palette.primary.weak.color, palette.primary.weak.text)
+    } else if is_active {
+        (palette.background.base.color, palette.background.base.text)
+    } else if is_hovered {
+        (
+            palette.background.weak.color,
+            palette.background.strong.text,
+        )
     } else {
-        palette.background.weakest.color
+        (
+            palette.background.weakest.color,
+            palette.background.strong.text,
+        )
     };
-    let text_color = if is_active {
-        palette.background.base.text
-    } else {
-        palette.background.strong.text
-    };
-    button::Style {
-        background: Some(background.into()),
-        text_color,
-        ..button::Style::default()
-    }
+    container::Style::default()
+        .background(background)
+        .color(text_color)
 }
 
 /// Tema de iced para un modo; en automático sigue al sistema (claro si no lo indica).
@@ -1094,6 +1126,8 @@ fn affects_session(message: &Message) -> bool {
             | Message::Highlighted { .. }
             | Message::PdfExported(_)
             | Message::ModifiersChanged(_)
+            | Message::TabUnhovered(_)
+            | Message::MouseReleased
             | Message::WindowResized(_)
             | Message::CloseContextMenu
     )

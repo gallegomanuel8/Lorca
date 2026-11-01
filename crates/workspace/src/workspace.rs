@@ -176,6 +176,16 @@ impl Workspace {
         }
     }
 
+    /// Mueve una pestaña a la posición `index` (ajustada al número de pestañas).
+    pub fn move_tab(&mut self, id: DocumentId, index: usize) {
+        let Some(from) = self.tabs.iter().position(|t| *t == id) else {
+            return;
+        };
+        let tab = self.tabs.remove(from);
+        let index = index.min(self.tabs.len());
+        self.tabs.insert(index, tab);
+    }
+
     // --- Selección múltiple -----------------------------------------------------------
 
     /// Pestañas seleccionadas, en el orden en que se eligieron.
@@ -579,6 +589,21 @@ mod tests {
         ws.toggle_selection(a);
         ws.close(a);
         assert_eq!(ws.selected(), &[b]);
+    }
+
+    #[test]
+    fn moving_tabs() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        let c = ws.new_document();
+        ws.move_tab(a, 2);
+        assert_eq!(ws.tabs(), &[b, c, a]);
+        ws.move_tab(a, 0);
+        assert_eq!(ws.tabs(), &[a, b, c]);
+        ws.move_tab(b, 99);
+        assert_eq!(ws.tabs(), &[a, c, b]);
+        assert_eq!(ws.active_id(), Some(c));
     }
 
     #[test]
