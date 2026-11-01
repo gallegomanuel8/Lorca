@@ -9,6 +9,9 @@ use crate::{Document, DocumentId, WorkspaceError};
 
 /// Documentos abiertos y estado de las pestañas.
 ///
+/// Máximo de documentos en pantalla dividida.
+pub const MAX_PANES: usize = 4;
+
 /// Invariantes: cada id de `tabs` existe en `documents` y viceversa; `active`, si existe,
 /// está en `tabs`; `active` es `None` solo cuando no hay pestañas.
 #[derive(Debug, Default)]
@@ -16,6 +19,11 @@ pub struct Workspace {
     documents: HashMap<DocumentId, Document>,
     tabs: Vec<DocumentId>,
     active: Option<DocumentId>,
+    /// Pestañas seleccionadas con Cmd/Ctrl+clic, en el orden en que se eligieron.
+    selected: Vec<DocumentId>,
+    /// Documentos mostrados en pantalla dividida, de izquierda a derecha (vacío = sin
+    /// dividir; si no, entre 2 y [`MAX_PANES`]). El activo siempre es uno de ellos.
+    panes: Vec<DocumentId>,
     next_id: u64,
 }
 
@@ -99,7 +107,7 @@ impl Workspace {
     pub fn open_loaded(&mut self, path: &Path, loaded: LoadedText) -> DocumentId {
         let path = normalize_path(path);
         if let Some(id) = self.find_by_path(&path) {
-            self.active = Some(id);
+            self.set_active(id);
             return id;
         }
         if let [only] = self.tabs[..]
@@ -117,7 +125,7 @@ impl Workspace {
     /// Lee un archivo de disco y lo abre (ver [`Workspace::open_loaded`]).
     pub fn open_file(&mut self, path: &Path) -> Result<DocumentId, WorkspaceError> {
         if let Some(id) = self.find_by_path(path) {
-            self.active = Some(id);
+            self.set_active(id);
             return Ok(id);
         }
         let bytes = std::fs::read(path).map_err(|source| WorkspaceError::Read {
@@ -134,20 +142,121 @@ impl Workspace {
     pub fn close(&mut self, id: DocumentId) -> Option<Document> {
         let index = self.tabs.iter().position(|t| *t == id)?;
         self.tabs.remove(index);
-        if self.active == Some(id) {
+        self.selected.retain(|s| *s != id);
+        if let Some(pane) = self.panes.iter().position(|p| *p == id) {
+            self.panes.remove(pane);
+            if self.active == Some(id) {
+                self.active = self
+                    .panes
+                    .get(pane.min(self.panes.len().saturating_sub(1)))
+                    .copied();
+            }
+            if self.panes.len() < 2 {
+                self.panes.clear();
+            }
+        }
+        if self.active == Some(id) || self.active.is_none() {
             self.active = self.tabs.get(index).or_else(|| self.tabs.last()).copied();
         }
         self.documents.remove(&id)
     }
 
     /// Activa una pestaña. Devuelve `false` si el documento no existe.
+    ///
+    /// Con la pantalla dividida, si el documento no está en ningún panel, sustituye al del
+    /// panel activo.
     pub fn activate(&mut self, id: DocumentId) -> bool {
         if self.documents.contains_key(&id) {
-            self.active = Some(id);
+            self.set_active(id);
             true
         } else {
             false
         }
+    }
+
+    // --- Selección múltiple -----------------------------------------------------------
+
+    /// Pestañas seleccionadas, en el orden en que se eligieron.
+    pub fn selected(&self) -> &[DocumentId] {
+        &self.selected
+    }
+
+    pub fn is_selected(&self, id: DocumentId) -> bool {
+        self.selected.contains(&id)
+    }
+
+    /// Añade o quita una pestaña de la selección (Cmd/Ctrl+clic). Al empezar una
+    /// selección, la pestaña activa entra primero.
+    pub fn toggle_selection(&mut self, id: DocumentId) {
+        if !self.documents.contains_key(&id) {
+            return;
+        }
+        if self.selected.is_empty()
+            && let Some(active) = self.active
+            && active != id
+        {
+            self.selected.push(active);
+        }
+        if let Some(position) = self.selected.iter().position(|s| *s == id) {
+            self.selected.remove(position);
+        } else {
+            self.selected.push(id);
+        }
+    }
+
+    /// Selecciona las pestañas entre la última elegida (o la activa) e `id` (Mayús+clic).
+    pub fn select_range(&mut self, id: DocumentId) {
+        let anchor = self.selected.last().copied().or(self.active);
+        let position = |target| self.tabs.iter().position(|t| *t == target);
+        let (Some(from), Some(to)) = (anchor.and_then(position), position(id)) else {
+            return;
+        };
+        let (start, end) = if from <= to { (from, to) } else { (to, from) };
+        self.selected = self
+            .tabs
+            .get(start..=end)
+            .map(<[_]>::to_vec)
+            .unwrap_or_default();
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+    }
+
+    // --- Pantalla dividida ------------------------------------------------------------
+
+    /// Documentos en pantalla dividida (vacío si no está dividida).
+    pub fn panes(&self) -> &[DocumentId] {
+        &self.panes
+    }
+
+    pub fn is_split(&self) -> bool {
+        !self.panes.is_empty()
+    }
+
+    /// Divide la pantalla con los documentos indicados (los [`MAX_PANES`] primeros, sin
+    /// repetir). Necesita al menos dos. Limpia la selección.
+    pub fn split(&mut self, ids: &[DocumentId]) -> bool {
+        let mut panes: Vec<DocumentId> = Vec::with_capacity(MAX_PANES);
+        for id in ids {
+            if panes.len() < MAX_PANES && self.documents.contains_key(id) && !panes.contains(id) {
+                panes.push(*id);
+            }
+        }
+        if panes.len() < 2 {
+            return false;
+        }
+        if !self.active.is_some_and(|a| panes.contains(&a)) {
+            self.active = panes.first().copied();
+        }
+        self.panes = panes;
+        self.selected.clear();
+        true
+    }
+
+    /// Vuelve a una sola vista con el documento activo.
+    pub fn unsplit(&mut self) {
+        self.panes.clear();
     }
 
     /// Activa la pestaña siguiente (vuelve a la primera tras la última).
@@ -208,8 +317,22 @@ impl Workspace {
         let id = document.id();
         self.documents.insert(id, document);
         self.tabs.push(id);
-        self.active = Some(id);
+        self.set_active(id);
         id
+    }
+
+    /// Activa un documento; si la pantalla está dividida y no está a la vista, ocupa el
+    /// panel activo.
+    fn set_active(&mut self, id: DocumentId) {
+        if !self.panes.contains(&id)
+            && let Some(slot) = self
+                .active
+                .and_then(|active| self.panes.iter().position(|p| *p == active))
+            && let Some(pane) = self.panes.get_mut(slot)
+        {
+            *pane = id;
+        }
+        self.active = Some(id);
     }
 
     fn cycle(&mut self, step: isize) {
@@ -223,7 +346,9 @@ impl Workspace {
         } else {
             (index + len - 1) % len
         };
-        self.active = self.tabs.get(next).copied();
+        if let Some(id) = self.tabs.get(next).copied() {
+            self.set_active(id);
+        }
     }
 
     fn lowest_free_untitled_number(&self) -> u32 {
@@ -331,6 +456,92 @@ mod tests {
         ws.close(a);
         assert_eq!(ws.active_id(), None);
         assert!(ws.is_empty());
+    }
+
+    #[test]
+    fn ctrl_click_starts_selection_with_active_tab() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        let c = ws.new_document();
+        ws.activate(a);
+        ws.toggle_selection(c);
+        ws.toggle_selection(b);
+        assert_eq!(ws.selected(), &[a, c, b]);
+        ws.toggle_selection(c);
+        assert_eq!(ws.selected(), &[a, b]);
+        ws.clear_selection();
+        assert!(ws.selected().is_empty());
+    }
+
+    #[test]
+    fn shift_click_selects_range_in_tab_order() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        let c = ws.new_document();
+        let d = ws.new_document();
+        ws.activate(d);
+        ws.select_range(b);
+        assert_eq!(ws.selected(), &[b, c, d]);
+        assert!(ws.is_selected(c) && !ws.is_selected(a));
+    }
+
+    #[test]
+    fn split_uses_first_four_unique_and_needs_two() {
+        let mut ws = Workspace::new();
+        let ids: Vec<_> = (0..6).map(|_| ws.new_document()).collect();
+        assert!(!ws.split(&[ids[0]]));
+        assert!(!ws.is_split());
+        let wanted = [ids[5], ids[1], ids[1], ids[3], ids[0], ids[2]];
+        assert!(ws.split(&wanted));
+        assert_eq!(ws.panes(), &[ids[5], ids[1], ids[3], ids[0]]);
+        // El activo (el último creado) está en un panel y se conserva.
+        assert_eq!(ws.active_id(), Some(ids[5]));
+        ws.unsplit();
+        assert!(!ws.is_split());
+    }
+
+    #[test]
+    fn activating_hidden_tab_replaces_active_pane() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        let c = ws.new_document();
+        ws.split(&[a, b]);
+        ws.activate(b);
+        ws.activate(c);
+        assert_eq!(ws.panes(), &[a, c]);
+        assert_eq!(ws.active_id(), Some(c));
+        // Un documento nuevo también ocupa el panel activo.
+        let d = ws.new_document();
+        assert_eq!(ws.panes(), &[a, d]);
+    }
+
+    #[test]
+    fn closing_pane_document_activates_neighbor_and_unsplits_at_one() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        let c = ws.new_document();
+        ws.split(&[a, b, c]);
+        ws.activate(b);
+        ws.close(b);
+        assert_eq!(ws.panes(), &[a, c]);
+        assert_eq!(ws.active_id(), Some(c));
+        ws.close(a);
+        assert!(!ws.is_split());
+        assert_eq!(ws.active_id(), Some(c));
+    }
+
+    #[test]
+    fn closing_removes_from_selection() {
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        let b = ws.new_document();
+        ws.toggle_selection(a);
+        ws.close(a);
+        assert_eq!(ws.selected(), &[b]);
     }
 
     #[test]

@@ -25,6 +25,9 @@ pub struct Session {
     pub active: Option<usize>,
     #[serde(default)]
     pub documents: Vec<SessionDocument>,
+    /// Índices (en `documents`) de los paneles de la pantalla dividida.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub split: Vec<usize>,
 }
 
 /// Estado guardado de una pestaña.
@@ -117,6 +120,11 @@ impl SessionStore {
                 .active_id()
                 .and_then(|id| workspace.tabs().iter().position(|t| *t == id)),
             documents: Vec::with_capacity(workspace.len()),
+            split: workspace
+                .panes()
+                .iter()
+                .filter_map(|id| workspace.tabs().iter().position(|t| t == id))
+                .collect(),
         };
         let mut kept = HashSet::new();
 
@@ -212,6 +220,13 @@ impl Workspace {
             }
             ids.push(id);
         }
+
+        let panes: Vec<DocumentId> = session
+            .split
+            .iter()
+            .filter_map(|index| ids.get(*index).copied().flatten())
+            .collect();
+        self.split(&panes);
 
         // Si la pestaña activa no se pudo restaurar, se activa la última restaurada.
         let active = session
@@ -450,6 +465,24 @@ mod tests {
     }
 
     #[test]
+    fn split_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        ws.new_document();
+        let c = ws.new_document();
+        ws.split(&[c, a]);
+        let (restored, _) = save_and_restore(&ws, dir.path());
+        let names: Vec<_> = restored
+            .panes()
+            .iter()
+            .map(|id| restored.document(*id).unwrap().display_name())
+            .collect();
+        assert_eq!(names, ["Sin título 3", "Sin título 1"]);
+        assert_eq!(restored.active().unwrap().display_name(), "Sin título 3");
+    }
+
+    #[test]
     fn manual_language_survives_restart() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = Workspace::new();
@@ -508,6 +541,7 @@ mod tests {
         let session = Session {
             version: SESSION_VERSION,
             active: Some(0),
+            split: Vec::new(),
             documents: vec![SessionDocument {
                 path: None,
                 untitled_number: Some(3),

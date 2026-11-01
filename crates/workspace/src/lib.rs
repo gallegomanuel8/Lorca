@@ -16,4 +16,4 @@ pub use document::{Document, DocumentId};
 pub use error::WorkspaceError;
 pub use session::{RestoreReport, SESSION_VERSION, Session, SessionDocument, SessionStore};
 pub use storage::{DiskStamp, data_dir};
-pub use workspace::Workspace;
+pub use workspace::{MAX_PANES, Workspace};
