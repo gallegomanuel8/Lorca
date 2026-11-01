@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use lorca_core::{LineEnding, Selection, TextEncoding, TextFormat, load_bytes};
+use lorca_syntax::Language;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::{read_optional, write_atomic};
@@ -39,6 +40,9 @@ pub struct SessionDocument {
     pub head: usize,
     pub scroll_x: f32,
     pub scroll_y: f32,
+    /// Lenguaje elegido a mano (identificador de `Language::id`), si lo hay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
     /// Huella del archivo en disco en el que se basan los cambios sin guardar.
     pub disk_stamp: Option<DiskStamp>,
 }
@@ -145,6 +149,9 @@ impl SessionStore {
                 head: selection.head,
                 scroll_x,
                 scroll_y,
+                language: document
+                    .is_language_manual()
+                    .then(|| document.language().id().to_owned()),
                 disk_stamp: document.disk_stamp(),
             });
         }
@@ -197,6 +204,9 @@ impl Workspace {
                     document
                         .editor
                         .set_selection(Selection::new(saved.anchor, saved.head));
+                    if let Some(language) = saved.language.as_deref().and_then(Language::from_id) {
+                        document.set_language(language);
+                    }
                 }
                 report.scrolls.push((id, saved.scroll_x, saved.scroll_y));
             }
@@ -440,6 +450,18 @@ mod tests {
     }
 
     #[test]
+    fn manual_language_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new();
+        ws.new_document();
+        ws.active_mut().unwrap().set_language(Language::Sql);
+        let (restored, _) = save_and_restore(&ws, dir.path());
+        let doc = restored.active().unwrap();
+        assert_eq!(doc.language(), Language::Sql);
+        assert!(doc.is_language_manual());
+    }
+
+    #[test]
     fn stale_backups_are_removed() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = Workspace::new();
@@ -496,6 +518,7 @@ mod tests {
                 head: 0,
                 scroll_x: 0.0,
                 scroll_y: 0.0,
+                language: None,
                 disk_stamp: None,
             }],
         };

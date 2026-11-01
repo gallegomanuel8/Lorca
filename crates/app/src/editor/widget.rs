@@ -14,10 +14,12 @@ use iced::{
     Theme,
 };
 use lorca_core::{EditorState, Position, display};
+use lorca_syntax::Highlights;
 
 use super::keymap::{KeyCommand, map_key};
 use super::{
     ClickKind, DocView, EditorAction, FONT_SIZE, LINE_HEIGHT, TAB_WIDTH, TEXT_PADDING, Viewport,
+    palette,
 };
 
 /// Periodo de parpadeo del cursor.
@@ -30,12 +32,14 @@ pub fn code_editor<'a, Message>(
     editor: &'a EditorState,
     view: DocView,
     focused: bool,
+    highlights: Option<&'a Highlights>,
     on_action: impl Fn(EditorAction) -> Message + 'a,
 ) -> CodeEditor<'a, Message> {
     CodeEditor {
         editor,
         view,
         focused,
+        highlights,
         on_action: Box::new(on_action),
     }
 }
@@ -45,6 +49,8 @@ pub struct CodeEditor<'a, Message> {
     editor: &'a EditorState,
     view: DocView,
     focused: bool,
+    /// Resaltado del documento; puede ir una revisión por detrás mientras se recalcula.
+    highlights: Option<&'a Highlights>,
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -496,16 +502,31 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     );
                 }
 
-                let (visible, start_cell) =
-                    display::visible_text(&text, first_cell, visible_cells, TAB_WIDTH);
-                if !visible.is_empty() {
+                let spans = self.highlights.map_or(&[][..], |h| h.line(line));
+                let mut next_span = 0;
+                let runs =
+                    display::visible_runs(&text, first_cell, visible_cells, TAB_WIDTH, |index| {
+                        while spans.get(next_span).is_some_and(|s| s.end <= index) {
+                            next_span += 1;
+                        }
+                        spans
+                            .get(next_span)
+                            .filter(|s| s.start <= index)
+                            .map(|s| s.kind)
+                    });
+                for run in runs {
+                    if run.text.trim().is_empty() {
+                        continue;
+                    }
+                    let (color, font) = palette::style(run.style, colors.is_dark);
                     renderer.fill_text(
                         Text {
-                            content: visible,
+                            content: run.text,
+                            font,
                             ..text_style()
                         },
-                        Point::new(geometry.cell_x(start_cell, view), y),
-                        colors.text,
+                        Point::new(geometry.cell_x(run.start_cell, view), y),
+                        color.unwrap_or(colors.text),
                         geometry.text_area,
                     );
                 }
@@ -579,6 +600,7 @@ struct Colors {
     selection: Color,
     cursor: Color,
     scrollbar: Color,
+    is_dark: bool,
 }
 
 impl Colors {
@@ -597,6 +619,7 @@ impl Colors {
                 ..palette.primary.base.color
             },
             cursor: palette.primary.strong.color,
+            is_dark: palette.is_dark,
             scrollbar: Color {
                 a: 0.5,
                 ..palette.background.strong.color

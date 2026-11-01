@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use iced::theme::Mode;
 use iced::time::{Duration, Instant};
@@ -9,6 +10,7 @@ use iced::widget::{
     button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip,
 };
 use iced::{Alignment, Element, Length, Subscription, Task, Theme, keyboard, system, window};
+use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
 
 use crate::dialogs::{self, SaveChoice};
@@ -72,6 +74,24 @@ pub enum Message {
     WelcomeDone,
     /// Latido para el guardado diferido de la sesión.
     Tick,
+    LanguageSelected(Language),
+    /// Resultado del resaltado en segundo plano de una revisión de un documento.
+    Highlighted {
+        id: DocumentId,
+        revision: u64,
+        language: Language,
+        result: Result<Option<Arc<Highlights>>, String>,
+    },
+}
+
+/// Resaltado de un documento y estado de su cálculo en segundo plano.
+#[derive(Debug, Default)]
+struct HighlightState {
+    /// Revisión y lenguaje del resaltado actual.
+    done: Option<(u64, Language)>,
+    highlights: Option<Arc<Highlights>>,
+    /// Hay un cálculo en marcha; no se lanza otro hasta que termine.
+    pending: bool,
 }
 
 /// Mensaje informativo o de error que se muestra en la barra de estado.
@@ -100,6 +120,7 @@ pub struct Lorca {
     system_mode: Mode,
     /// Opción marcada en la pantalla de bienvenida; `Some` mientras se muestra.
     welcome_choice: Option<ThemeMode>,
+    highlights: HashMap<DocumentId, HighlightState>,
 }
 
 impl Lorca {
@@ -153,6 +174,7 @@ impl Lorca {
             session,
             session_dirty: None,
             system_mode: Mode::None,
+            highlights: HashMap::new(),
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -160,7 +182,11 @@ impl Lorca {
         let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
         app.open_paths(&paths);
         app.ensure_document();
-        (app, system::theme().map(Message::SystemTheme))
+        let highlight = app.schedule_highlight();
+        (
+            app,
+            Task::batch([system::theme().map(Message::SystemTheme), highlight]),
+        )
     }
 
     pub fn title(&self) -> String {
@@ -194,6 +220,11 @@ impl Lorca {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        Task::batch([task, self.schedule_highlight()])
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         if affects_session(&message) {
             let now = Instant::now();
             let first = self.session_dirty.map_or(now, |(first, _)| first);
@@ -313,6 +344,34 @@ impl Lorca {
                 self.save_config();
                 Task::none()
             }
+            Message::LanguageSelected(language) => {
+                if let Some(document) = self.workspace.active_mut() {
+                    document.set_language(language);
+                }
+                Task::none()
+            }
+            Message::Highlighted {
+                id,
+                revision,
+                language,
+                result,
+            } => {
+                let state = self.highlights.entry(id).or_default();
+                let language_changed = state.done.map(|(_, l)| l) != Some(language);
+                state.pending = false;
+                state.done = Some((revision, language));
+                match result {
+                    Ok(highlights) => state.highlights = highlights,
+                    Err(error) => {
+                        state.highlights = None;
+                        // Solo se avisa una vez por lenguaje, no en cada pulsación.
+                        if language_changed {
+                            self.show_error(error);
+                        }
+                    }
+                }
+                Task::none()
+            }
             Message::Tick => {
                 if let Some((first, last)) = self.session_dirty {
                     let now = Instant::now();
@@ -371,12 +430,42 @@ impl Lorca {
             return;
         };
         let view = self.views.entry(id).or_default();
-        if let Err(error) = apply_action(action, &mut document.editor, view, self.viewport) {
-            self.notice = Some(Notice {
-                text: error.to_string(),
-                is_error: true,
-            });
+        let result = apply_action(action, &mut document.editor, view, self.viewport);
+        document.refresh_language();
+        if let Err(error) = result {
+            self.show_error(error.to_string());
         }
+    }
+
+    /// Lanza el resaltado del documento activo si está desactualizado y no hay otro en
+    /// marcha. Se ejecuta fuera del hilo de la interfaz; mientras tanto se pinta el
+    /// resaltado anterior.
+    fn schedule_highlight(&mut self) -> Task<Message> {
+        let Some(document) = self.workspace.active() else {
+            return Task::none();
+        };
+        let id = document.id();
+        let revision = document.editor.revision();
+        let language = document.language();
+        let state = self.highlights.entry(id).or_default();
+        if state.pending || state.done == Some((revision, language)) {
+            return Task::none();
+        }
+        state.pending = true;
+        let text = document.editor.text();
+        Task::perform(
+            async move {
+                lorca_syntax::highlight(language, &text)
+                    .map(|highlights| highlights.map(Arc::new))
+                    .map_err(|error: SyntaxError| error.to_string())
+            },
+            move |result| Message::Highlighted {
+                id,
+                revision,
+                language,
+                result,
+            },
+        )
     }
 
     fn undo_redo(&mut self, undo: bool) {
@@ -391,6 +480,7 @@ impl Lorca {
         } else {
             document.editor.redo()
         };
+        document.refresh_language();
         match result {
             Ok(_) => self
                 .views
@@ -505,6 +595,7 @@ impl Lorca {
             Then::CloseTab => {
                 self.workspace.close(id);
                 self.views.remove(&id);
+                self.highlights.remove(&id);
                 self.ensure_document();
                 Task::none()
             }
@@ -595,7 +686,18 @@ impl Lorca {
             return space().into();
         };
         let view = self.views.get(&document.id()).copied().unwrap_or_default();
-        code_editor(&document.editor, view, !self.dialog_open, Message::Editor).into()
+        let highlights = self
+            .highlights
+            .get(&document.id())
+            .and_then(|state| state.highlights.as_deref());
+        code_editor(
+            &document.editor,
+            view,
+            !self.dialog_open,
+            highlights,
+            Message::Editor,
+        )
+        .into()
     }
 
     fn status_bar(&self) -> Element<'_, Message> {
@@ -627,25 +729,30 @@ impl Lorca {
                 position.push_str(&format!(" ({selected} seleccionados)"));
             }
             let format = document.format();
+            items.push(text(position).size(12).into());
             items.push(
                 pick_list(
-                    ThemeMode::ALL,
-                    Some(self.config.theme.unwrap_or_default()),
-                    Message::ThemeSelected,
+                    Language::ALL,
+                    Some(document.language()),
+                    Message::LanguageSelected,
                 )
                 .text_size(12)
                 .padding([0, 6])
                 .into(),
             );
-            for label in [
-                position,
-                document.language().name().to_owned(),
-                format.encoding.label().to_owned(),
-                format.line_ending.label().to_owned(),
-            ] {
-                items.push(text(label).size(12).into());
-            }
+            items.push(text(format.encoding.label()).size(12).into());
+            items.push(text(format.line_ending.label()).size(12).into());
         }
+        items.push(
+            pick_list(
+                ThemeMode::ALL,
+                Some(self.config.theme.unwrap_or_default()),
+                Message::ThemeSelected,
+            )
+            .text_size(12)
+            .padding([0, 6])
+            .into(),
+        );
 
         container(row(items).spacing(18).align_y(Alignment::Center))
             .padding([3, 12])
@@ -698,6 +805,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::ThemeSelected(_)
             | Message::WelcomeChoose(_)
             | Message::WelcomeDone
+            | Message::Highlighted { .. }
     )
 }
 

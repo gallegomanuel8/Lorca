@@ -71,6 +71,64 @@ pub fn visible_text(
     (out, start.unwrap_or(visual))
 }
 
+/// Tramo de texto visible con un mismo estilo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run<T> {
+    /// Texto con los tabuladores ya expandidos a espacios.
+    pub text: String,
+    /// Celda en la que empieza.
+    pub start_cell: usize,
+    pub style: Option<T>,
+}
+
+/// Como [`visible_text`], pero dividido en tramos según el estilo de cada carácter.
+///
+/// `style_at` recibe el índice de carácter dentro de la línea, en orden creciente.
+pub fn visible_runs<T: Copy + PartialEq>(
+    line: &str,
+    first_cell: usize,
+    max_cells: usize,
+    tab_width: usize,
+    mut style_at: impl FnMut(usize) -> Option<T>,
+) -> Vec<Run<T>> {
+    let mut runs: Vec<Run<T>> = Vec::new();
+    let mut visual = 0usize;
+    let mut start: Option<usize> = None;
+    for (index, c) in line.chars().enumerate() {
+        let width = char_cells(c, visual, tab_width);
+        if start.is_none() && visual + width > first_cell {
+            start = Some(visual);
+        }
+        if let Some(start) = start {
+            if visual >= start + max_cells {
+                break;
+            }
+            let style = style_at(index);
+            let run = match runs.last_mut() {
+                Some(run) if run.style == style => run,
+                _ => {
+                    runs.push(Run {
+                        text: String::new(),
+                        start_cell: visual,
+                        style,
+                    });
+                    match runs.last_mut() {
+                        Some(run) => run,
+                        None => break,
+                    }
+                }
+            };
+            if c == '\t' {
+                run.text.extend(std::iter::repeat_n(' ', width));
+            } else {
+                run.text.push(c);
+            }
+        }
+        visual += width;
+    }
+    runs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +154,56 @@ mod tests {
         assert_eq!(char_column_at_visual("\tx", 1.0, 4), 0);
         assert_eq!(char_column_at_visual("\tx", 3.0, 4), 1);
         assert_eq!(char_column_at_visual("日本", 2.6, 4), 1);
+    }
+
+    #[test]
+    fn runs_split_by_style() {
+        let style = |i: usize| (i < 2).then_some('k');
+        let runs = visible_runs("fn main", 0, 80, 4, style);
+        assert_eq!(
+            runs,
+            vec![
+                Run {
+                    text: "fn".into(),
+                    start_cell: 0,
+                    style: Some('k')
+                },
+                Run {
+                    text: " main".into(),
+                    start_cell: 2,
+                    style: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn runs_respect_scroll_and_tabs() {
+        let runs = visible_runs("\tab", 2, 80, 4, |i| (i == 0).then_some(1));
+        assert_eq!(
+            runs,
+            vec![
+                Run {
+                    text: "    ".into(),
+                    start_cell: 0,
+                    style: Some(1)
+                },
+                Run {
+                    text: "ab".into(),
+                    start_cell: 4,
+                    style: None
+                },
+            ]
+        );
+        let runs = visible_runs("abcdef", 3, 2, 4, |_| None::<u8>);
+        assert_eq!(
+            runs,
+            vec![Run {
+                text: "de".into(),
+                start_cell: 3,
+                style: None
+            }]
+        );
     }
 
     #[test]

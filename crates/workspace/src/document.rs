@@ -28,6 +28,8 @@ pub struct Document {
     untitled_number: Option<u32>,
     format: TextFormat,
     language: Language,
+    /// `true` si el usuario eligió el lenguaje a mano: ya no se detecta automáticamente.
+    language_manual: bool,
     /// Revisión del historial en el momento de abrir o guardar.
     saved_revision: u64,
     /// Cambios que no pasan por el historial (p. ej. cambiar la codificación).
@@ -45,6 +47,7 @@ impl Document {
             untitled_number: Some(number),
             format: TextFormat::default(),
             language: Language::PlainText,
+            language_manual: false,
             saved_revision: 0,
             forced_modified: false,
             disk_stamp: None,
@@ -56,8 +59,9 @@ impl Document {
         Self {
             id,
             saved_revision: editor.revision(),
+            language: Language::detect(Some(&path), &editor.buffer().line_text(0)),
+            language_manual: false,
             editor,
-            language: Language::from_path(&path),
             disk_stamp: DiskStamp::of(&path),
             path: Some(path),
             untitled_number: None,
@@ -80,10 +84,9 @@ impl Document {
         Self {
             id,
             saved_revision: editor.revision(),
+            language: Language::detect(path.as_deref(), &editor.buffer().line_text(0)),
+            language_manual: false,
             editor,
-            language: path
-                .as_deref()
-                .map_or(Language::PlainText, Language::from_path),
             untitled_number: if path.is_some() {
                 None
             } else {
@@ -120,6 +123,25 @@ impl Document {
         self.language
     }
 
+    pub fn is_language_manual(&self) -> bool {
+        self.language_manual
+    }
+
+    /// Fija el lenguaje a mano; a partir de ahora no se vuelve a detectar.
+    pub fn set_language(&mut self, language: Language) {
+        self.language = language;
+        self.language_manual = true;
+    }
+
+    /// Vuelve a detectar el lenguaje (ruta y shebang) salvo que se haya elegido a mano.
+    /// Es barato: solo mira la ruta y la primera línea.
+    pub fn refresh_language(&mut self) {
+        if !self.language_manual {
+            self.language =
+                Language::detect(self.path.as_deref(), &self.editor.buffer().line_text(0));
+        }
+    }
+
     /// Nombre que se muestra en la pestaña: el nombre del archivo o "Sin título N".
     pub fn display_name(&self) -> String {
         match (&self.path, self.untitled_number) {
@@ -148,11 +170,46 @@ impl Document {
     }
 
     pub(crate) fn mark_saved(&mut self, path: PathBuf) {
-        self.language = Language::from_path(&path);
         self.path = Some(path);
+        self.refresh_language();
         self.untitled_number = None;
         self.saved_revision = self.editor.revision();
         self.forced_modified = false;
         self.disk_stamp = self.path.as_deref().and_then(DiskStamp::of);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untitled_detects_shebang_when_refreshed() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        doc.editor
+            .insert_text("#!/usr/bin/env python3\nprint(1)")
+            .unwrap();
+        assert_eq!(doc.language(), Language::PlainText);
+        doc.refresh_language();
+        assert_eq!(doc.language(), Language::Python);
+    }
+
+    #[test]
+    fn manual_language_is_kept() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        doc.set_language(Language::Sql);
+        doc.editor.insert_text("#!/bin/bash").unwrap();
+        doc.refresh_language();
+        assert_eq!(doc.language(), Language::Sql);
+        doc.mark_saved(PathBuf::from("/x/script.py"));
+        assert_eq!(doc.language(), Language::Sql);
+        assert!(doc.is_language_manual());
+    }
+
+    #[test]
+    fn loaded_file_without_extension_uses_shebang() {
+        let loaded = lorca_core::load_bytes(b"#!/bin/sh\necho hola\n");
+        let doc = Document::from_loaded(DocumentId(1), PathBuf::from("/x/deploy"), loaded);
+        assert_eq!(doc.language(), Language::Bash);
     }
 }

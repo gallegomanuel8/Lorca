@@ -44,6 +44,20 @@ mensaje en español.
   - `History::revision()` identifica el estado del texto; `Document::is_modified` lo
     compara con la revisión guardada (deshacer hasta lo guardado = sin cambios).
   - `display`: columnas visuales (tabuladores, caracteres anchos con `unicode-width`).
+- `syntax`
+  - `Language`: `id`/`from_id` (sesión), `from_name` (alias de bloques de código Markdown),
+    `detect(path, primera línea)` = extensión/nombre → shebang → texto plano.
+  - `highlight(language, &str)` → `Highlights` (tramos `StyledSpan` por línea, columnas de
+    carácter, sin solapes) con `tree-sitter-highlight`. Recalcula el documento entero (no
+    incremental). `CAPTURES` mapea nombres de captura a `HighlightKind`; añadir ahí los
+    nombres nuevos que traigan las gramáticas.
+  - `Grammar`: configuraciones compiladas una vez (`OnceLock`) por gramática. TypeScript
+    usa la gramática TSX con las consultas de JS + JSX + TS concatenadas.
+  - Markdown: las inyecciones del bloque necesitan `injection.include-children` para
+    `inline` y `code_fence_content` (`markdown_block_injections`); sin eso el texto
+    inyectado llega troceado.
+  - `examples/bench_highlight.rs` mide rendimiento (≈35 ms para 6 600 líneas de Rust en
+    release).
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje, `DiskStamp`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
@@ -72,6 +86,13 @@ mensaje en español.
   - Tema: `resolve_theme(ThemeMode, system Mode)`; el modo del sistema llega con
     `system::theme()` al arrancar y `system::theme_changes()`. `welcome.rs` es la
     pantalla del primer arranque.
+  - Resaltado: `schedule_highlight` (al final de cada `update`) lanza `Task::perform` con
+    una copia del texto si la revisión o el lenguaje del documento activo cambiaron y no
+    hay otro cálculo en marcha; `Message::Highlighted` guarda el resultado en
+    `HighlightState`. El widget pinta con el último resultado aunque vaya una revisión por
+    detrás. Colores en `editor/palette.rs` (provisional hasta los temas de la Fase 6).
+  - `Document::refresh_language()` se llama tras cada edición (detecta shebangs al
+    teclear); `set_language` lo fija a mano y se guarda en la sesión.
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)

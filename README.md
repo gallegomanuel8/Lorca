@@ -32,6 +32,19 @@ gestión de documentos en pestañas.
 - **Tema claro, oscuro o automático** (sigue al sistema en vivo). Se elige en la pantalla
   de bienvenida del primer arranque y se cambia desde la barra de estado.
 
+**Fase 2 completada:**
+
+- **Resaltado de sintaxis** con tree-sitter para Markdown, SQL, Rust, Python, JavaScript,
+  TypeScript (incluido TSX), JSON, YAML, TOML, HTML, CSS y Bash, con colores adaptados al
+  tema claro u oscuro. Los bloques de código de Markdown (```` ```rust ````) y el JS/CSS
+  dentro de HTML se resaltan con su propio lenguaje.
+- **Detección del lenguaje** por extensión, nombre de archivo y shebang
+  (`#!/usr/bin/env python3`), también mientras escribes en un documento sin título.
+- **Selector manual de lenguaje** en la barra de estado; la elección se recuerda entre
+  sesiones.
+- El resaltado se calcula en segundo plano para no frenar la escritura en archivos grandes
+  (por encima de 4 MB se muestra sin colores).
+
 ### Datos de usuario
 
 | Sistema | Carpeta |
@@ -77,7 +90,7 @@ Workspace de Cargo:
 | Crate | Responsabilidad |
 |---|---|
 | `crates/core` (`lorca-core`) | Buffer (ropey), selección, ediciones, deshacer/rehacer, codificaciones y finales de línea. Sin GUI. |
-| `crates/syntax` (`lorca-syntax`) | Detección de lenguaje (y, en la Fase 2, resaltado). |
+| `crates/syntax` (`lorca-syntax`) | Detección de lenguaje y resaltado con tree-sitter. |
 | `crates/search` (`lorca-search`) | Buscar y reemplazar (Fase 3). |
 | `crates/formats` (`lorca-formats`) | Preview de Markdown y formateadores SQL/JSON (Fase 4). |
 | `crates/workspace` (`lorca-workspace`) | Documentos abiertos, pestañas, guardado, sesión y configuración. |
@@ -87,8 +100,8 @@ Workspace de Cargo:
 
 1. **MVP** ✅: workspace, núcleo de edición, pestañas, guardar/abrir, atajos.
    - **1.5** ✅: sesión persistente con cambios sin guardar y tema claro/oscuro/automático.
-2. **Lenguajes**: detección por extensión y shebang, selector manual en la barra de estado,
-   resaltado de sintaxis.
+2. **Lenguajes** ✅: detección por extensión y shebang, selector manual en la barra de
+   estado, resaltado de sintaxis.
 3. **Búsqueda**: panel buscar/reemplazar (⌘F, ⌘H), expresiones regulares, resaltado de
    coincidencias, siguiente/anterior, reemplazar todo; ir a línea (⌘G).
 4. **Formato**: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras

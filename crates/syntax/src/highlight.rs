@@ -368,15 +368,21 @@ impl Grammar {
 }
 
 /// Consulta de inyecciones del Markdown de bloque con `injection.include-children` en el
-/// texto en línea: el nodo `inline` tiene hijos ocultos y, sin esa opción,
-/// tree-sitter-highlight los excluiría y la gramática en línea no vería nada.
+/// texto en línea y en los bloques de código: esos nodos tienen hijos ocultos y, sin esa
+/// opción, tree-sitter-highlight los excluiría y la gramática inyectada vería el texto
+/// troceado.
 fn markdown_block_injections() -> &'static str {
     static QUERY: OnceLock<String> = OnceLock::new();
     QUERY.get_or_init(|| {
-        tree_sitter_md::INJECTION_QUERY_BLOCK.replace(
-            "(#set! injection.language \"markdown_inline\")",
-            "(#set! injection.language \"markdown_inline\")\n  (#set! injection.include-children)",
-        )
+        tree_sitter_md::INJECTION_QUERY_BLOCK
+            .replace(
+                "(#set! injection.language \"markdown_inline\")",
+                "(#set! injection.language \"markdown_inline\")\n  (#set! injection.include-children)",
+            )
+            .replace(
+                "(code_fence_content) @injection.content)",
+                "(code_fence_content) @injection.content\n  (#set! injection.include-children))",
+            )
     })
 }
 
@@ -481,6 +487,17 @@ mod tests {
         assert!(h.line(2).iter().any(|s| s.kind == HighlightKind::Strong));
         assert!(h.line(2).iter().any(|s| s.kind == HighlightKind::Code));
         assert_eq!(kind_at(&h, 5, 0), Some(HighlightKind::Keyword));
+        assert_eq!(kind_at(&h, 5, 3), Some(HighlightKind::Function));
+    }
+
+    #[test]
+    fn code_blocks_in_markdown_get_full_highlighting() {
+        let h = run(
+            Language::Markdown,
+            "```rust\nfn main() {\n    // nota\n}\n```\n",
+        );
+        assert_eq!(kind_at(&h, 1, 3), Some(HighlightKind::Function));
+        assert_eq!(kind_at(&h, 2, 6), Some(HighlightKind::Comment));
     }
 
     #[test]
