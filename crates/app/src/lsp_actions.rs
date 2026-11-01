@@ -516,14 +516,9 @@ impl Lorca {
             document.editor.set_cursor(target, false);
         }
         self.reveal_active_cursor();
-        if let Some((severity, message)) = self.diagnostic_at_cursor() {
-            let message = message.to_owned();
-            if severity == Severity::Error {
-                self.show_error(message);
-            } else {
-                self.show_info(message);
-            }
-        }
+        // El mensaje lo muestra la barra de estado mientras el cursor esté en el problema;
+        // un aviso se quedaría aunque el problema se corrigiera.
+        self.notice = None;
     }
 
     // --- Eventos del servidor ---------------------------------------------------------
