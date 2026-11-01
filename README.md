@@ -277,8 +277,7 @@ cargo packager --release --formats deb,appimage
 ```
 
 Los paquetes quedan en `target/packages/`. No están firmados: en macOS, la primera vez
-abre la app con clic derecho → Abrir. El icono se genera con `python3
-assets/make_icon.py`.
+abre la app con clic derecho → Abrir. Los iconos están en `assets/icons/`.
 
 ### Integración continua
 

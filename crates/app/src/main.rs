@@ -19,14 +19,23 @@ mod welcome;
 
 use app::Lorca;
 
+/// Icono de la ventana (barra de tareas en Windows y Linux; macOS usa el del bundle).
+const ICON: &[u8] = include_bytes!("../../../assets/icons/png/lorca-256.png");
+
 fn main() -> anyhow::Result<()> {
+    let window = iced::window::Settings {
+        size: app::WINDOW_SIZE,
+        position: iced::window::Position::Centered,
+        exit_on_close_request: false,
+        // Si no se pudiera decodificar, la ventana sale sin icono.
+        icon: iced::window::icon::from_file_data(ICON, None).ok(),
+        ..iced::window::Settings::default()
+    };
     iced::application(Lorca::boot, Lorca::update, Lorca::view)
         .title(Lorca::title)
         .subscription(Lorca::subscription)
         .theme(Lorca::theme)
-        .exit_on_close_request(false)
-        .window_size(app::WINDOW_SIZE)
-        .centered()
+        .window(window)
         .run()?;
     Ok(())
 }

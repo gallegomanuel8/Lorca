@@ -8,7 +8,7 @@ description = "Editor de texto y código, en homenaje a Federico García Lorca"
 
 [dependencies]
 anyhow = "1.0.104"
-iced = { version = "0.14.0", features = ["advanced", "markdown", "smol"] }
+iced = { version = "0.14.0", features = ["advanced", "image", "markdown", "smol"] }
 lorca-core = { version = "0.1.0", path = "../core" }
 lorca-formats = { version = "0.1.0", path = "../formats" }
 lorca-lsp = { version = "0.1.0", path = "../lsp" }
@@ -21,6 +21,9 @@ rfd = "0.17.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }
 
+[target."cfg(windows)".build-dependencies]
+winresource = "0.1.34"
+
 [lints]
 workspace = true
 
@@ -32,7 +35,14 @@ identifier = "io.github.gallegomanuel8.lorca"
 category = "DeveloperTool"
 before-packaging-command = "cargo build --release -p lorca"
 out-dir = "../../target/packages"
-icons = ["../../assets/icons/*.png", "../../assets/icons/icon.ico"]
+icons = [
+  "../../assets/icons/png/lorca-32.png",
+  "../../assets/icons/png/lorca-128.png",
+  "../../assets/icons/png/lorca-256.png",
+  "../../assets/icons/png/lorca-512.png",
+  "../../assets/icons/lorca.icns",
+  "../../assets/icons/lorca.ico",
+]
 binaries = [{ path = "lorca", main = true }]
 
 [package.metadata.packager.macos]

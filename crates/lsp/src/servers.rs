@@ -238,9 +238,16 @@ mod tests {
         };
         std::fs::write(dir.path().join(name), "").unwrap();
         let path = std::env::join_paths([dir.path()]).unwrap();
-        assert_eq!(
-            find_executable_in("servidor", &path),
-            Some(dir.path().join(name))
+        // En Windows la extensión sale de PATHEXT («.EXE») y el sistema de archivos no
+        // distingue mayúsculas: se compara sin ellas.
+        let found = find_executable_in("servidor", &path).unwrap();
+        assert_eq!(found.parent(), Some(dir.path()));
+        assert!(
+            found
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
         );
         assert_eq!(find_executable_in("no-existe", &path), None);
     }

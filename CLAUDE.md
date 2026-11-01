@@ -196,8 +196,11 @@ mensaje en español.
 ## Empaquetado y CI
 
 - `cargo packager --release` desde `crates/app` (configuración en su `Cargo.toml`);
-  salida en `target/packages/`. Iconos en `assets/icons/` generados por
-  `assets/make_icon.py` (el de 1024 debe llamarse `512x512@2x.png` para `.icns`).
+  salida en `target/packages/`. Iconos en `assets/icons/` (ver su `LEEME.md`):
+  `lorca.icns` para el bundle, `lorca.ico` incrustado en el `.exe` por `build.rs`
+  (`winresource`, solo Windows) y `png/lorca-256.png` como icono de la ventana
+  (feature `image` de iced). Si `create-dmg` falla con «Recurso ocupado», queda montado
+  un `/Volumes/Lorca` de un intento anterior: `hdiutil detach`.
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
   (paquetes al publicar una etiqueta `v*`).
 - Código solo para macOS: lo que no se use fuera necesita
