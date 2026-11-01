@@ -1,10 +1,10 @@
-//! Estado de edición de un documento: buffer, selección e historial.
+//! Estado de edición de un documento: buffer, cursores e historial.
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
-    Bookmarks, Buffer, CoreError, Edit, EditKind, History, LineEnding, Position, Selection,
+    Bookmarks, Buffer, CoreError, Cursors, Edit, EditKind, History, LineEnding, Position, Selection,
 };
 
 /// Movimientos del cursor.
@@ -27,17 +27,27 @@ pub enum Motion {
     PageDown(usize),
 }
 
-/// Buffer, selección e historial de un documento, con las operaciones de edición.
+impl Motion {
+    fn is_vertical(self) -> bool {
+        matches!(
+            self,
+            Self::Up | Self::Down | Self::PageUp(_) | Self::PageDown(_)
+        )
+    }
+}
+
+/// Buffer, cursores e historial de un documento, con las operaciones de edición.
 ///
-/// Cada operación que modifica el texto se registra en el historial como una
-/// transacción, de modo que deshacer/rehacer restaura texto y selección.
+/// Admite varios cursores (multicursor): cada edición se aplica en todos y se registra
+/// en el historial como una sola transacción, de modo que deshacer/rehacer restaura
+/// texto y cursores a la vez.
 #[derive(Debug, Clone)]
 pub struct EditorState {
     buffer: Buffer,
-    selection: Selection,
+    cursors: Cursors,
     history: History,
-    /// Columna que se intenta mantener en movimientos verticales consecutivos.
-    preferred_column: Option<usize>,
+    /// Columna que intenta mantener cada cursor en movimientos verticales consecutivos.
+    preferred_columns: Vec<Option<usize>>,
     bookmarks: Bookmarks,
     /// Versión del contenido; ver [`EditorState::version`].
     version: u64,
@@ -47,9 +57,9 @@ impl Default for EditorState {
     fn default() -> Self {
         Self {
             buffer: Buffer::default(),
-            selection: Selection::default(),
+            cursors: Cursors::default(),
             history: History::default(),
-            preferred_column: None,
+            preferred_columns: Vec::new(),
             bookmarks: Bookmarks::default(),
             version: next_version(),
         }
@@ -61,6 +71,35 @@ static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
 
 fn next_version() -> u64 {
     NEXT_VERSION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Cambio que una edición multicursor produce en uno de los cursores.
+struct Change {
+    /// Rango del texto actual que se sustituye.
+    range: Range<usize>,
+    /// Texto nuevo (ya normalizado a LF).
+    text: String,
+    /// Ancla y cabeza de la selección resultante, relativas al inicio del rango.
+    after: (usize, usize),
+}
+
+impl Change {
+    fn delete(range: Range<usize>) -> Self {
+        Self {
+            range,
+            text: String::new(),
+            after: (0, 0),
+        }
+    }
+
+    fn replace(range: Range<usize>, text: &str) -> Self {
+        let len = text.chars().count();
+        Self {
+            range,
+            text: text.to_owned(),
+            after: (len, len),
+        }
+    }
 }
 
 impl EditorState {
@@ -84,13 +123,23 @@ impl EditorState {
         self.buffer.to_string()
     }
 
+    /// Selección principal.
     pub fn selection(&self) -> Selection {
-        self.selection
+        self.cursors.primary()
     }
 
-    /// Línea y columna de la cabeza de la selección.
+    /// Todas las selecciones, ordenadas.
+    pub fn selections(&self) -> &[Selection] {
+        self.cursors.as_slice()
+    }
+
+    pub fn cursors(&self) -> &Cursors {
+        &self.cursors
+    }
+
+    /// Línea y columna de la cabeza de la selección principal.
     pub fn cursor(&self) -> Position {
-        self.buffer.char_to_position(self.selection.head)
+        self.buffer.char_to_position(self.selection().head)
     }
 
     /// Identificador del estado del texto según el historial; ver [`History::revision`].
@@ -117,27 +166,154 @@ impl EditorState {
         self.history.can_redo()
     }
 
-    /// Texto seleccionado, o `None` si la selección está vacía.
+    /// Texto de la selección principal, o `None` si está vacía.
     pub fn selected_text(&self) -> Option<String> {
-        if self.selection.is_empty() {
+        let selection = self.selection();
+        if selection.is_empty() {
             return None;
         }
-        self.buffer.slice(self.selection.range()).ok()
+        self.buffer.slice(selection.range()).ok()
+    }
+
+    /// Texto de cada selección no vacía, en orden (para copiar con varios cursores).
+    pub fn selected_texts(&self) -> Vec<String> {
+        self.selections()
+            .iter()
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| self.buffer.slice(s.range()).ok())
+            .collect()
     }
 
     // --- Selección y movimiento -------------------------------------------------------
 
-    /// Sustituye la selección (ajustada al buffer) y cierra el grupo de deshacer.
+    /// Deja una sola selección (ajustada al buffer) y cierra el grupo de deshacer.
     pub fn set_selection(&mut self, selection: Selection) {
-        self.selection = selection.clamped(self.buffer.len_chars());
-        self.preferred_column = None;
+        self.set_cursors(Cursors::single(selection));
+    }
+
+    /// Sustituye todos los cursores y cierra el grupo de deshacer.
+    pub fn set_cursors(&mut self, cursors: Cursors) {
+        self.cursors = cursors.clamped(self.buffer.len_chars());
+        self.preferred_columns.clear();
         self.history.seal();
     }
 
-    /// Coloca el cursor en `index`. Con `extend`, mantiene el ancla y extiende la selección.
+    /// Coloca el cursor en `index` (un solo cursor). Con `extend`, mantiene el ancla de la
+    /// selección principal y extiende la selección.
     pub fn set_cursor(&mut self, index: usize, extend: bool) {
-        let anchor = if extend { self.selection.anchor } else { index };
+        let anchor = if extend {
+            self.selection().anchor
+        } else {
+            index
+        };
         self.set_selection(Selection::new(anchor, index));
+    }
+
+    /// Añade un cursor en `index` (⌥+clic). Pasa a ser el principal.
+    pub fn add_cursor(&mut self, index: usize) {
+        let mut selections = self.selections().to_vec();
+        selections.push(Selection::cursor(index));
+        let primary = selections.len() - 1;
+        self.set_cursors(Cursors::new(selections, primary));
+    }
+
+    /// Deja solo el cursor principal (Escape con varios cursores).
+    pub fn collapse_to_primary(&mut self) {
+        let primary = self.selection();
+        self.set_selection(primary);
+    }
+
+    /// Añade un cursor en la línea de arriba del primero (o de abajo del último), en la
+    /// misma columna. Devuelve `false` si no hay línea a la que ir.
+    pub fn add_cursor_vertical(&mut self, up: bool) -> bool {
+        let selections = self.selections();
+        let base = if up {
+            selections.first()
+        } else {
+            selections.last()
+        };
+        let Some(base) = base.copied() else {
+            return false;
+        };
+        let position = self.buffer.char_to_position(base.head);
+        let column = self
+            .preferred_columns
+            .get(self.cursors.primary_index())
+            .copied()
+            .flatten();
+        let column = column.unwrap_or(position.column);
+        let line = if up {
+            match position.line.checked_sub(1) {
+                Some(line) => line,
+                None => return false,
+            }
+        } else if position.line + 1 < self.buffer.len_lines() {
+            position.line + 1
+        } else {
+            return false;
+        };
+        let index = self.buffer.position_to_char(Position::new(line, column));
+        let mut selections = self.selections().to_vec();
+        selections.push(Selection::cursor(index));
+        let primary = selections.len() - 1;
+        let preferred = vec![Some(column); selections.len()];
+        self.set_cursors(Cursors::new(selections, primary));
+        self.preferred_columns = preferred;
+        true
+    }
+
+    /// ⌘D: sin selección, selecciona la palabra del cursor; con selección, añade un
+    /// cursor en la siguiente aparición del texto seleccionado (dando la vuelta).
+    /// Devuelve `false` si no hay nada más que añadir.
+    pub fn add_next_occurrence(&mut self) -> bool {
+        let primary = self.selection();
+        if primary.is_empty() {
+            let Some((start, end)) = self.word_bounds(primary.head) else {
+                return false;
+            };
+            let mut selections = self.selections().to_vec();
+            let index = self.cursors.primary_index();
+            if let Some(slot) = selections.get_mut(index) {
+                *slot = Selection::new(start, end);
+            }
+            self.set_cursors(Cursors::new(selections, index));
+            return true;
+        }
+        let Some(needle) = self.selected_text() else {
+            return false;
+        };
+        let needle_len = needle.chars().count();
+        let text = self.buffer.to_string();
+        // Inicios (en caracteres) de todas las apariciones.
+        let mut starts = Vec::new();
+        let (mut byte_cursor, mut char_cursor) = (0usize, 0usize);
+        for (byte, _) in text.match_indices(&needle) {
+            char_cursor += text.get(byte_cursor..byte).map_or(0, |s| s.chars().count());
+            byte_cursor = byte;
+            starts.push(char_cursor);
+        }
+        let selected = |start: usize| {
+            self.selections()
+                .iter()
+                .any(|s| s.start() == start && s.len() == needle_len)
+        };
+        let last_end = self
+            .selections()
+            .iter()
+            .map(Selection::end)
+            .max()
+            .unwrap_or(0);
+        let next = starts
+            .iter()
+            .copied()
+            .find(|&start| start >= last_end && !selected(start))
+            .or_else(|| starts.iter().copied().find(|&start| !selected(start)));
+        let Some(start) = next else { return false };
+        let mut selections = self.selections().to_vec();
+        selections.push(Selection::new(start, start + needle_len));
+        let primary = selections.len() - 1;
+        self.set_cursors(Cursors::new(selections, primary));
+        true
     }
 
     pub fn select_all(&mut self) {
@@ -158,24 +334,25 @@ impl EditorState {
 
     /// Selecciona la palabra (o el bloque de blancos o de signos) que contiene `index`.
     pub fn select_word_at(&mut self, index: usize) {
+        match self.word_bounds(index) {
+            Some((start, end)) => self.set_selection(Selection::new(start, end)),
+            None => self.set_cursor(index.min(self.buffer.len_chars()), false),
+        }
+    }
+
+    /// Límites de la palabra (o bloque de blancos o signos) que contiene `index`.
+    fn word_bounds(&self, index: usize) -> Option<(usize, usize)> {
         let len = self.buffer.len_chars();
         let index = index.min(len);
         // Al final de una palabra se toma el carácter anterior.
         let probe = match self.buffer.char_at(index) {
             Some(c) if c != '\n' => index,
             _ if index > 0 => index - 1,
-            _ => {
-                self.set_cursor(index, false);
-                return;
-            }
+            _ => return None,
         };
-        let Some(class) = self.buffer.char_at(probe).map(CharClass::of) else {
-            self.set_cursor(index, false);
-            return;
-        };
+        let class = self.buffer.char_at(probe).map(CharClass::of)?;
         if class == CharClass::Newline {
-            self.set_cursor(index, false);
-            return;
+            return None;
         }
         let mut start = probe;
         while start > 0 && self.class_at(start - 1) == Some(class) {
@@ -185,162 +362,199 @@ impl EditorState {
         while end < len && self.class_at(end) == Some(class) {
             end += 1;
         }
-        self.set_selection(Selection::new(start, end));
+        Some((start, end))
     }
 
-    /// Mueve el cursor. Con `extend`, extiende la selección en lugar de colapsarla.
+    /// Mueve todos los cursores. Con `extend`, extiende las selecciones en lugar de
+    /// colapsarlas.
     pub fn move_cursor(&mut self, motion: Motion, extend: bool) {
-        let selection = self.selection;
+        let vertical = motion.is_vertical();
+        let mut moved = Vec::with_capacity(self.cursors.len());
+        let mut columns = Vec::with_capacity(self.cursors.len());
+        for (index, selection) in self.selections().iter().enumerate() {
+            let preferred = if vertical {
+                self.preferred_columns.get(index).copied().flatten()
+            } else {
+                None
+            };
+            let (selection, column) = self.move_one(*selection, motion, extend, preferred);
+            moved.push(selection);
+            columns.push(Some(column));
+        }
+        let count = moved.len();
+        let primary = self.cursors.primary_index();
+        self.set_cursors(Cursors::new(moved, primary));
+        // Si ningún cursor se ha fusionado, cada uno conserva su columna deseada.
+        if vertical && self.cursors.len() == count {
+            self.preferred_columns = columns;
+        }
+    }
+
+    /// Mueve una selección. Devuelve la nueva y la columna usada en vertical.
+    fn move_one(
+        &self,
+        selection: Selection,
+        motion: Motion,
+        extend: bool,
+        preferred: Option<usize>,
+    ) -> (Selection, usize) {
         let head = selection.head;
         let len = self.buffer.len_chars();
         let collapse = !extend && !selection.is_empty();
+        let column = preferred.unwrap_or_else(|| self.buffer.char_to_position(head).column);
 
-        let current_column = self.buffer.char_to_position(head).column;
-        let column = self.preferred_column.unwrap_or(current_column);
-
-        let (target, vertical) = match motion {
-            Motion::Left if collapse => (selection.start(), false),
-            Motion::Right if collapse => (selection.end(), false),
-            Motion::Left => (head.saturating_sub(1), false),
-            Motion::Right => ((head + 1).min(len), false),
-            Motion::Up => (self.vertical_target(head, column, -1), true),
-            Motion::Down => (self.vertical_target(head, column, 1), true),
-            Motion::PageUp(lines) => (self.vertical_target(head, column, -signed(lines)), true),
-            Motion::PageDown(lines) => (self.vertical_target(head, column, signed(lines)), true),
-            Motion::WordLeft => (self.word_left(head), false),
-            Motion::WordRight => (self.word_right(head), false),
-            Motion::LineStart => (self.smart_line_start(head), false),
-            Motion::LineEnd => (self.buffer.line_end(self.buffer.char_to_line(head)), false),
-            Motion::DocumentStart => (0, false),
-            Motion::DocumentEnd => (len, false),
+        let target = match motion {
+            Motion::Left if collapse => selection.start(),
+            Motion::Right if collapse => selection.end(),
+            Motion::Left => head.saturating_sub(1),
+            Motion::Right => (head + 1).min(len),
+            Motion::Up => self.vertical_target(head, column, -1),
+            Motion::Down => self.vertical_target(head, column, 1),
+            Motion::PageUp(lines) => self.vertical_target(head, column, -signed(lines)),
+            Motion::PageDown(lines) => self.vertical_target(head, column, signed(lines)),
+            Motion::WordLeft => self.word_left(head),
+            Motion::WordRight => self.word_right(head),
+            Motion::LineStart => self.smart_line_start(head),
+            Motion::LineEnd => self.buffer.line_end(self.buffer.char_to_line(head)),
+            Motion::DocumentStart => 0,
+            Motion::DocumentEnd => len,
         };
-
         let anchor = if extend { selection.anchor } else { target };
-        self.set_selection(Selection::new(anchor, target));
-        if vertical {
-            self.preferred_column = Some(column);
-        }
+        (Selection::new(anchor, target), column)
     }
 
     // --- Edición ----------------------------------------------------------------------
 
-    /// Inserta texto sustituyendo la selección. Los finales de línea se normalizan a LF.
+    /// Inserta texto en cada cursor, sustituyendo las selecciones. Los finales de línea se
+    /// normalizan a LF.
     pub fn insert_text(&mut self, text: &str) -> Result<(), CoreError> {
         let text = LineEnding::normalize(text);
-        let selection = self.selection;
-        if text.is_empty() && selection.is_empty() {
+        let all_empty = self.selections().iter().all(Selection::is_empty);
+        if text.is_empty() && all_empty {
             return Ok(());
         }
-
-        let kind = if selection.is_empty() {
+        let kind = if all_empty {
             kind_of_typed(&text)
         } else {
             None
         };
-        let start = selection.start();
-        let mut edits = Vec::with_capacity(2);
-        if !selection.is_empty() {
-            edits.push(Edit::Delete {
-                at: start,
-                text: self.buffer.slice(selection.range())?,
-            });
-        }
-        let inserted_len = text.chars().count();
-        if !text.is_empty() {
-            edits.push(Edit::Insert {
-                at: start,
-                text: text.into_owned(),
-            });
-        }
-        self.apply(edits, Selection::cursor(start + inserted_len), kind)
+        self.edit_each(kind, |_, _, selection| {
+            Some(Change::replace(selection.range(), &text))
+        })
     }
 
-    /// Inserta un salto de línea manteniendo la indentación de la línea actual.
-    pub fn insert_newline(&mut self) -> Result<(), CoreError> {
-        let start = self.selection.start();
-        let line = self.buffer.char_to_line(start);
-        let column = start - self.buffer.line_start(line);
-        let indent: String = self
-            .buffer
-            .line_text(line)
-            .chars()
-            .take(column)
-            .take_while(|c| *c == ' ' || *c == '\t')
+    /// Inserta un texto distinto en cada cursor (p. ej. pegar varias líneas con tantos
+    /// cursores como líneas). Si el número no coincide, pega todo el texto en cada uno.
+    pub fn insert_texts(&mut self, texts: &[String]) -> Result<(), CoreError> {
+        if texts.len() != self.cursors.len() {
+            return self.insert_text(&texts.join("\n"));
+        }
+        let texts: Vec<String> = texts
+            .iter()
+            .map(|t| LineEnding::normalize(t).into_owned())
             .collect();
-        self.insert_text(&format!("\n{indent}"))
+        self.edit_each(None, |_, index, selection| {
+            texts
+                .get(index)
+                .map(|text| Change::replace(selection.range(), text))
+        })
     }
 
-    /// Borra la selección o, si está vacía, el carácter anterior al cursor.
+    /// Inserta un salto de línea en cada cursor manteniendo la indentación de su línea.
+    pub fn insert_newline(&mut self) -> Result<(), CoreError> {
+        self.edit_each(None, |state, _, selection| {
+            let start = selection.start();
+            let line = state.buffer.char_to_line(start);
+            let column = start - state.buffer.line_start(line);
+            let indent: String = state
+                .buffer
+                .line_text(line)
+                .chars()
+                .take(column)
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect();
+            Some(Change::replace(selection.range(), &format!("\n{indent}")))
+        })
+    }
+
+    /// Borra cada selección o, si está vacía, el carácter anterior al cursor.
     pub fn backspace(&mut self) -> Result<(), CoreError> {
-        if !self.selection.is_empty() {
-            return self.delete_selection();
-        }
-        let head = self.selection.head;
-        if head == 0 {
-            return Ok(());
-        }
-        let text = self.buffer.slice(head - 1..head)?;
-        let edit = Edit::Delete { at: head - 1, text };
-        self.apply(
-            vec![edit],
-            Selection::cursor(head - 1),
-            Some(EditKind::Backspace),
-        )
+        let kind = self
+            .selections()
+            .iter()
+            .all(Selection::is_empty)
+            .then_some(EditKind::Backspace);
+        self.edit_each(kind, |_, _, selection| {
+            if !selection.is_empty() {
+                Some(Change::delete(selection.range()))
+            } else if selection.head > 0 {
+                Some(Change::delete(selection.head - 1..selection.head))
+            } else {
+                None
+            }
+        })
     }
 
-    /// Borra la selección o, si está vacía, el carácter siguiente al cursor.
+    /// Borra cada selección o, si está vacía, el carácter siguiente al cursor.
     pub fn delete_forward(&mut self) -> Result<(), CoreError> {
-        if !self.selection.is_empty() {
-            return self.delete_selection();
-        }
-        let head = self.selection.head;
-        if head >= self.buffer.len_chars() {
-            return Ok(());
-        }
-        let text = self.buffer.slice(head..head + 1)?;
-        let edit = Edit::Delete { at: head, text };
-        self.apply(
-            vec![edit],
-            Selection::cursor(head),
-            Some(EditKind::DeleteForward),
-        )
+        let kind = self
+            .selections()
+            .iter()
+            .all(Selection::is_empty)
+            .then_some(EditKind::DeleteForward);
+        let len = self.buffer.len_chars();
+        self.edit_each(kind, |_, _, selection| {
+            if !selection.is_empty() {
+                Some(Change::delete(selection.range()))
+            } else if selection.head < len {
+                Some(Change::delete(selection.head..selection.head + 1))
+            } else {
+                None
+            }
+        })
     }
 
-    /// Borra desde el cursor hasta el inicio de la palabra anterior (o la selección).
+    /// Borra desde cada cursor hasta el inicio de la palabra anterior (o la selección).
     pub fn delete_word_backward(&mut self) -> Result<(), CoreError> {
-        if !self.selection.is_empty() {
-            return self.delete_selection();
-        }
-        let head = self.selection.head;
-        self.delete_range(self.word_left(head), head)
+        self.edit_each(None, |state, _, selection| {
+            if !selection.is_empty() {
+                return Some(Change::delete(selection.range()));
+            }
+            let start = state.word_left(selection.head);
+            (start < selection.head).then(|| Change::delete(start..selection.head))
+        })
     }
 
-    /// Borra desde el cursor hasta el final de la palabra siguiente (o la selección).
+    /// Borra desde cada cursor hasta el final de la palabra siguiente (o la selección).
     pub fn delete_word_forward(&mut self) -> Result<(), CoreError> {
-        if !self.selection.is_empty() {
-            return self.delete_selection();
-        }
-        let head = self.selection.head;
-        self.delete_range(head, self.word_right(head))
+        self.edit_each(None, |state, _, selection| {
+            if !selection.is_empty() {
+                return Some(Change::delete(selection.range()));
+            }
+            let end = state.word_right(selection.head);
+            (end > selection.head).then(|| Change::delete(selection.head..end))
+        })
     }
 
-    /// Borra el texto seleccionado (por ejemplo, al cortar).
+    /// Borra el texto de todas las selecciones (por ejemplo, al cortar).
     pub fn delete_selection(&mut self) -> Result<(), CoreError> {
-        let range = self.selection.range();
-        self.delete_range(range.start, range.end)
+        self.edit_each(None, |_, _, selection| {
+            (!selection.is_empty()).then(|| Change::delete(selection.range()))
+        })
     }
 
     /// Deshace la última transacción. Devuelve `false` si no había nada que deshacer.
     pub fn undo(&mut self) -> Result<bool, CoreError> {
-        self.preferred_column = None;
+        self.preferred_columns.clear();
         let Some(transaction) = self.history.undo() else {
             return Ok(false);
         };
         for edit in transaction.edits.iter().rev() {
             apply_edit(&mut self.buffer, &mut self.bookmarks, &edit.inverse())?;
         }
-        self.selection = transaction
+        self.cursors = transaction
             .selection_before
+            .clone()
             .clamped(self.buffer.len_chars());
         self.version = next_version();
         Ok(true)
@@ -348,22 +562,25 @@ impl EditorState {
 
     /// Rehace la última transacción deshecha. Devuelve `false` si no había ninguna.
     pub fn redo(&mut self) -> Result<bool, CoreError> {
-        self.preferred_column = None;
+        self.preferred_columns.clear();
         let Some(transaction) = self.history.redo() else {
             return Ok(false);
         };
         for edit in &transaction.edits {
             apply_edit(&mut self.buffer, &mut self.bookmarks, edit)?;
         }
-        self.selection = transaction.selection_after.clamped(self.buffer.len_chars());
+        self.cursors = transaction
+            .selection_after
+            .clone()
+            .clamped(self.buffer.len_chars());
         self.version = next_version();
         Ok(true)
     }
 
     /// Sustituye varios rangos en una sola transacción (p. ej. «Reemplazar todo»).
     ///
-    /// Los rangos deben estar ordenados y no solaparse. El cursor se mantiene sobre el
-    /// mismo texto. Devuelve el número de sustituciones.
+    /// Los rangos deben estar ordenados y no solaparse. Deja un solo cursor, que se
+    /// mantiene sobre el mismo texto. Devuelve el número de sustituciones.
     pub fn replace_ranges(
         &mut self,
         replacements: &[(Range<usize>, String)],
@@ -381,7 +598,7 @@ impl EditorState {
             previous_end = range.end;
         }
 
-        let head = self.selection.head;
+        let head = self.selection().head;
         let mut shift: isize = 0;
         let mut edits = Vec::with_capacity(replacements.len() * 2);
         // De atrás hacia delante, para que los índices de los rangos sigan siendo válidos.
@@ -400,16 +617,14 @@ impl EditorState {
                 });
             }
             if range.end <= head {
-                let added = isize::try_from(text.chars().count()).unwrap_or(isize::MAX);
-                let removed = isize::try_from(range.len()).unwrap_or(isize::MAX);
-                shift = shift.saturating_add(added - removed);
+                shift = shift.saturating_add(signed(text.chars().count()) - signed(range.len()));
             }
         }
         let new_head = head.saturating_add_signed(shift);
         self.history.seal();
-        self.apply(edits, Selection::cursor(new_head), None)?;
+        self.apply(edits, Cursors::single(Selection::cursor(new_head)), None)?;
         self.history.seal();
-        self.selection = self.selection.clamped(self.buffer.len_chars());
+        self.cursors = self.cursors.clone().clamped(self.buffer.len_chars());
         Ok(replacements.len())
     }
 
@@ -503,16 +718,71 @@ impl EditorState {
 
     // --- Auxiliares -------------------------------------------------------------------
 
-    fn delete_range(&mut self, start: usize, end: usize) -> Result<(), CoreError> {
-        if start >= end {
+    /// Aplica a cada cursor el cambio que devuelve `change_for` (o ninguno) en una sola
+    /// transacción y recoloca los cursores. Los rangos que se solaparían se recortan.
+    fn edit_each(
+        &mut self,
+        kind: Option<EditKind>,
+        mut change_for: impl FnMut(&Self, usize, Selection) -> Option<Change>,
+    ) -> Result<(), CoreError> {
+        let selections = self.selections().to_vec();
+        let primary = self.cursors.primary_index();
+
+        let mut changes: Vec<Option<Change>> = Vec::with_capacity(selections.len());
+        let mut previous_end = 0;
+        for (index, selection) in selections.iter().enumerate() {
+            let mut change = change_for(self, index, *selection);
+            if let Some(change) = &mut change {
+                change.range.start = change.range.start.max(previous_end).min(change.range.end);
+                previous_end = change.range.end;
+            }
+            changes.push(change);
+        }
+        if changes
+            .iter()
+            .flatten()
+            .all(|c| c.range.is_empty() && c.text.is_empty())
+        {
             return Ok(());
         }
-        let text = self.buffer.slice(start..end)?;
-        self.apply(
-            vec![Edit::Delete { at: start, text }],
-            Selection::cursor(start),
-            None,
-        )
+
+        // De atrás hacia delante, para que los índices sigan siendo válidos.
+        let mut edits = Vec::new();
+        for change in changes.iter().rev().flatten() {
+            if !change.range.is_empty() {
+                edits.push(Edit::Delete {
+                    at: change.range.start,
+                    text: self.buffer.slice(change.range.clone())?,
+                });
+            }
+            if !change.text.is_empty() {
+                edits.push(Edit::Insert {
+                    at: change.range.start,
+                    text: change.text.clone(),
+                });
+            }
+        }
+
+        // Posiciones finales: cada cambio desplaza a los cursores posteriores.
+        let mut delta: isize = 0;
+        let mut after = Vec::with_capacity(selections.len());
+        for (selection, change) in selections.iter().zip(&changes) {
+            match change {
+                Some(change) => {
+                    let start = change.range.start.saturating_add_signed(delta);
+                    after.push(Selection::new(
+                        start + change.after.0,
+                        start + change.after.1,
+                    ));
+                    delta += signed(change.text.chars().count()) - signed(change.range.len());
+                }
+                None => after.push(Selection::new(
+                    selection.anchor.saturating_add_signed(delta),
+                    selection.head.saturating_add_signed(delta),
+                )),
+            }
+        }
+        self.apply(edits, Cursors::new(after, primary), kind)
     }
 
     /// Aplica las ediciones y las registra en el historial. Si alguna falla, revierte las
@@ -520,7 +790,7 @@ impl EditorState {
     fn apply(
         &mut self,
         edits: Vec<Edit>,
-        after: Selection,
+        after: Cursors,
         kind: Option<EditKind>,
     ) -> Result<(), CoreError> {
         for (applied, edit) in edits.iter().enumerate() {
@@ -533,9 +803,8 @@ impl EditorState {
                 return Err(error);
             }
         }
-        let before = self.selection;
-        self.selection = after;
-        self.preferred_column = None;
+        let before = std::mem::replace(&mut self.cursors, after.clone());
+        self.preferred_columns.clear();
         self.history.record(edits, before, after, kind);
         self.version = next_version();
         Ok(())
@@ -1026,6 +1295,138 @@ mod tests {
         assert!(s.bookmarks().is_empty());
         s.undo().unwrap();
         assert_eq!(s.text(), "uno\ndos\ntres\ncuatro");
+    }
+
+    fn cursors_at(text: &str, indices: &[usize]) -> EditorState {
+        let mut s = EditorState::from_text(text);
+        s.set_cursor(indices[0], false);
+        for &index in &indices[1..] {
+            s.add_cursor(index);
+        }
+        s
+    }
+
+    #[test]
+    fn typing_with_several_cursors() {
+        let mut s = cursors_at("a\nb\nc", &[0, 2, 4]);
+        type_str(&mut s, "- ");
+        assert_eq!(s.text(), "- a\n- b\n- c");
+        assert_eq!(s.selections().len(), 3);
+        // Todo lo tecleado se deshace a la vez (dos pasos: palabra y espacio).
+        s.undo().unwrap();
+        s.undo().unwrap();
+        assert_eq!(s.text(), "a\nb\nc");
+        assert_eq!(s.selections().len(), 3);
+    }
+
+    #[test]
+    fn backspace_with_several_cursors() {
+        let mut s = cursors_at("ab\ncd", &[2, 5]);
+        s.backspace().unwrap();
+        assert_eq!(s.text(), "a\nc");
+        assert_eq!(
+            s.selections(),
+            &[Selection::cursor(1), Selection::cursor(3)]
+        );
+    }
+
+    #[test]
+    fn cursors_merge_when_they_meet() {
+        let mut s = cursors_at("abc", &[1, 2]);
+        s.backspace().unwrap();
+        s.backspace().unwrap();
+        assert_eq!(s.text(), "c");
+        assert_eq!(s.selections().len(), 1);
+    }
+
+    #[test]
+    fn moving_several_cursors() {
+        let mut s = cursors_at("uno\ndos\ntres", &[0, 4]);
+        s.move_cursor(Motion::LineEnd, false);
+        assert_eq!(
+            s.selections(),
+            &[Selection::cursor(3), Selection::cursor(7)]
+        );
+        s.move_cursor(Motion::Down, false);
+        assert_eq!(
+            s.selections(),
+            &[Selection::cursor(7), Selection::cursor(11)]
+        );
+    }
+
+    #[test]
+    fn add_next_occurrence_selects_word_then_matches() {
+        let mut s = EditorState::from_text("luna sol luna mar luna");
+        s.set_cursor(1, false);
+        assert!(s.add_next_occurrence());
+        assert_eq!(s.selections(), &[Selection::new(0, 4)]);
+        assert!(s.add_next_occurrence());
+        assert!(s.add_next_occurrence());
+        assert_eq!(s.selections().len(), 3);
+        assert!(!s.add_next_occurrence());
+        s.insert_text("sol").unwrap();
+        assert_eq!(s.text(), "sol sol sol mar sol");
+    }
+
+    #[test]
+    fn add_next_occurrence_wraps_around() {
+        let mut s = EditorState::from_text("ab x ab");
+        s.set_selection(Selection::new(5, 7));
+        assert!(s.add_next_occurrence());
+        assert_eq!(
+            s.selections(),
+            &[Selection::new(0, 2), Selection::new(5, 7)]
+        );
+    }
+
+    #[test]
+    fn column_cursors() {
+        let mut s = EditorState::from_text("abcd\nab\nabcd");
+        s.set_cursor(3, false);
+        assert!(s.add_cursor_vertical(false));
+        assert!(s.add_cursor_vertical(false));
+        assert!(!s.add_cursor_vertical(false));
+        // En la línea corta el cursor se ajusta al final; en la siguiente vuelve a la columna.
+        assert_eq!(
+            s.selections(),
+            &[
+                Selection::cursor(3),
+                Selection::cursor(7),
+                Selection::cursor(11)
+            ]
+        );
+        s.collapse_to_primary();
+        assert_eq!(s.selections(), &[Selection::cursor(11)]);
+    }
+
+    #[test]
+    fn pasting_one_line_per_cursor() {
+        let mut s = cursors_at("x\ny\nz", &[1, 3, 5]);
+        s.insert_texts(&["1".into(), "2".into(), "3".into()])
+            .unwrap();
+        assert_eq!(s.text(), "x1\ny2\nz3");
+        let mut s = cursors_at("x\ny", &[1, 3]);
+        s.insert_texts(&["1".into(), "2".into(), "3".into()])
+            .unwrap();
+        assert_eq!(s.text(), "x1\n2\n3\ny1\n2\n3");
+    }
+
+    #[test]
+    fn copy_texts_of_all_selections() {
+        let mut s = EditorState::from_text("uno dos tres");
+        s.set_selection(Selection::new(0, 3));
+        s.add_cursor(8);
+        s.move_cursor(Motion::WordRight, true);
+        // Ambas selecciones se amplían hasta el final de la palabra siguiente.
+        assert_eq!(s.selected_texts(), ["uno dos", "tres"]);
+        assert_eq!(s.selections().len(), 2);
+    }
+
+    #[test]
+    fn newline_with_several_cursors_keeps_each_indent() {
+        let mut s = cursors_at("  a\n    b", &[3, 9]);
+        s.insert_newline().unwrap();
+        assert_eq!(s.text(), "  a\n  \n    b\n    ");
     }
 
     #[test]

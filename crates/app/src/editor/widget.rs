@@ -210,10 +210,15 @@ impl<Message> CodeEditor<'_, Message> {
         buffer.position_to_char(Position::new(line, column))
     }
 
-    /// Rectángulo del cursor en pantalla.
+    /// Rectángulo del cursor principal en pantalla.
     fn cursor_rect(&self, geometry: &Geometry) -> Rectangle {
+        self.cursor_rect_at(self.editor.selection().head, geometry)
+    }
+
+    /// Rectángulo de un cursor situado en el índice `head`.
+    fn cursor_rect_at(&self, head: usize, geometry: &Geometry) -> Rectangle {
         let buffer = self.editor.buffer();
-        let position = self.editor.cursor();
+        let position = buffer.char_to_position(head);
         let line = buffer.line_text(position.line);
         let cells = display::visual_column(&line, position.column, TAB_WIDTH);
         Rectangle {
@@ -332,19 +337,23 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 };
                 match command {
                     KeyCommand::Edit(EditorAction::CollapseSelection)
-                        if self.editor.selection().is_empty() =>
+                        if self.editor.selection().is_empty()
+                            && self.editor.selections().len() == 1 =>
                     {
                         return;
                     }
                     KeyCommand::Edit(action) => self.publish(shell, action),
+                    // Con varios cursores se copian todas las selecciones, una por línea.
                     KeyCommand::Copy => {
-                        if let Some(selected) = self.editor.selected_text() {
-                            clipboard.write(clipboard::Kind::Standard, selected);
+                        let selected = self.editor.selected_texts();
+                        if !selected.is_empty() {
+                            clipboard.write(clipboard::Kind::Standard, selected.join("\n"));
                         }
                     }
                     KeyCommand::Cut => {
-                        if let Some(selected) = self.editor.selected_text() {
-                            clipboard.write(clipboard::Kind::Standard, selected);
+                        let selected = self.editor.selected_texts();
+                        if !selected.is_empty() {
+                            clipboard.write(clipboard::Kind::Standard, selected.join("\n"));
                             self.publish(shell, EditorAction::DeleteSelection);
                         }
                     }
@@ -396,6 +405,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 };
                 let extend = kind == ClickKind::Single && state.modifiers.shift();
                 let index = self.index_at(position, &geometry);
+                // ⌥+clic (Alt+clic) añade un cursor.
+                if kind == ClickKind::Single && state.modifiers.alt() {
+                    state.dragging = false;
+                    self.publish(shell, EditorAction::AddCursor { index });
+                    state.restart_blink();
+                    shell.capture_event();
+                    return;
+                }
                 self.publish(
                     shell,
                     EditorAction::Click {
@@ -471,7 +488,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         let visible_cells = (geometry.text_area.width / geometry.cell).ceil() as usize + 2;
 
         let selection = self.editor.selection();
-        let selected = selection.range();
+        let selections = self.editor.selections();
         let cursor_line = buffer.char_to_line(selection.head);
 
         // Números de línea.
@@ -565,7 +582,21 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     );
                 }
 
-                if selected.start <= line_end && selected.end > line_start {
+                // Selecciones (todas las de los cursores) que tocan esta línea.
+                let first = selections.partition_point(|s| s.end() < line_start);
+                for selected in selections
+                    .iter()
+                    .skip(first)
+                    .map(lorca_core::Selection::range)
+                {
+                    if selected.start > line_end {
+                        break;
+                    }
+                    if selected.is_empty()
+                        || selected.end <= line_start && selected.start < line_start
+                    {
+                        continue;
+                    }
                     let start = selected.start.max(line_start) - line_start;
                     let end = selected.end.min(line_end) - line_start;
                     let mut end_cells = display::visual_column(&text, end, TAB_WIDTH);
@@ -682,7 +713,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             }
 
             if self.focused && state.window_focused && state.cursor_visible() {
-                fill(renderer, self.cursor_rect(&geometry), colors.cursor);
+                for selection in self.editor.selections() {
+                    fill(
+                        renderer,
+                        self.cursor_rect_at(selection.head, &geometry),
+                        colors.cursor,
+                    );
+                }
             }
 
             // Indicador de posición vertical.

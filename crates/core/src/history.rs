@@ -1,6 +1,6 @@
 //! Historial de deshacer/rehacer basado en transacciones.
 
-use crate::{Edit, Selection};
+use crate::{Cursors, Edit};
 
 /// Tipo de edición, usado para decidir si una edición se agrupa con la anterior.
 ///
@@ -25,9 +25,9 @@ pub struct Transaction {
     pub id: u64,
     pub edits: Vec<Edit>,
     /// Selección antes de aplicar la transacción (se restaura al deshacer).
-    pub selection_before: Selection,
+    pub selection_before: Cursors,
     /// Selección después de aplicarla (se restaura al rehacer).
-    pub selection_after: Selection,
+    pub selection_after: Cursors,
 }
 
 /// Pilas de deshacer y rehacer.
@@ -52,8 +52,8 @@ impl History {
     pub fn record(
         &mut self,
         edits: Vec<Edit>,
-        selection_before: Selection,
-        selection_after: Selection,
+        selection_before: Cursors,
+        selection_after: Cursors,
         kind: Option<EditKind>,
     ) {
         if edits.is_empty() {
@@ -119,6 +119,11 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Selection;
+
+    fn cur(at: usize) -> Cursors {
+        Selection::cursor(at).into()
+    }
 
     fn insert(at: usize, text: &str) -> Vec<Edit> {
         vec![Edit::Insert {
@@ -130,39 +135,19 @@ mod tests {
     #[test]
     fn same_kind_contiguous_edits_are_grouped() {
         let mut h = History::new();
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            Some(EditKind::Word),
-        );
-        h.record(
-            insert(1, "b"),
-            Selection::cursor(1),
-            Selection::cursor(2),
-            Some(EditKind::Word),
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), Some(EditKind::Word));
+        h.record(insert(1, "b"), cur(1), cur(2), Some(EditKind::Word));
         let t = h.undo().unwrap();
         assert_eq!(t.edits.len(), 2);
-        assert_eq!(t.selection_before, Selection::cursor(0));
+        assert_eq!(t.selection_before, cur(0));
         assert!(!h.can_undo());
     }
 
     #[test]
     fn different_kinds_are_not_grouped() {
         let mut h = History::new();
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            Some(EditKind::Word),
-        );
-        h.record(
-            insert(1, " "),
-            Selection::cursor(1),
-            Selection::cursor(2),
-            Some(EditKind::Space),
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), Some(EditKind::Word));
+        h.record(insert(1, " "), cur(1), cur(2), Some(EditKind::Space));
         h.undo();
         assert!(h.can_undo());
     }
@@ -170,19 +155,9 @@ mod tests {
     #[test]
     fn seal_closes_group() {
         let mut h = History::new();
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            Some(EditKind::Word),
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), Some(EditKind::Word));
         h.seal();
-        h.record(
-            insert(1, "b"),
-            Selection::cursor(1),
-            Selection::cursor(2),
-            Some(EditKind::Word),
-        );
+        h.record(insert(1, "b"), cur(1), cur(2), Some(EditKind::Word));
         h.undo();
         assert!(h.can_undo());
     }
@@ -190,18 +165,8 @@ mod tests {
     #[test]
     fn non_contiguous_edits_are_not_grouped() {
         let mut h = History::new();
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            Some(EditKind::Word),
-        );
-        h.record(
-            insert(5, "b"),
-            Selection::cursor(5),
-            Selection::cursor(6),
-            Some(EditKind::Word),
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), Some(EditKind::Word));
+        h.record(insert(5, "b"), cur(5), cur(6), Some(EditKind::Word));
         h.undo();
         assert!(h.can_undo());
     }
@@ -209,20 +174,10 @@ mod tests {
     #[test]
     fn new_edit_clears_redo() {
         let mut h = History::new();
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            None,
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), None);
         h.undo();
         assert!(h.can_redo());
-        h.record(
-            insert(0, "b"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            None,
-        );
+        h.record(insert(0, "b"), cur(0), cur(1), None);
         assert!(!h.can_redo());
     }
 
@@ -230,19 +185,9 @@ mod tests {
     fn revision_tracks_state() {
         let mut h = History::new();
         assert_eq!(h.revision(), 0);
-        h.record(
-            insert(0, "a"),
-            Selection::cursor(0),
-            Selection::cursor(1),
-            None,
-        );
+        h.record(insert(0, "a"), cur(0), cur(1), None);
         let saved = h.revision();
-        h.record(
-            insert(1, "b"),
-            Selection::cursor(1),
-            Selection::cursor(2),
-            None,
-        );
+        h.record(insert(1, "b"), cur(1), cur(2), None);
         assert_ne!(h.revision(), saved);
         h.undo();
         assert_eq!(h.revision(), saved);
@@ -255,7 +200,7 @@ mod tests {
     #[test]
     fn empty_edits_are_ignored() {
         let mut h = History::new();
-        h.record(Vec::new(), Selection::cursor(0), Selection::cursor(0), None);
+        h.record(Vec::new(), cur(0), cur(0), None);
         assert!(!h.can_undo());
     }
 }

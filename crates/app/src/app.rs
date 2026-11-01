@@ -1182,7 +1182,10 @@ impl Lorca {
             let cursor = document.editor.cursor();
             let selected = document.editor.selection().range().len();
             let mut position = format!("Lín {}, Col {}", cursor.line + 1, cursor.column + 1);
-            if selected > 0 {
+            let cursors = document.editor.selections().len();
+            if cursors > 1 {
+                position.push_str(&format!(" · {cursors} cursores"));
+            } else if selected > 0 {
                 position.push_str(&format!(" ({selected} seleccionados)"));
             }
             let format = document.format();

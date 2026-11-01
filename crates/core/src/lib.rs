@@ -6,6 +6,7 @@
 
 mod bookmarks;
 mod buffer;
+mod cursors;
 pub mod display;
 mod edit;
 mod editor;
@@ -19,6 +20,7 @@ mod text_format;
 
 pub use bookmarks::Bookmarks;
 pub use buffer::Buffer;
+pub use cursors::Cursors;
 pub use edit::Edit;
 pub use editor::{EditorState, Motion};
 pub use encoding::{Decoded, TextEncoding, decode, decode_as, encode};

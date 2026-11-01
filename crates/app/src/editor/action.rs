@@ -44,6 +44,16 @@ pub enum EditorAction {
         dy: f32,
     },
     Viewport(Viewport),
+    /// ⌥+clic: añade un cursor.
+    AddCursor {
+        index: usize,
+    },
+    /// ⌘D: selecciona la palabra o añade la siguiente aparición.
+    AddNextOccurrence,
+    /// ⌥⌘↑/↓: añade un cursor en la línea de arriba o de abajo.
+    AddCursorVertical {
+        up: bool,
+    },
     /// Clic derecho en `index`; `position` es el punto de la ventana donde abrir el menú.
     ContextMenu {
         index: usize,
@@ -88,6 +98,26 @@ pub fn apply_action(
             ClickKind::Triple => editor.select_line(editor.buffer().char_to_line(index)),
         },
         EditorAction::Drag { index } => editor.set_cursor(index, true),
+        EditorAction::AddCursor { index } => editor.add_cursor(index),
+        EditorAction::AddNextOccurrence => {
+            editor.add_next_occurrence();
+        }
+        EditorAction::AddCursorVertical { up } => {
+            editor.add_cursor_vertical(up);
+        }
+        // Con tantos cursores como líneas pegadas, se reparte una línea a cada uno.
+        EditorAction::Insert(text) if editor.selections().len() > 1 => {
+            let lines: Vec<String> = text
+                .trim_end_matches('\n')
+                .split('\n')
+                .map(str::to_owned)
+                .collect();
+            if lines.len() == editor.selections().len() {
+                editor.insert_texts(&lines)?;
+            } else {
+                editor.insert_text(&text)?;
+            }
+        }
         EditorAction::Insert(text) => editor.insert_text(&text)?,
         EditorAction::Newline => editor.insert_newline()?,
         EditorAction::Indent => editor.insert_text(INDENT)?,
@@ -103,9 +133,14 @@ pub fn apply_action(
         }
         EditorAction::DeleteSelection => editor.delete_selection()?,
         EditorAction::SelectAll => editor.select_all(),
+        // Esc: primero deja un solo cursor; después quita la selección.
         EditorAction::CollapseSelection => {
-            let head = editor.selection().head;
-            editor.set_cursor(head, false);
+            if editor.selections().len() > 1 {
+                editor.collapse_to_primary();
+            } else {
+                let head = editor.selection().head;
+                editor.set_cursor(head, false);
+            }
         }
     }
     view.reveal_cursor(editor, viewport);

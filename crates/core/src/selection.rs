@@ -38,6 +38,11 @@ impl Selection {
         self.anchor.max(self.head)
     }
 
+    /// Número de caracteres seleccionados.
+    pub fn len(&self) -> usize {
+        self.end() - self.start()
+    }
+
     pub fn range(&self) -> Range<usize> {
         self.start()..self.end()
     }

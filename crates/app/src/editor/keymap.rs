@@ -36,6 +36,19 @@ pub fn map_key(
     let motion = |motion| Some(KeyCommand::Edit(EditorAction::Move { motion, extend }));
     let edit = |action| Some(KeyCommand::Edit(action));
 
+    // ⌥⌘↑/↓ (Ctrl+Alt+↑/↓): añadir cursor arriba o abajo.
+    if modifiers.command() && modifiers.alt() {
+        match key {
+            Key::Named(Named::ArrowUp) => {
+                return edit(EditorAction::AddCursorVertical { up: true });
+            }
+            Key::Named(Named::ArrowDown) => {
+                return edit(EditorAction::AddCursorVertical { up: false });
+            }
+            _ => {}
+        }
+    }
+
     if let Key::Named(named) = key {
         match named {
             Named::ArrowLeft => {
@@ -123,6 +136,7 @@ pub fn map_key(
         }
         return match key.to_latin(physical_key) {
             Some('a') => edit(EditorAction::SelectAll),
+            Some('d') => edit(EditorAction::AddNextOccurrence),
             Some('c') => Some(KeyCommand::Copy),
             Some('x') => Some(KeyCommand::Cut),
             Some('v') => Some(KeyCommand::Paste),
@@ -213,6 +227,20 @@ mod tests {
     fn shifted_clipboard_combos_are_not_captured() {
         assert_eq!(character("V", Modifiers::COMMAND | Modifiers::SHIFT), None);
         assert_eq!(character("C", Modifiers::COMMAND | Modifiers::SHIFT), None);
+    }
+
+    #[test]
+    fn multicursor_shortcuts() {
+        assert_eq!(
+            character("d", Modifiers::COMMAND),
+            Some(KeyCommand::Edit(EditorAction::AddNextOccurrence))
+        );
+        assert_eq!(
+            named(Named::ArrowDown, Modifiers::COMMAND | Modifiers::ALT),
+            Some(KeyCommand::Edit(EditorAction::AddCursorVertical {
+                up: false
+            }))
+        );
     }
 
     #[test]
