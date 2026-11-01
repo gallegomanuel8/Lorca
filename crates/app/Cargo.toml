@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-iced = { version = "0.14.0", features = ["advanced"] }
+iced = { version = "0.14.0", features = ["advanced", "smol"] }
 lorca-core = { version = "0.1.0", path = "../core" }
 lorca-syntax = { version = "0.1.0", path = "../syntax" }
 lorca-workspace = { version = "0.1.0", path = "../workspace" }

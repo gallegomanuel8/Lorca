@@ -195,6 +195,15 @@ impl Workspace {
         DocumentId(self.next_id)
     }
 
+    /// Crea un documento con un id nuevo, lo añade al final y lo activa.
+    pub(crate) fn push_document(
+        &mut self,
+        make: impl FnOnce(DocumentId) -> Document,
+    ) -> DocumentId {
+        let id = self.allocate_id();
+        self.insert(make(id))
+    }
+
     fn insert(&mut self, document: Document) -> DocumentId {
         let id = document.id();
         self.documents.insert(id, document);

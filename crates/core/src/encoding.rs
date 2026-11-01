@@ -16,6 +16,31 @@ pub enum TextEncoding {
 }
 
 impl TextEncoding {
+    /// Todas las codificaciones soportadas.
+    pub const ALL: [Self; 5] = [
+        Self::Utf8,
+        Self::Utf8Bom,
+        Self::Utf16Le,
+        Self::Utf16Be,
+        Self::Windows1252,
+    ];
+
+    /// Identificador estable para guardar en archivos de sesión o configuración.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Utf8 => "utf-8",
+            Self::Utf8Bom => "utf-8-bom",
+            Self::Utf16Le => "utf-16le",
+            Self::Utf16Be => "utf-16be",
+            Self::Windows1252 => "windows-1252",
+        }
+    }
+
+    /// Inverso de [`TextEncoding::id`].
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|e| e.id() == id)
+    }
+
     /// Nombre para mostrar en la interfaz.
     pub const fn label(self) -> &'static str {
         match self {
@@ -112,6 +137,14 @@ pub fn encode(text: &str, encoding: TextEncoding) -> Result<Vec<u8>, CoreError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ids_round_trip() {
+        for encoding in TextEncoding::ALL {
+            assert_eq!(TextEncoding::from_id(encoding.id()), Some(encoding));
+        }
+        assert_eq!(TextEncoding::from_id("ebcdic"), None);
+    }
 
     #[test]
     fn plain_utf8() {

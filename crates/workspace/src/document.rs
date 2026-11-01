@@ -5,9 +5,18 @@ use std::path::{Path, PathBuf};
 use lorca_core::{EditorState, LoadedText, TextFormat};
 use lorca_syntax::Language;
 
+use crate::DiskStamp;
+
 /// Identificador estable de un documento mientras está abierto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DocumentId(pub(crate) u64);
+
+impl DocumentId {
+    /// Valor numérico, útil para nombres de archivo derivados.
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
 
 /// Documento abierto en una pestaña.
 #[derive(Debug, Clone)]
@@ -23,6 +32,8 @@ pub struct Document {
     saved_revision: u64,
     /// Cambios que no pasan por el historial (p. ej. cambiar la codificación).
     forced_modified: bool,
+    /// Huella del archivo en disco al abrirlo o guardarlo por última vez.
+    disk_stamp: Option<DiskStamp>,
 }
 
 impl Document {
@@ -36,6 +47,7 @@ impl Document {
             language: Language::PlainText,
             saved_revision: 0,
             forced_modified: false,
+            disk_stamp: None,
         }
     }
 
@@ -46,10 +58,41 @@ impl Document {
             saved_revision: editor.revision(),
             editor,
             language: Language::from_path(&path),
+            disk_stamp: DiskStamp::of(&path),
             path: Some(path),
             untitled_number: None,
             format: loaded.format,
             forced_modified: false,
+        }
+    }
+
+    /// Documento restaurado de una copia de respaldo: siempre se considera modificado,
+    /// porque su contenido no coincide (o puede no coincidir) con el del disco.
+    pub(crate) fn restored(
+        id: DocumentId,
+        path: Option<PathBuf>,
+        untitled_number: Option<u32>,
+        text: &str,
+        format: TextFormat,
+        disk_stamp: Option<DiskStamp>,
+    ) -> Self {
+        let editor = EditorState::from_text(text);
+        Self {
+            id,
+            saved_revision: editor.revision(),
+            editor,
+            language: path
+                .as_deref()
+                .map_or(Language::PlainText, Language::from_path),
+            untitled_number: if path.is_some() {
+                None
+            } else {
+                untitled_number
+            },
+            path,
+            format,
+            forced_modified: true,
+            disk_stamp,
         }
     }
 
@@ -67,6 +110,10 @@ impl Document {
 
     pub fn format(&self) -> TextFormat {
         self.format
+    }
+
+    pub fn disk_stamp(&self) -> Option<DiskStamp> {
+        self.disk_stamp
     }
 
     pub fn language(&self) -> Language {
@@ -106,5 +153,6 @@ impl Document {
         self.untitled_number = None;
         self.saved_revision = self.editor.revision();
         self.forced_modified = false;
+        self.disk_stamp = self.path.as_deref().and_then(DiskStamp::of);
     }
 }

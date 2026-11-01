@@ -20,6 +20,12 @@ pub enum WorkspaceError {
         source: std::io::Error,
     },
 
+    #[error("formato inválido en «{}»: {message}", path.display())]
+    Parse { path: PathBuf, message: String },
+
+    #[error("no se pudo serializar «{}»: {message}", path.display())]
+    Serialize { path: PathBuf, message: String },
+
     #[error(transparent)]
     Core(#[from] CoreError),
 

@@ -5,9 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+dirs = "7.0.0"
 lorca-core = { version = "0.1.0", path = "../core" }
 lorca-syntax = { version = "0.1.0", path = "../syntax" }
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+toml = "1.1.8"
 
 [lints]
 workspace = true

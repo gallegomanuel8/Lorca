@@ -24,6 +24,23 @@ impl LineEnding {
         }
     }
 
+    /// Identificador estable para guardar en archivos de sesión o configuración.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Lf => "lf",
+            Self::CrLf => "crlf",
+        }
+    }
+
+    /// Inverso de [`LineEnding::id`].
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "lf" => Some(Self::Lf),
+            "crlf" => Some(Self::CrLf),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Lf => "\n",
@@ -85,6 +102,14 @@ mod tests {
         assert_eq!(LineEnding::detect("a\r\nb\r\nc\n"), Some(LineEnding::CrLf));
         assert_eq!(LineEnding::detect("a\r\nb\nc\n"), Some(LineEnding::Lf));
         assert_eq!(LineEnding::detect("a\rb"), Some(LineEnding::Lf));
+    }
+
+    #[test]
+    fn ids_round_trip() {
+        for ending in [LineEnding::Lf, LineEnding::CrLf] {
+            assert_eq!(LineEnding::from_id(ending.id()), Some(ending));
+        }
+        assert_eq!(LineEnding::from_id("cr"), None);
     }
 
     #[test]
