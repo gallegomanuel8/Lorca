@@ -38,11 +38,28 @@ impl fmt::Display for ThemeMode {
 }
 
 /// Preferencias persistentes. Los campos ausentes del archivo toman su valor por defecto.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Tema elegido. `None` significa que el usuario aún no ha elegido (primer arranque).
     pub theme: Option<ThemeMode>,
+    /// Mostrar espacios (·) y tabuladores (→).
+    pub show_whitespace: bool,
+    /// Mostrar los finales de línea (LF / CRLF).
+    pub show_line_endings: bool,
+    /// Mostrar guías verticales de indentación.
+    pub indent_guides: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: None,
+            show_whitespace: false,
+            show_line_endings: false,
+            indent_guides: true,
+        }
+    }
 }
 
 impl Config {
@@ -86,13 +103,25 @@ mod tests {
         let path = dir.path().join("sub").join(Config::FILE_NAME);
         let config = Config {
             theme: Some(ThemeMode::Dark),
+            show_whitespace: true,
+            ..Config::default()
         };
         config.save(&path).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap().trim(),
-            "theme = \"dark\""
-        );
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("theme = \"dark\""));
+        assert!(written.contains("show_whitespace = true"));
         assert_eq!(Config::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn old_files_get_defaults_for_new_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(Config::FILE_NAME);
+        std::fs::write(&path, "theme = \"light\"").unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.theme, Some(ThemeMode::Light));
+        assert!(config.indent_guides);
+        assert!(!config.show_whitespace);
     }
 
     #[test]

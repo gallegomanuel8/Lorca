@@ -3,6 +3,7 @@ name = "lorca-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 encoding_rs = "0.8.44"

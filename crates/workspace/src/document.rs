@@ -159,6 +159,15 @@ impl Document {
         self.forced_modified || self.editor.revision() != self.saved_revision
     }
 
+    /// Cambia la codificación o el final de línea con que se guardará. Si cambia algo, el
+    /// documento queda modificado (el archivo en disco aún tiene el formato anterior).
+    pub fn set_format(&mut self, format: TextFormat) {
+        if format != self.format {
+            self.format = format;
+            self.forced_modified = true;
+        }
+    }
+
     /// Marca el documento como modificado aunque el texto no haya cambiado.
     pub fn mark_modified(&mut self) {
         self.forced_modified = true;
@@ -204,6 +213,28 @@ mod tests {
         doc.mark_saved(PathBuf::from("/x/script.py"));
         assert_eq!(doc.language(), Language::Sql);
         assert!(doc.is_language_manual());
+    }
+
+    #[test]
+    fn changing_format_marks_modified() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        let format = doc.format();
+        doc.set_format(format);
+        assert!(!doc.is_modified());
+        let crlf = TextFormat {
+            line_ending: lorca_core::LineEnding::CrLf,
+            ..format
+        };
+        let lf = TextFormat {
+            line_ending: lorca_core::LineEnding::Lf,
+            ..format
+        };
+        doc.set_format(if format.line_ending == lorca_core::LineEnding::Lf {
+            crlf
+        } else {
+            lf
+        });
+        assert!(doc.is_modified());
     }
 
     #[test]

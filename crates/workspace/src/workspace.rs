@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use lorca_core::{LoadedText, load_bytes, save_bytes};
+use lorca_core::{
+    LineEnding, LoadedText, TextEncoding, TextFormat, decode_as, load_bytes, save_bytes,
+};
 
 use crate::{Document, DocumentId, WorkspaceError};
 
@@ -297,6 +299,42 @@ impl Workspace {
         Ok(())
     }
 
+    /// Vuelve a leer el archivo con otra codificación, descartando los cambios sin guardar.
+    /// Conserva la posición de la pestaña y el lenguaje elegido a mano.
+    pub fn reload_with_encoding(
+        &mut self,
+        id: DocumentId,
+        encoding: TextEncoding,
+    ) -> Result<(), WorkspaceError> {
+        let document = self
+            .documents
+            .get(&id)
+            .ok_or(WorkspaceError::UnknownDocument(id))?;
+        let path = document.path().ok_or(WorkspaceError::NoPath)?.to_owned();
+        let manual_language = document.is_language_manual().then(|| document.language());
+        let bytes = std::fs::read(&path).map_err(|source| WorkspaceError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        let decoded = decode_as(&bytes, encoding);
+        let line_ending =
+            LineEnding::detect(&decoded.text).unwrap_or_else(LineEnding::platform_default);
+        let loaded = LoadedText {
+            text: LineEnding::normalize(&decoded.text).into_owned(),
+            format: TextFormat {
+                encoding: decoded.encoding,
+                line_ending,
+            },
+            had_decoding_errors: decoded.had_errors,
+        };
+        let mut reloaded = Document::from_loaded(id, path, loaded);
+        if let Some(language) = manual_language {
+            reloaded.set_language(language);
+        }
+        self.documents.insert(id, reloaded);
+        Ok(())
+    }
+
     // --- Auxiliares -------------------------------------------------------------------
 
     fn allocate_id(&mut self) -> DocumentId {
@@ -369,7 +407,6 @@ fn normalize_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lorca_core::{LineEnding, TextEncoding};
 
     fn loaded(text: &str) -> LoadedText {
         load_bytes(text.as_bytes())
@@ -660,6 +697,39 @@ mod tests {
                 .unwrap(),
             id
         );
+    }
+
+    #[test]
+    fn reload_with_other_encoding() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("viejo.txt");
+        // UTF-8 válido que en realidad se escribió pensando en otra cosa: forzamos 1252.
+        std::fs::write(&path, "canción\r\n".as_bytes()).unwrap();
+        let mut ws = Workspace::new();
+        let id = ws.open_file(&path).unwrap();
+        ws.document_mut(id)
+            .unwrap()
+            .editor
+            .insert_text("cambio")
+            .unwrap();
+        ws.reload_with_encoding(id, TextEncoding::Windows1252)
+            .unwrap();
+        let doc = ws.document(id).unwrap();
+        assert_eq!(doc.editor.text(), "canciÃ³n\n");
+        assert_eq!(doc.format().encoding, TextEncoding::Windows1252);
+        assert_eq!(doc.format().line_ending, LineEnding::CrLf);
+        assert!(!doc.is_modified());
+        assert_eq!(ws.tabs(), &[id]);
+    }
+
+    #[test]
+    fn reload_needs_a_path() {
+        let mut ws = Workspace::new();
+        let id = ws.new_document();
+        assert!(matches!(
+            ws.reload_with_encoding(id, TextEncoding::Utf8),
+            Err(WorkspaceError::NoPath)
+        ));
     }
 
     #[test]
