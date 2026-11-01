@@ -12,7 +12,7 @@ mod storage;
 mod theme;
 mod workspace;
 
-pub use config::{Config, ThemeMode};
+pub use config::{Config, LspConfig, LspServer, ThemeMode};
 pub use document::{Document, DocumentId};
 pub use error::WorkspaceError;
 pub use session::{RestoreReport, SESSION_VERSION, Session, SessionDocument, SessionStore};

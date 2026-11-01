@@ -36,6 +36,8 @@ label!(ZOOM_IN, "⌘+", "Ctrl++");
 label!(ZOOM_OUT, "⌘−", "Ctrl+−");
 label!(ZOOM_RESET, "⌘0", "Ctrl+0");
 label!(SETTINGS, "⌘,", "Ctrl+,");
+label!(COMPLETE, "⌃Espacio", "Ctrl+Espacio");
+label!(HOVER, "⌘I", "Ctrl+I");
 
 /// Texto de «mostrar el archivo» en el gestor de archivos del sistema.
 pub const REVEAL: &str = if cfg!(target_os = "macos") {

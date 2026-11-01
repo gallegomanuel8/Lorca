@@ -18,6 +18,7 @@ use std::ops::Range;
 use lorca_core::{EditorState, LineEnding, Position, display};
 use lorca_syntax::Highlights;
 
+use super::action::CompletionKey;
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
 use super::{ClickKind, DocView, EditorAction, Metrics, TEXT_PADDING, Viewport};
@@ -58,6 +59,23 @@ pub struct ViewOptions {
     pub line_ending: Option<LineEnding>,
     pub indent_guides: bool,
     pub metrics: Metrics,
+    /// Hay un desplegable de autocompletado: ↑, ↓, Intro y Tab son para él.
+    pub completion_open: bool,
+}
+
+/// Gravedad de un subrayado de diagnóstico.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnderlineKind {
+    Error,
+    Warning,
+    Info,
+}
+
+/// Rango (en caracteres) subrayado con una línea ondulada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Underline {
+    pub range: Range<usize>,
+    pub kind: UnderlineKind,
 }
 
 /// Rangos (en caracteres, ordenados y sin solapes) que se resaltan bajo el texto.
@@ -69,6 +87,8 @@ pub struct Decorations<'a> {
     pub current: Option<usize>,
     /// Coincidencias marcadas con «Marcar todo».
     pub marks: &'a [Range<usize>],
+    /// Diagnósticos del servidor de lenguaje, ordenados por inicio.
+    pub underlines: &'a [Underline],
 }
 
 /// Widget de edición. Ver el módulo [`crate::editor`].
@@ -109,6 +129,7 @@ struct State {
     now: Instant,
     window_focused: bool,
     reported: Option<Viewport>,
+    reported_cursor: Option<Point>,
     preedit: Option<input_method::Preedit>,
 }
 
@@ -125,6 +146,7 @@ impl Default for State {
             now,
             window_focused: true,
             reported: None,
+            reported_cursor: None,
             preedit: None,
         }
     }
@@ -327,6 +349,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     state.reported = Some(viewport);
                     self.publish(shell, EditorAction::Viewport(viewport));
                 }
+                if self.focused {
+                    let rect = self.cursor_rect(&geometry);
+                    let point = Point::new(rect.x, rect.y + rect.height);
+                    if state.reported_cursor != Some(point) {
+                        state.reported_cursor = Some(point);
+                        self.publish(shell, EditorAction::CursorPoint(point));
+                    }
+                }
                 if self.focused && state.window_focused {
                     let elapsed = now.saturating_duration_since(state.blink_epoch).as_millis();
                     let wait = BLINK_MILLIS - elapsed % BLINK_MILLIS;
@@ -346,6 +376,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 ..
             }) if self.focused && !shell.is_event_captured() => {
                 state.modifiers = *modifiers;
+                if self.options.completion_open
+                    && let Some(key) = completion_key(key, *modifiers)
+                {
+                    self.publish(shell, EditorAction::Completion(key));
+                    shell.capture_event();
+                    return;
+                }
                 let Some(command) = map_key(
                     key,
                     *physical_key,
@@ -425,6 +462,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 };
                 let extend = kind == ClickKind::Single && state.modifiers.shift();
                 let index = self.index_at(position, &geometry);
+                // ⌘+clic (Ctrl+clic) va a la definición.
+                if kind == ClickKind::Single && state.modifiers.command() {
+                    state.dragging = false;
+                    self.publish(shell, EditorAction::GoToDefinition { index });
+                    shell.capture_event();
+                    return;
+                }
                 // ⌥+clic (Alt+clic) añade un cursor.
                 if kind == ClickKind::Single && state.modifiers.alt() {
                     state.dragging = false;
@@ -762,6 +806,23 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 }
             }
 
+            for underline in self.decorations.underlines {
+                let color = match underline.kind {
+                    UnderlineKind::Error => colors.error,
+                    UnderlineKind::Warning => colors.warning,
+                    UnderlineKind::Info => colors.info,
+                };
+                draw_underline(
+                    renderer,
+                    &geometry,
+                    view,
+                    buffer,
+                    underline,
+                    first_line..last_line,
+                    color,
+                );
+            }
+
             if self.focused && state.window_focused && state.cursor_visible() {
                 for selection in self.editor.selections() {
                     fill(
@@ -967,6 +1028,71 @@ impl LineRanges<'_> {
                 color,
             );
         }
+    }
+}
+
+/// Línea ondulada bajo la parte visible de un rango (puede ocupar varias líneas). Un rango
+/// vacío marca una celda.
+fn draw_underline(
+    renderer: &mut Renderer,
+    geometry: &Geometry,
+    view: DocView,
+    buffer: &lorca_core::Buffer,
+    underline: &Underline,
+    visible: Range<usize>,
+    color: Color,
+) {
+    let tab_width = geometry.metrics.tab_width;
+    let start = buffer.char_to_position(underline.range.start);
+    let end = buffer.char_to_position(underline.range.end);
+    for line in start.line.max(visible.start)..=end.line.min(visible.end.saturating_sub(1)) {
+        let text = buffer.line_text(line);
+        let from = if line == start.line { start.column } else { 0 };
+        let to = if line == end.line {
+            end.column
+        } else {
+            text.chars().count()
+        };
+        let x0 = geometry.cell_x(display::visual_column(&text, from, tab_width), view);
+        let mut cells = display::visual_column(&text, to, tab_width)
+            .saturating_sub(display::visual_column(&text, from, tab_width));
+        if cells == 0 {
+            cells = 1;
+        }
+        let width = cells as f32 * geometry.cell;
+        let base = geometry.line_y(line, view) + geometry.metrics.line_height - 3.0;
+        // Ondas de 2 píxeles: un tramo arriba y otro abajo, alternos.
+        let step: f32 = 2.0;
+        let mut x = x0;
+        let mut up = false;
+        while x < x0 + width {
+            fill(
+                renderer,
+                Rectangle {
+                    x,
+                    y: if up { base - 1.0 } else { base },
+                    width: step.min(x0 + width - x),
+                    height: 1.5,
+                },
+                color,
+            );
+            x += step;
+            up = !up;
+        }
+    }
+}
+
+/// Tecla para el desplegable de autocompletado (sin modificadores).
+fn completion_key(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option<CompletionKey> {
+    use keyboard::key::Named;
+    if modifiers.command() || modifiers.alt() || modifiers.shift() || modifiers.control() {
+        return None;
+    }
+    match key {
+        keyboard::Key::Named(Named::ArrowUp) => Some(CompletionKey::Up),
+        keyboard::Key::Named(Named::ArrowDown) => Some(CompletionKey::Down),
+        keyboard::Key::Named(Named::Enter | Named::Tab) => Some(CompletionKey::Accept),
+        _ => None,
     }
 }
 

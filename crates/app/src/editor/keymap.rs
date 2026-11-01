@@ -149,6 +149,10 @@ pub fn map_key(
         return None;
     }
 
+    // ⌃Espacio es el autocompletado, no un espacio.
+    if modifiers.control() && text == Some(" ") {
+        return None;
+    }
     let text: String = text?.chars().filter(|c| !c.is_control()).collect();
     (!text.is_empty()).then_some(KeyCommand::Edit(EditorAction::Insert(text)))
 }

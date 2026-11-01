@@ -2121,6 +2121,7 @@ dependencies = [
  "iced",
  "lorca-core",
  "lorca-formats",
+ "lorca-lsp",
  "lorca-search",
  "lorca-syntax",
  "lorca-workspace",

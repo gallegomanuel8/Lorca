@@ -100,6 +100,7 @@ impl Lorca {
                 .mark_cache
                 .get(&id)
                 .map_or(&[][..], |c| c.matches.as_slice()),
+            underlines: self.underlines(id),
         };
         let focused = is_active
             && self.focus == super::Focus::Editor
@@ -114,6 +115,11 @@ impl Lorca {
                 .then(|| document.format().line_ending),
             indent_guides: self.config.indent_guides,
             metrics: self.metrics(),
+            completion_open: self
+                .lsp
+                .completion
+                .as_ref()
+                .is_some_and(|c| c.document == id),
         };
         let editor: Element<'_, Message> = code_editor(
             &document.editor,
@@ -353,6 +359,28 @@ impl Lorca {
             ));
         }
         commands.extend([
+            Command::new(
+                "Código: Autocompletar",
+                keys::COMPLETE,
+                Message::TriggerCompletion,
+            ),
+            Command::new(
+                "Código: Mostrar información",
+                keys::HOVER,
+                Message::ShowHover,
+            ),
+            Command::new("Código: Ir a la definición", "F12", Message::GoToDefinition),
+            Command::new(
+                "Código: Siguiente problema",
+                "F8",
+                Message::NextProblem(true),
+            ),
+            Command::new(
+                "Código: Problema anterior",
+                "⇧F8",
+                Message::NextProblem(false),
+            ),
+            Command::new("LSP: Reiniciar servidores", "", Message::LspRestart),
             Command::new("Ver: Aumentar letra", keys::ZOOM_IN, Message::Zoom(1)),
             Command::new("Ver: Reducir letra", keys::ZOOM_OUT, Message::Zoom(-1)),
             Command::new(
@@ -466,7 +494,23 @@ impl Lorca {
                 let editor = &document.editor;
                 let has_selection = !editor.selection().is_empty();
                 let language = document.language();
-                let mut items = vec![
+                let mut items = Vec::new();
+                if self.lsp_status().is_some_and(|(_, ready)| ready) {
+                    items.extend([
+                        MenuItem::new(
+                            "Ir a la definición",
+                            "F12",
+                            Some(ContextAction::GoToDefinition),
+                        ),
+                        MenuItem::new(
+                            "Mostrar información",
+                            keys::HOVER,
+                            Some(ContextAction::ShowHover),
+                        ),
+                        MenuItem::Separator,
+                    ]);
+                }
+                items.extend([
                     MenuItem::new("Cortar", keys::CUT, some(has_selection, ContextAction::Cut)),
                     MenuItem::new(
                         "Copiar",
@@ -496,7 +540,7 @@ impl Lorca {
                         some(editor.can_redo(), ContextAction::Redo),
                     ),
                     MenuItem::Separator,
-                ];
+                ]);
                 let format_label = match language {
                     Language::Json => "Formatear JSON",
                     Language::Sql => "Formatear SQL",
@@ -857,6 +901,14 @@ impl Lorca {
                         Err(error) => self.show_error(error.to_string()),
                     }
                 }
+                Task::none()
+            }
+            ContextAction::GoToDefinition => {
+                self.request_definition();
+                Task::none()
+            }
+            ContextAction::ShowHover => {
+                self.request_hover();
                 Task::none()
             }
             ContextAction::SetThemeMode(mode) => {

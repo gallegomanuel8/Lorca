@@ -1,5 +1,6 @@
 //! Configuración del usuario (`config.toml`).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
@@ -69,6 +70,47 @@ pub struct Config {
     pub tab_width: u8,
     /// La tecla Tab inserta espacios (`true`) o un tabulador.
     pub insert_spaces: bool,
+    /// Servidores de lenguaje (LSP).
+    pub lsp: LspConfig,
+}
+
+/// Configuración de los servidores de lenguaje.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LspConfig {
+    /// Usar servidores de lenguaje.
+    pub enabled: bool,
+    /// Pedir autocompletado al escribir (si no, solo con ⌃Espacio).
+    pub auto_completion: bool,
+    /// Servidor por lenguaje (claves como `rust`, `python`…). Sustituye al servidor
+    /// conocido para ese lenguaje.
+    pub servers: BTreeMap<String, LspServer>,
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_completion: true,
+            servers: BTreeMap::new(),
+        }
+    }
+}
+
+/// Orden de un servidor de lenguaje. Con `enabled = false` no se usa ninguno para ese
+/// lenguaje.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LspServer {
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+const fn enabled_by_default() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -83,6 +125,7 @@ impl Default for Config {
             font_size: Self::DEFAULT_FONT_SIZE,
             tab_width: 4,
             insert_spaces: true,
+            lsp: LspConfig::default(),
         }
     }
 }
@@ -204,6 +247,24 @@ mod tests {
         assert_eq!(config.font_size(), 40);
         config.insert_spaces = false;
         assert_eq!(config.indent_unit(), "\t");
+    }
+
+    #[test]
+    fn lsp_servers_can_be_overridden() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(Config::FILE_NAME);
+        std::fs::write(
+            &path,
+            "[lsp.servers.python]\ncommand = \"pylsp\"\n\n[lsp.servers.rust]\nenabled = false\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.lsp.enabled);
+        assert_eq!(config.lsp.servers["python"].command, "pylsp");
+        assert!(config.lsp.servers["python"].enabled);
+        assert!(!config.lsp.servers["rust"].enabled);
+        config.save(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap(), config);
     }
 
     #[test]

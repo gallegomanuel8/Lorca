@@ -77,6 +77,8 @@ pub enum ContextAction {
     TogglePreview,
     ExportPdf(DocumentId),
     SetThemeMode(lorca_workspace::ThemeMode),
+    GoToDefinition,
+    ShowHover,
     /// Índice del tema en el [`lorca_workspace::ThemeSet`].
     SetTheme(usize),
 }

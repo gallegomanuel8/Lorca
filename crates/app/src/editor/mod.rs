@@ -9,10 +9,10 @@ mod palette;
 mod view;
 mod widget;
 
-pub use action::{ClickKind, EditorAction, apply_action};
+pub use action::{ClickKind, CompletionKey, EditorAction, apply_action};
 pub use palette::{EditorColors, to_color};
 pub use view::{DocView, Viewport};
-pub use widget::{Decorations, ViewOptions, code_editor};
+pub use widget::{Decorations, Underline, UnderlineKind, ViewOptions, code_editor};
 
 /// Medidas del texto del editor, derivadas de la configuración.
 #[derive(Debug, Clone, Copy, PartialEq)]

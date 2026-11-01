@@ -42,6 +42,11 @@ use find_actions::{Focus, MatchCache};
 #[path = "panes.rs"]
 mod panes;
 
+#[path = "lsp_actions.rs"]
+mod lsp_actions;
+
+use lsp_actions::LspState;
+
 use panes::PaneLayout;
 
 /// Tamaño inicial de la ventana.
@@ -151,6 +156,17 @@ pub enum Message {
     OpenConfig,
     /// Crea una copia editable del tema actual y la abre.
     NewTheme,
+    /// La suscripción de los servidores de lenguaje está lista para recibir eventos.
+    LspConnected(iced::futures::channel::mpsc::UnboundedSender<lorca_lsp::Event>),
+    Lsp(lorca_lsp::Event),
+    /// Clic en una propuesta del desplegable (posición en la lista visible).
+    CompletionPick(usize),
+    TriggerCompletion,
+    ShowHover,
+    GoToDefinition,
+    /// Siguiente (`true`) o anterior problema del documento.
+    NextProblem(bool),
+    LspRestart,
     /// Opción marcada en la pantalla de bienvenida (aún sin confirmar).
     WelcomeChoose(ThemeMode),
     WelcomeDone,
@@ -239,6 +255,7 @@ pub struct Lorca {
     palette: Option<Palette>,
     /// Barra de menús nativa; se conserva para que siga viva.
     native_menu: Option<menu::NativeMenu>,
+    lsp: LspState,
 }
 
 impl Lorca {
@@ -330,6 +347,7 @@ impl Lorca {
             dragging_tab: None,
             palette: None,
             native_menu: None,
+            lsp: LspState::default(),
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -394,6 +412,7 @@ impl Lorca {
             menu::events(),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
             watcher::watch(self.watched()),
+            crate::lsp_view::events(),
         ];
         if self.palette.is_some() {
             subscriptions.push(event::listen_with(palette_keys));
@@ -428,6 +447,8 @@ impl Lorca {
         self.refresh_search();
         self.refresh_previews();
         self.refresh_theme();
+        self.sync_lsp();
+        self.refresh_diagnostics();
         Task::batch([task, self.schedule_highlight()])
     }
 
@@ -440,10 +461,25 @@ impl Lorca {
 
         match message {
             Message::Editor(id, action) => {
-                if let EditorAction::ContextMenu { position, .. } = action {
-                    self.open_context_menu(position, MenuTarget::Text(id));
+                match action {
+                    EditorAction::ContextMenu { position, .. } => {
+                        self.open_context_menu(position, MenuTarget::Text(id));
+                    }
+                    EditorAction::CursorPoint(point) => {
+                        self.lsp.cursor_point = Some((id, point));
+                        return Task::none();
+                    }
+                    EditorAction::Completion(key) => {
+                        self.completion_key(key);
+                        return Task::none();
+                    }
+                    _ => {}
                 }
-                self.apply_editor_action(id, action);
+                self.apply_editor_action(id, action.clone());
+                self.after_editor_action(id, &action);
+                if matches!(action, EditorAction::GoToDefinition { .. }) {
+                    self.request_definition();
+                }
                 Task::none()
             }
             Message::NewDocument => {
@@ -836,9 +872,46 @@ impl Lorca {
             }
             Message::GoToLine => self.open_goto(),
             Message::Escape => {
-                if self.palette.take().is_none() && self.context_menu.take().is_none() {
+                let had_popup =
+                    self.lsp.completion.take().is_some() | self.lsp.hover.take().is_some();
+                if !had_popup && self.palette.take().is_none() && self.context_menu.take().is_none()
+                {
                     self.escape();
                 }
+                Task::none()
+            }
+            Message::LspConnected(sender) => {
+                self.lsp_connected(sender);
+                Task::none()
+            }
+            Message::Lsp(event) => {
+                self.handle_lsp_event(event);
+                Task::none()
+            }
+            Message::CompletionPick(row) => {
+                self.accept_completion(row);
+                Task::none()
+            }
+            Message::TriggerCompletion => {
+                self.request_completion(None, true);
+                Task::none()
+            }
+            Message::ShowHover => {
+                self.context_menu = None;
+                self.request_hover();
+                Task::none()
+            }
+            Message::GoToDefinition => {
+                self.context_menu = None;
+                self.request_definition();
+                Task::none()
+            }
+            Message::NextProblem(forward) => {
+                self.jump_to_diagnostic(forward);
+                Task::none()
+            }
+            Message::LspRestart => {
+                self.restart_lsp();
                 Task::none()
             }
             Message::Bookmark(action) => {
@@ -884,6 +957,7 @@ impl Lorca {
     /// errores se avisa y se mantiene la configuración actual.
     fn reload_config(&mut self) {
         let Some(dir) = &self.data_dir else { return };
+        let previous_lsp = self.config.lsp.clone();
         match Config::load(&dir.join(Config::FILE_NAME)) {
             // El primer arranque se decide en la bienvenida, no al leer el archivo.
             Ok(config) if config.theme.is_none() && self.config.theme.is_some() => {
@@ -894,6 +968,10 @@ impl Lorca {
             }
             Ok(config) => self.config = config,
             Err(error) => self.show_error(error.to_string()),
+        }
+        // Otros servidores: se paran y se lanzan los nuevos en la siguiente sincronización.
+        if self.config.lsp != previous_lsp {
+            self.stop_lsp();
         }
     }
 
@@ -940,7 +1018,10 @@ impl Lorca {
             EditorAction::Indent => EditorAction::Insert(self.config.indent_unit()),
             other => other,
         };
-        if matches!(action, EditorAction::Click { .. }) {
+        if matches!(
+            action,
+            EditorAction::Click { .. } | EditorAction::GoToDefinition { .. }
+        ) {
             self.focus = Focus::Editor;
             self.context_menu = None;
             self.workspace.clear_selection();
@@ -1084,6 +1165,7 @@ impl Lorca {
     }
 
     fn notify_saved(&mut self, id: DocumentId) {
+        self.lsp_saved(id);
         if let Some(document) = self.workspace.document(id) {
             let text = format!("Guardado «{}»", document.display_name());
             self.notice = Some(Notice {
@@ -1254,6 +1336,7 @@ impl Lorca {
             layout = layout.push(find::results_panel(results));
         }
         let base: Element<'_, Message> = layout.push(self.status_bar()).into();
+        let base = self.lsp_popups(base);
         let base = match &self.context_menu {
             Some(menu) => {
                 context_menu::layer(base, menu, self.menu_items(menu.target), self.window_size)
@@ -1264,6 +1347,38 @@ impl Lorca {
             Some(state) => palette::layer(base, state, &self.palette_matches()),
             None => base,
         }
+    }
+
+    /// Desplegables de autocompletado e información junto al cursor del documento activo.
+    fn lsp_popups<'a>(&'a self, base: Element<'a, Message>) -> Element<'a, Message> {
+        let Some((id, point)) = self.lsp.cursor_point else {
+            return base;
+        };
+        if self.workspace.active_id() != Some(id) || self.focus != Focus::Editor {
+            return base;
+        }
+        let line_height = self.metrics().line_height;
+        if let Some(completion) = self.lsp.completion.as_ref().filter(|c| c.document == id) {
+            return crate::lsp_view::completion_layer(
+                base,
+                completion.rows().collect(),
+                completion.selected,
+                point,
+                self.window_size,
+                line_height,
+            );
+        }
+        if let Some(hover) = self.lsp.hover.as_ref().filter(|h| h.document == id) {
+            return crate::lsp_view::hover_layer(
+                base,
+                &hover.content,
+                &self.active_theme.iced,
+                point,
+                self.window_size,
+                line_height,
+            );
+        }
+        base
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -1347,7 +1462,47 @@ impl Lorca {
                     .into(),
             );
         }
+        if self.notice.is_none()
+            && let Some((severity, message)) = self.diagnostic_at_cursor()
+        {
+            let is_error = severity == lorca_lsp::Severity::Error;
+            let first_line = message.lines().next().unwrap_or_default().to_owned();
+            items.push(
+                text(first_line)
+                    .size(12)
+                    .wrapping(text::Wrapping::None)
+                    .style(move |theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        text::Style {
+                            color: Some(if is_error {
+                                palette.danger.base.color
+                            } else {
+                                palette.warning.base.color
+                            }),
+                        }
+                    })
+                    .into(),
+            );
+        }
         items.push(space::horizontal().into());
+
+        if let Some((name, ready)) = self.lsp_status() {
+            let label = if ready {
+                name
+            } else {
+                format!("{name} (iniciando…)")
+            };
+            items.push(text(label).size(12).into());
+        }
+        if let Some((errors, warnings)) = self.diagnostic_counts() {
+            items.push(
+                button(text(format!("✕ {errors}  ⚠ {warnings}")).size(12))
+                    .padding(0)
+                    .style(button::text)
+                    .on_press(Message::NextProblem(true))
+                    .into(),
+            );
+        }
 
         if let Some(document) = self.workspace.active() {
             let cursor = document.editor.cursor();
@@ -1474,6 +1629,10 @@ fn affects_session(message: &Message) -> bool {
             | Message::ClosePalette
             | Message::WindowResized(_)
             | Message::CloseContextMenu
+            | Message::LspConnected(_)
+            | Message::Lsp(_)
+            | Message::ShowHover
+            | Message::Editor(_, EditorAction::CursorPoint(_))
     )
 }
 

@@ -268,7 +268,7 @@ impl Lorca {
         }
     }
 
-    fn reveal_active_cursor(&mut self) {
+    pub(super) fn reveal_active_cursor(&mut self) {
         let Some(document) = self.workspace.active() else {
             return;
         };

@@ -8,6 +8,7 @@ mod dialogs;
 mod editor;
 mod find;
 mod key_filter;
+mod lsp_view;
 mod menu;
 mod palette;
 mod shortcut_labels;

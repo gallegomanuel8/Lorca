@@ -52,6 +52,11 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
             Named::F2 if modifiers.command() => Some(Message::Bookmark(BookmarkAction::Toggle)),
             Named::F2 if shift => Some(Message::Bookmark(BookmarkAction::Previous)),
             Named::F2 => Some(Message::Bookmark(BookmarkAction::Next)),
+            Named::F8 => Some(Message::NextProblem(!shift)),
+            Named::F12 => Some(Message::GoToDefinition),
+            Named::Space if modifiers.control() && !modifiers.command() => {
+                Some(Message::TriggerCompletion)
+            }
             _ => None,
         };
     }
@@ -106,6 +111,7 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         'u' if shift => Some(Message::Context(ContextAction::ChangeCase(Case::Upper))),
         'u' => Some(Message::Context(ContextAction::ChangeCase(Case::Lower))),
         'v' if shift => Some(Message::Context(ContextAction::TogglePreview)),
+        'i' if !shift => Some(Message::ShowHover),
         'g' if is_mac && shift => Some(Message::FindPrevious),
         'g' if is_mac => Some(Message::FindNext),
         _ => None,
@@ -169,6 +175,27 @@ mod tests {
             Some(Message::Zoom(0))
         ));
         assert!(char_key("+", Code::BracketRight, Modifiers::empty()).is_none());
+    }
+
+    #[test]
+    fn language_server_shortcuts() {
+        assert!(matches!(
+            named(Named::F12, Modifiers::empty()),
+            Some(Message::GoToDefinition)
+        ));
+        assert!(matches!(
+            named(Named::F8, Modifiers::SHIFT),
+            Some(Message::NextProblem(false))
+        ));
+        assert!(matches!(
+            named(Named::Space, Modifiers::CTRL),
+            Some(Message::TriggerCompletion)
+        ));
+        assert!(named(Named::Space, Modifiers::empty()).is_none());
+        assert!(matches!(
+            char_key("i", Code::KeyI, Modifiers::COMMAND),
+            Some(Message::ShowHover)
+        ));
     }
 
     #[test]

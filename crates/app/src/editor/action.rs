@@ -59,6 +59,22 @@ pub enum EditorAction {
         index: usize,
         position: Point,
     },
+    /// ⌘+clic (Ctrl+clic): ir a la definición de lo que hay en `index`.
+    GoToDefinition {
+        index: usize,
+    },
+    /// Punto de la ventana justo debajo del cursor principal (para los desplegables).
+    CursorPoint(Point),
+    /// Tecla con el desplegable de autocompletado abierto.
+    Completion(CompletionKey),
+}
+
+/// Teclas que maneja el desplegable de autocompletado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionKey {
+    Up,
+    Down,
+    Accept,
 }
 
 /// Aplica una acción al documento y a su vista. Tras mover el cursor o editar, desplaza
@@ -80,6 +96,12 @@ pub fn apply_action(
             return Ok(());
         }
         // Como en Notepad++: si el clic derecho cae fuera de la selección, mueve el cursor.
+        // Las maneja la aplicación.
+        EditorAction::CursorPoint(_) | EditorAction::Completion(_) => return Ok(()),
+        EditorAction::GoToDefinition { index } => {
+            editor.set_cursor(index, false);
+            return Ok(());
+        }
         EditorAction::ContextMenu { index, .. } => {
             let selection = editor.selection();
             if selection.is_empty() || !(selection.start()..=selection.end()).contains(&index) {

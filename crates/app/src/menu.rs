@@ -49,6 +49,12 @@ pub fn message_for(id: &str) -> Option<Message> {
         "zoom_reset" => Message::Zoom(0),
         "open_config" => Message::OpenConfig,
         "new_theme" => Message::NewTheme,
+        "complete" => Message::TriggerCompletion,
+        "hover" => Message::ShowHover,
+        "definition" => Message::GoToDefinition,
+        "next_problem" => Message::NextProblem(true),
+        "previous_problem" => Message::NextProblem(false),
+        "lsp_restart" => Message::LspRestart,
         _ => return None,
     };
     Some(message)
@@ -170,6 +176,19 @@ mod native {
                 &item("bookmark", "Poner o quitar marcador", Some("CmdOrCtrl+F2")),
             ],
         )?;
+        let code = submenu(
+            "Código",
+            &[
+                &item("complete", "Autocompletar", None),
+                &item("hover", "Mostrar información", None),
+                &item("definition", "Ir a la definición", None),
+                &separator(),
+                &item("next_problem", "Siguiente problema", None),
+                &item("previous_problem", "Problema anterior", None),
+                &separator(),
+                &item("lsp_restart", "Reiniciar servidores de lenguaje", None),
+            ],
+        )?;
         let view = submenu(
             "Ver",
             &[
@@ -203,7 +222,7 @@ mod native {
         )?;
 
         let menu = Menu::new();
-        for submenu in [&app, &file, &edit, &search, &view, &window] {
+        for submenu in [&app, &file, &edit, &search, &code, &view, &window] {
             menu.append(submenu).map_err(|e| e.to_string())?;
         }
         window.set_as_windows_menu_for_nsapp();
