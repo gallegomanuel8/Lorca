@@ -54,7 +54,9 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
             Named::F2 => Some(Message::Bookmark(BookmarkAction::Next)),
             Named::F8 => Some(Message::NextProblem(!shift)),
             Named::F12 => Some(Message::GoToDefinition),
-            Named::Space if modifiers.control() && !modifiers.command() => {
+            // Ctrl+Espacio en todas las plataformas (fuera de macOS Ctrl es además la
+            // tecla de órdenes, así que no se puede exigir que ⌘ no esté pulsado).
+            Named::Space if modifiers.control() && !modifiers.alt() && !modifiers.logo() => {
                 Some(Message::TriggerCompletion)
             }
             _ => None,
