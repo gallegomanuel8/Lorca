@@ -5,6 +5,7 @@
 //! (codificación y finales de línea) se conserva en [`TextFormat`] y se restaura al guardar.
 
 mod buffer;
+pub mod display;
 mod edit;
 mod editor;
 mod encoding;

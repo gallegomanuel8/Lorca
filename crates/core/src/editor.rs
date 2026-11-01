@@ -105,6 +105,18 @@ impl EditorState {
         self.set_selection(Selection::new(0, self.buffer.len_chars()));
     }
 
+    /// Selecciona la línea completa, incluido su salto final.
+    pub fn select_line(&mut self, line: usize) {
+        let start = self.buffer.line_start(line);
+        let end = self.buffer.line_start(line + 1);
+        let end = if end > start {
+            end
+        } else {
+            self.buffer.len_chars()
+        };
+        self.set_selection(Selection::new(start, end));
+    }
+
     /// Selecciona la palabra (o el bloque de blancos o de signos) que contiene `index`.
     pub fn select_word_at(&mut self, index: usize) {
         let len = self.buffer.len_chars();
@@ -694,6 +706,15 @@ mod tests {
         assert_eq!(s.selected_text().as_deref(), Some("!"));
         s.select_all();
         assert_eq!(s.selection(), Selection::new(0, 16));
+    }
+
+    #[test]
+    fn select_line_includes_newline() {
+        let mut s = EditorState::from_text("uno\ndos\ntres");
+        s.select_line(1);
+        assert_eq!(s.selected_text().as_deref(), Some("dos\n"));
+        s.select_line(2);
+        assert_eq!(s.selected_text().as_deref(), Some("tres"));
     }
 
     #[test]
