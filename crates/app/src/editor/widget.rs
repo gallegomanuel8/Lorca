@@ -13,6 +13,8 @@ use iced::{
     Background, Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Renderer, Size,
     Theme,
 };
+use std::ops::Range;
+
 use lorca_core::{EditorState, Position, display};
 use lorca_syntax::Highlights;
 
@@ -33,6 +35,7 @@ pub fn code_editor<'a, Message>(
     view: DocView,
     focused: bool,
     highlights: Option<&'a Highlights>,
+    decorations: Decorations<'a>,
     on_action: impl Fn(EditorAction) -> Message + 'a,
 ) -> CodeEditor<'a, Message> {
     CodeEditor {
@@ -40,8 +43,20 @@ pub fn code_editor<'a, Message>(
         view,
         focused,
         highlights,
+        decorations,
         on_action: Box::new(on_action),
     }
+}
+
+/// Rangos (en caracteres, ordenados y sin solapes) que se resaltan bajo el texto.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Decorations<'a> {
+    /// Coincidencias de la búsqueda actual.
+    pub matches: &'a [Range<usize>],
+    /// Índice en `matches` de la coincidencia seleccionada.
+    pub current: Option<usize>,
+    /// Coincidencias marcadas con «Marcar todo».
+    pub marks: &'a [Range<usize>],
 }
 
 /// Widget de edición. Ver el módulo [`crate::editor`].
@@ -51,6 +66,7 @@ pub struct CodeEditor<'a, Message> {
     focused: bool,
     /// Resaltado del documento; puede ir una revisión por detrás mientras se recalcula.
     highlights: Option<&'a Highlights>,
+    decorations: Decorations<'a>,
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -290,7 +306,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 modifiers,
                 text,
                 ..
-            }) if self.focused => {
+            }) if self.focused && !shell.is_event_captured() => {
                 state.modifiers = *modifiers;
                 let Some(command) = map_key(
                     key,
@@ -328,29 +344,31 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 state.restart_blink();
                 shell.capture_event();
             }
-            Event::InputMethod(event) if self.focused => match event {
-                input_method::Event::Opened => {
-                    state.preedit = Some(input_method::Preedit::new());
-                    shell.request_redraw();
+            Event::InputMethod(event) if self.focused && !shell.is_event_captured() => {
+                match event {
+                    input_method::Event::Opened => {
+                        state.preedit = Some(input_method::Preedit::new());
+                        shell.request_redraw();
+                    }
+                    input_method::Event::Closed => {
+                        state.preedit = None;
+                        shell.request_redraw();
+                    }
+                    input_method::Event::Preedit(content, selection) => {
+                        state.preedit = Some(input_method::Preedit {
+                            content: content.clone(),
+                            selection: selection.clone(),
+                            text_size: Some(Pixels(FONT_SIZE)),
+                        });
+                        shell.request_redraw();
+                    }
+                    input_method::Event::Commit(content) => {
+                        self.publish(shell, EditorAction::Insert(content.clone()));
+                        state.restart_blink();
+                        shell.capture_event();
+                    }
                 }
-                input_method::Event::Closed => {
-                    state.preedit = None;
-                    shell.request_redraw();
-                }
-                input_method::Event::Preedit(content, selection) => {
-                    state.preedit = Some(input_method::Preedit {
-                        content: content.clone(),
-                        selection: selection.clone(),
-                        text_size: Some(Pixels(FONT_SIZE)),
-                    });
-                    shell.request_redraw();
-                }
-                input_method::Event::Commit(content) => {
-                    self.publish(shell, EditorAction::Insert(content.clone()));
-                    state.restart_blink();
-                    shell.capture_event();
-                }
-            },
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let Some(position) = cursor.position_over(geometry.bounds) else {
                     return;
@@ -443,6 +461,26 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 } else {
                     colors.line_number
                 };
+                if self.editor.bookmarks().contains(line) {
+                    let size = LINE_HEIGHT * 0.45;
+                    renderer::Renderer::fill_quad(
+                        renderer,
+                        Quad {
+                            bounds: Rectangle {
+                                x: geometry.gutter.x + geometry.cell * 0.4,
+                                y: geometry.line_y(line, view) + (LINE_HEIGHT - size) / 2.0,
+                                width: size,
+                                height: size,
+                            },
+                            border: iced::Border {
+                                radius: (size / 2.0).into(),
+                                ..iced::Border::default()
+                            },
+                            ..Quad::default()
+                        },
+                        Background::Color(colors.bookmark),
+                    );
+                }
                 renderer.fill_text(
                     Text {
                         content: (line + 1).to_string(),
@@ -477,6 +515,26 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             ..geometry.text_area
                         },
                         colors.current_line,
+                    );
+                }
+
+                let decorations = self.decorations;
+                let line_ranges = LineRanges {
+                    text: &text,
+                    line_start,
+                    line_end,
+                    y,
+                };
+                line_ranges.fill(renderer, &geometry, view, decorations.marks, colors.mark);
+                line_ranges.fill(renderer, &geometry, view, decorations.matches, colors.found);
+                if let Some(current) = decorations.current.and_then(|i| decorations.matches.get(i))
+                {
+                    line_ranges.fill(
+                        renderer,
+                        &geometry,
+                        view,
+                        std::slice::from_ref(current),
+                        colors.found_current,
                     );
                 }
 
@@ -600,6 +658,10 @@ struct Colors {
     selection: Color,
     cursor: Color,
     scrollbar: Color,
+    found: Color,
+    found_current: Color,
+    mark: Color,
+    bookmark: Color,
     is_dark: bool,
 }
 
@@ -620,10 +682,69 @@ impl Colors {
             },
             cursor: palette.primary.strong.color,
             is_dark: palette.is_dark,
+            found: Color {
+                a: 0.35,
+                ..palette.warning.base.color
+            },
+            found_current: Color {
+                a: 0.75,
+                ..palette.warning.strong.color
+            },
+            mark: Color {
+                a: 0.35,
+                ..palette.success.base.color
+            },
+            bookmark: palette.primary.base.color,
             scrollbar: Color {
                 a: 0.5,
                 ..palette.background.strong.color
             },
+        }
+    }
+}
+
+/// Una línea visible, para pintar los tramos de rangos que caen en ella.
+struct LineRanges<'a> {
+    text: &'a str,
+    line_start: usize,
+    /// Índice del salto de línea (o del final del texto).
+    line_end: usize,
+    y: f32,
+}
+
+impl LineRanges<'_> {
+    /// Pinta la parte de cada rango que cae en la línea. Si un rango sigue en la línea
+    /// siguiente, se marca también la celda del salto.
+    fn fill(
+        &self,
+        renderer: &mut Renderer,
+        geometry: &Geometry,
+        view: DocView,
+        ranges: &[Range<usize>],
+        color: Color,
+    ) {
+        let first = ranges.partition_point(|r| r.end <= self.line_start);
+        for range in ranges.iter().skip(first) {
+            if range.start > self.line_end {
+                break;
+            }
+            let start = range.start.max(self.line_start) - self.line_start;
+            let end = range.end.min(self.line_end) - self.line_start;
+            let start_cells = display::visual_column(self.text, start, TAB_WIDTH);
+            let mut end_cells = display::visual_column(self.text, end, TAB_WIDTH);
+            if range.end > self.line_end {
+                end_cells += 1;
+            }
+            fill(
+                renderer,
+                Rectangle {
+                    x: geometry.cell_x(start_cells, view),
+                    y: self.y,
+                    width: end_cells.saturating_sub(start_cells) as f32 * geometry.cell,
+                    height: LINE_HEIGHT,
+                },
+                color,
+            );
         }
     }
 }

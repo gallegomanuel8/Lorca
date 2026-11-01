@@ -58,6 +58,14 @@ mensaje en español.
     inyectado llega troceado.
   - `examples/bench_highlight.rs` mide rendimiento (≈35 ms para 6 600 líneas de Rust en
     release).
+- `search`
+  - `SearchQuery::new(patrón, SearchOptions)`: todos los modos se compilan a `regex`
+    (Normal = `regex::escape`, Extendido = `unescape_extended` + escape, Regex tal cual),
+    siempre multilínea. CRLF/CR del patrón se convierten en LF (el buffer solo tiene LF).
+  - Posiciones en **caracteres**. «Palabra completa» se comprueba mirando los caracteres
+    vecinos (el crate `regex` no tiene lookaround).
+  - `replacement()` / `replace_all()` expanden `$1`, `${n}` y `\1` (`regex_template`).
+  - `next_match` / `previous_match` / `match_index` trabajan sobre rangos ordenados.
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje, `DiskStamp`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
@@ -93,6 +101,18 @@ mensaje en español.
     detrás. Colores en `editor/palette.rs` (provisional hasta los temas de la Fase 6).
   - `Document::refresh_language()` se llama tras cada edición (detecta shebangs al
     teclear); `set_language` lo fija a mano y se guarda en la sesión.
+  - Búsqueda: `find.rs` (estado `FindState`, vistas de la barra, «Ir a línea» y panel de
+    resultados) y `find_actions.rs` (submódulo de `app` con las acciones). Las
+    coincidencias se cachean por (documento, revisión, patrón, opciones, ámbito) en
+    `MatchCache`; `refresh_search` se llama al final de cada `update`. «Marcar» guarda la
+    consulta por documento y se reevalúa en vivo. El widget recibe `Decorations`.
+  - Foco: `Focus` (Editor/FindBar/GoTo). El editor ignora teclas ya capturadas
+    (`shell.is_event_captured()`). Los atajos usan `event::listen_with` (también ven
+    eventos capturados: Escape, F2, F3…).
+  - `key_filter.rs`: en macOS el `text_input` de iced escribe aunque se pulse ⌘ (⌘G → «g»,
+    ⌥⌘F → «ƒ»); `filter_command_keys` envuelve los campos de la barra para evitarlo.
+  - Saltos (buscar, ir a línea, resultados, marcadores) usan `DocView::jump_to_cursor`,
+    que deja contexto; al cambiar el tamaño del editor se mantiene visible el cursor.
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)
@@ -104,4 +124,8 @@ mensaje en español.
   (crate `muda`) que enrute «Salir» por `Message::CloseRequested`.
 - Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
 - El historial de deshacer no se conserva entre sesiones.
+- La búsqueda trabaja sobre una copia `String` del documento y se recalcula al editar
+  (rápido gracias a la caché, pero no incremental).
+- Los resultados de «Buscar todo» son una foto: si el documento cambia, el clic lleva a la
+  línea guardada en vez de al rango exacto.
 - Sin resaltado de sintaxis (Fase 2), ni búsqueda (Fase 3).

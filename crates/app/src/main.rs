@@ -5,6 +5,8 @@
 mod app;
 mod dialogs;
 mod editor;
+mod find;
+mod key_filter;
 mod shortcuts;
 mod welcome;
 

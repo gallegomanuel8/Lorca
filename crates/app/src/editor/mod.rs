@@ -11,7 +11,7 @@ mod widget;
 
 pub use action::{ClickKind, EditorAction, apply_action};
 pub use view::{DocView, Viewport};
-pub use widget::code_editor;
+pub use widget::{Decorations, code_editor};
 
 /// Tamaño de la fuente del editor, en píxeles lógicos.
 pub const FONT_SIZE: f32 = 14.0;

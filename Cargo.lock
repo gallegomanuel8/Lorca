@@ -1625,6 +1625,7 @@ dependencies = [
  "anyhow",
  "iced",
  "lorca-core",
+ "lorca-search",
  "lorca-syntax",
  "lorca-workspace",
  "rfd",

@@ -9,14 +9,24 @@ use iced::time::{Duration, Instant};
 use iced::widget::{
     button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip,
 };
-use iced::{Alignment, Element, Length, Subscription, Task, Theme, keyboard, system, window};
+use iced::{
+    Alignment, Element, Length, Subscription, Task, Theme, event, keyboard, system, window,
+};
+use lorca_search::{SearchQuery, match_index};
 use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
 
 use crate::dialogs::{self, SaveChoice};
-use crate::editor::{DocView, EditorAction, Viewport, apply_action, code_editor};
+use crate::editor::{Decorations, DocView, EditorAction, Viewport, apply_action, code_editor};
+use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::shortcuts::shortcut;
 use crate::welcome;
+
+#[path = "find_actions.rs"]
+mod find_actions;
+
+pub use find_actions::BookmarkAction;
+use find_actions::{Focus, MatchCache};
 
 /// Pausa sin cambios tras la que se guarda la sesión.
 ///
@@ -82,6 +92,16 @@ pub enum Message {
         language: Language,
         result: Result<Option<Arc<Highlights>>, String>,
     },
+    Find(FindMessage),
+    OpenFind,
+    OpenReplace,
+    FindNext,
+    FindPrevious,
+    FindWordUnderCursor,
+    GoToLine,
+    Escape,
+    Bookmark(BookmarkAction),
+    ModifiersChanged(keyboard::Modifiers),
 }
 
 /// Resaltado de un documento y estado de su cálculo en segundo plano.
@@ -121,6 +141,16 @@ pub struct Lorca {
     /// Opción marcada en la pantalla de bienvenida; `Some` mientras se muestra.
     welcome_choice: Option<ThemeMode>,
     highlights: HashMap<DocumentId, HighlightState>,
+    find: FindState,
+    /// Texto de «Ir a línea»; `Some` mientras la barra está abierta.
+    goto: Option<String>,
+    focus: Focus,
+    results: Option<SearchResults>,
+    /// Consultas marcadas con «Marcar todo» en cada documento.
+    marks: HashMap<DocumentId, SearchQuery>,
+    find_cache: Option<MatchCache>,
+    mark_cache: HashMap<DocumentId, MatchCache>,
+    modifiers: keyboard::Modifiers,
 }
 
 impl Lorca {
@@ -175,6 +205,14 @@ impl Lorca {
             session_dirty: None,
             system_mode: Mode::None,
             highlights: HashMap::new(),
+            find: FindState::default(),
+            goto: None,
+            focus: Focus::Editor,
+            results: None,
+            marks: HashMap::new(),
+            find_cache: None,
+            mark_cache: HashMap::new(),
+            modifiers: keyboard::Modifiers::default(),
         };
         if !problems.is_empty() {
             app.show_error(problems.join(" · "));
@@ -209,7 +247,7 @@ impl Lorca {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
-            keyboard::listen().filter_map(shortcut),
+            event::listen_with(shortcut),
             window::close_requests().map(|_| Message::CloseRequested),
             system::theme_changes().map(Message::SystemTheme),
         ];
@@ -221,6 +259,7 @@ impl Lorca {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        self.refresh_search();
         Task::batch([task, self.schedule_highlight()])
     }
 
@@ -372,6 +411,28 @@ impl Lorca {
                 }
                 Task::none()
             }
+            Message::Find(message) => self.handle_find(message),
+            Message::OpenFind => self.open_find(find::PATTERN_ID),
+            Message::OpenReplace => self.open_find(find::REPLACEMENT_ID),
+            Message::FindNext => self.find_next(true),
+            Message::FindPrevious => self.find_next(false),
+            Message::FindWordUnderCursor => {
+                self.find_word_under_cursor();
+                Task::none()
+            }
+            Message::GoToLine => self.open_goto(),
+            Message::Escape => {
+                self.escape();
+                Task::none()
+            }
+            Message::Bookmark(action) => {
+                self.bookmark_action(action);
+                Task::none()
+            }
+            Message::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers;
+                Task::none()
+            }
             Message::Tick => {
                 if let Some((first, last)) = self.session_dirty {
                     let now = Instant::now();
@@ -420,8 +481,22 @@ impl Lorca {
     // --- Edición ----------------------------------------------------------------------
 
     fn apply_editor_action(&mut self, action: EditorAction) {
-        if let EditorAction::Viewport(viewport) = action {
-            self.viewport = viewport;
+        // Si la vista cambia de tamaño (p. ej. al abrir o cerrar una barra) y el cursor
+        // estaba visible, se mantiene visible con las nuevas medidas.
+        let mut keep_cursor_visible = false;
+        match action {
+            EditorAction::Viewport(viewport) => {
+                keep_cursor_visible = self.workspace.active().is_some_and(|document| {
+                    self.views
+                        .get(&document.id())
+                        .copied()
+                        .unwrap_or_default()
+                        .is_cursor_visible(&document.editor, self.viewport)
+                });
+                self.viewport = viewport;
+            }
+            EditorAction::Click { .. } => self.focus = Focus::Editor,
+            _ => {}
         }
         let Some(id) = self.workspace.active_id() else {
             return;
@@ -431,6 +506,9 @@ impl Lorca {
         };
         let view = self.views.entry(id).or_default();
         let result = apply_action(action, &mut document.editor, view, self.viewport);
+        if keep_cursor_visible {
+            view.reveal_cursor(&document.editor, self.viewport);
+        }
         document.refresh_language();
         if let Err(error) = result {
             self.show_error(error.to_string());
@@ -596,6 +674,8 @@ impl Lorca {
                 self.workspace.close(id);
                 self.views.remove(&id);
                 self.highlights.remove(&id);
+                self.marks.remove(&id);
+                self.mark_cache.remove(&id);
                 self.ensure_document();
                 Task::none()
             }
@@ -627,7 +707,25 @@ impl Lorca {
         if let Some(choice) = self.welcome_choice {
             return welcome::view(choice, self.system_mode);
         }
-        column![self.tab_bar(), self.editor_area(), self.status_bar()].into()
+        let mut layout = column![self.tab_bar()];
+        if let Some(input) = &self.goto {
+            let lines = self
+                .workspace
+                .active()
+                .map_or(1, |d| d.editor.buffer().len_lines());
+            layout = layout.push(find::goto_bar(input, lines));
+        } else if self.find.open {
+            let bookmarks = self
+                .workspace
+                .active()
+                .map_or(0, |d| d.editor.bookmarks().len());
+            layout = layout.push(find::bar(&self.find, self.find_counter(), bookmarks));
+        }
+        layout = layout.push(self.editor_area());
+        if let Some(results) = &self.results {
+            layout = layout.push(find::results_panel(results));
+        }
+        layout.push(self.status_bar()).into()
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -690,11 +788,24 @@ impl Lorca {
             .highlights
             .get(&document.id())
             .and_then(|state| state.highlights.as_deref());
+        let matches = self
+            .find_cache
+            .as_ref()
+            .map_or(&[][..], |c| c.matches.as_slice());
+        let decorations = Decorations {
+            matches,
+            current: match_index(matches, &document.editor.selection().range()),
+            marks: self
+                .mark_cache
+                .get(&document.id())
+                .map_or(&[][..], |c| c.matches.as_slice()),
+        };
         code_editor(
             &document.editor,
             view,
-            !self.dialog_open,
+            self.focus == Focus::Editor && !self.dialog_open,
             highlights,
+            decorations,
             Message::Editor,
         )
         .into()
@@ -806,6 +917,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::WelcomeChoose(_)
             | Message::WelcomeDone
             | Message::Highlighted { .. }
+            | Message::ModifiersChanged(_)
     )
 }
 

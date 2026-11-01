@@ -1,36 +1,67 @@
 //! Atajos de teclado globales de la aplicación.
+//!
+//! Se escuchan todos los eventos de teclado, también los que ya ha capturado un control
+//! (p. ej. el campo de búsqueda captura Escape). Por eso aquí solo se reconocen
+//! combinaciones que ningún control usa para escribir.
 
-use iced::keyboard::{self, Key, key::Named};
+use iced::event::{self, Event};
+use iced::keyboard::{self, Key, Modifiers, key::Named, key::Physical};
+use iced::window;
 
-use crate::app::Message;
+use crate::app::{BookmarkAction, Message};
 
-/// Traduce una tecla no capturada por el editor en un mensaje de la aplicación.
-///
-/// Cmd en macOS y Ctrl en el resto (`Modifiers::command`), salvo Ctrl+Tab, que es Ctrl en
-/// todas las plataformas.
-pub fn shortcut(event: keyboard::Event) -> Option<Message> {
-    let keyboard::Event::KeyPressed {
-        key,
-        physical_key,
-        modifiers,
-        ..
-    } = event
-    else {
-        return None;
-    };
+/// Traduce un evento en un mensaje de la aplicación (firma de `event::listen_with`).
+pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+    match event {
+        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+            Some(Message::ModifiersChanged(modifiers))
+        }
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) => key_shortcut(&key, physical_key, modifiers),
+        _ => None,
+    }
+}
+
+/// Cmd en macOS y Ctrl en el resto (`Modifiers::command`), salvo Ctrl+Tab y Ctrl+G
+/// (ir a línea), que usan Ctrl en todas las plataformas: en macOS ⌘G es «buscar siguiente».
+fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Option<Message> {
+    let is_mac = cfg!(target_os = "macos");
     let shift = modifiers.shift();
 
-    if key == Key::Named(Named::Tab) && modifiers.control() {
-        return Some(if shift {
-            Message::PreviousTab
-        } else {
-            Message::NextTab
-        });
+    if let Key::Named(named) = key {
+        return match named {
+            Named::Escape => Some(Message::Escape),
+            Named::Tab if modifiers.control() => Some(if shift {
+                Message::PreviousTab
+            } else {
+                Message::NextTab
+            }),
+            Named::F3 if modifiers.command() => Some(Message::FindWordUnderCursor),
+            Named::F3 if shift => Some(Message::FindPrevious),
+            Named::F3 => Some(Message::FindNext),
+            Named::F2 if modifiers.command() => Some(Message::Bookmark(BookmarkAction::Toggle)),
+            Named::F2 if shift => Some(Message::Bookmark(BookmarkAction::Previous)),
+            Named::F2 => Some(Message::Bookmark(BookmarkAction::Next)),
+            _ => None,
+        };
     }
-    if !modifiers.command() || modifiers.alt() {
+
+    let letter = key.to_latin(physical_key)?.to_ascii_lowercase();
+    if letter == 'g' && modifiers.control() && !modifiers.alt() {
+        return Some(Message::GoToLine);
+    }
+    if !modifiers.command() {
         return None;
     }
-    match key.to_latin(physical_key)?.to_ascii_lowercase() {
+    // ⌘H oculta la aplicación en macOS: allí sustituir es ⌥⌘F, como en Xcode o VS Code.
+    if modifiers.alt() {
+        return (is_mac && letter == 'f').then_some(Message::OpenReplace);
+    }
+    match letter {
         'n' if !shift => Some(Message::NewDocument),
         'o' if !shift => Some(Message::Open),
         's' if shift => Some(Message::SaveAs),
@@ -38,7 +69,11 @@ pub fn shortcut(event: keyboard::Event) -> Option<Message> {
         'w' if !shift => Some(Message::CloseActive),
         'z' if shift => Some(Message::Redo),
         'z' => Some(Message::Undo),
-        'y' if !cfg!(target_os = "macos") => Some(Message::Redo),
+        'y' if !is_mac => Some(Message::Redo),
+        'f' if !shift => Some(Message::OpenFind),
+        'h' if !is_mac && !shift => Some(Message::OpenReplace),
+        'g' if is_mac && shift => Some(Message::FindPrevious),
+        'g' if is_mac => Some(Message::FindNext),
         _ => None,
     }
 }
@@ -46,23 +81,14 @@ pub fn shortcut(event: keyboard::Event) -> Option<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::keyboard::key::{Code, Physical};
-    use iced::keyboard::{Location, Modifiers};
-
-    fn press(key: Key, code: Code, modifiers: Modifiers) -> Option<Message> {
-        shortcut(keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: Physical::Code(code),
-            location: Location::Standard,
-            modifiers,
-            text: None,
-            repeat: false,
-        })
-    }
+    use iced::keyboard::key::Code;
 
     fn char_key(c: &str, code: Code, modifiers: Modifiers) -> Option<Message> {
-        press(Key::Character(c.into()), code, modifiers)
+        key_shortcut(&Key::Character(c.into()), Physical::Code(code), modifiers)
+    }
+
+    fn named(n: Named, modifiers: Modifiers) -> Option<Message> {
+        key_shortcut(&Key::Named(n), Physical::Code(Code::F1), modifiers)
     }
 
     #[test]
@@ -105,14 +131,64 @@ mod tests {
 
     #[test]
     fn tab_cycling_uses_ctrl_everywhere() {
-        let tab = || Key::Named(Named::Tab);
         assert!(matches!(
-            press(tab(), Code::Tab, Modifiers::CTRL),
+            named(Named::Tab, Modifiers::CTRL),
             Some(Message::NextTab)
         ));
         assert!(matches!(
-            press(tab(), Code::Tab, Modifiers::CTRL | Modifiers::SHIFT),
+            named(Named::Tab, Modifiers::CTRL | Modifiers::SHIFT),
             Some(Message::PreviousTab)
+        ));
+    }
+
+    #[test]
+    fn search_shortcuts() {
+        let cmd = Modifiers::COMMAND;
+        assert!(matches!(
+            char_key("f", Code::KeyF, cmd),
+            Some(Message::OpenFind)
+        ));
+        assert!(matches!(
+            named(Named::F3, Modifiers::empty()),
+            Some(Message::FindNext)
+        ));
+        assert!(matches!(
+            named(Named::F3, Modifiers::SHIFT),
+            Some(Message::FindPrevious)
+        ));
+        assert!(matches!(
+            named(Named::F3, cmd),
+            Some(Message::FindWordUnderCursor)
+        ));
+        assert!(matches!(
+            named(Named::Escape, Modifiers::empty()),
+            Some(Message::Escape)
+        ));
+        assert!(matches!(
+            char_key("g", Code::KeyG, Modifiers::CTRL),
+            Some(Message::GoToLine)
+        ));
+        let replace = if cfg!(target_os = "macos") {
+            char_key("f", Code::KeyF, cmd | Modifiers::ALT)
+        } else {
+            char_key("h", Code::KeyH, cmd)
+        };
+        assert!(matches!(replace, Some(Message::OpenReplace)));
+    }
+
+    #[test]
+    fn bookmark_shortcuts() {
+        assert!(matches!(
+            named(Named::F2, Modifiers::COMMAND),
+            Some(Message::Bookmark(BookmarkAction::Toggle))
+        ));
+        assert!(matches!(
+            named(Named::F2, Modifiers::empty()),
+            Some(Message::Bookmark(BookmarkAction::Next))
+        ));
+        assert!(matches!(
+            named(Named::F2, Modifiers::SHIFT),
+            Some(Message::Bookmark(BookmarkAction::Previous))
         ));
     }
 

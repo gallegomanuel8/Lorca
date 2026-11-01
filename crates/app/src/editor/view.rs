@@ -44,6 +44,28 @@ impl DocView {
         self.scroll_x = self.scroll_x.clamp(0.0, max_x);
     }
 
+    /// `true` si el cursor cae dentro de la vista con estas dimensiones.
+    pub fn is_cursor_visible(&self, editor: &EditorState, viewport: Viewport) -> bool {
+        if viewport.height <= 0.0 {
+            return false;
+        }
+        let top = editor.cursor().line as f32 * LINE_HEIGHT;
+        top >= self.scroll_y && top + LINE_HEIGHT <= self.scroll_y + viewport.height
+    }
+
+    /// Para saltos (buscar, ir a línea…): si el cursor no está a la vista, lo coloca a un
+    /// tercio de la altura para que se vea el contexto; si ya lo está, no mueve nada.
+    pub fn jump_to_cursor(&mut self, editor: &EditorState, viewport: Viewport) {
+        if viewport.height <= 0.0 {
+            return;
+        }
+        if !self.is_cursor_visible(editor, viewport) {
+            let top = editor.cursor().line as f32 * LINE_HEIGHT;
+            self.scroll_y = (top - viewport.height / 3.0).max(0.0);
+        }
+        self.reveal_cursor(editor, viewport);
+    }
+
     /// Ajusta el desplazamiento mínimo necesario para que el cursor sea visible.
     pub fn reveal_cursor(&mut self, editor: &EditorState, viewport: Viewport) {
         if viewport.height <= 0.0 || viewport.width <= 0.0 {
@@ -115,6 +137,29 @@ mod tests {
         assert_eq!(view.scroll_y, 2.0 * LINE_HEIGHT);
         view.scroll_by(1e6, 0.0, VIEWPORT, &buffer);
         assert_eq!(view.scroll_x, 0.0);
+    }
+
+    #[test]
+    fn jump_places_target_with_context() {
+        let mut editor = EditorState::from_text(&"x\n".repeat(200));
+        let mut view = DocView::default();
+        editor.move_cursor(Motion::PageDown(100), false);
+        view.jump_to_cursor(&editor, VIEWPORT);
+        assert_eq!(view.scroll_y, 100.0 * LINE_HEIGHT - VIEWPORT.height / 3.0);
+        // Si ya está a la vista, no se mueve.
+        editor.move_cursor(Motion::Down, false);
+        view.jump_to_cursor(&editor, VIEWPORT);
+        assert_eq!(view.scroll_y, 100.0 * LINE_HEIGHT - VIEWPORT.height / 3.0);
+    }
+
+    #[test]
+    fn cursor_visibility() {
+        let mut editor = EditorState::from_text(&"x\n".repeat(50));
+        let view = DocView::default();
+        assert!(view.is_cursor_visible(&editor, VIEWPORT));
+        assert!(!view.is_cursor_visible(&editor, Viewport::default()));
+        editor.move_cursor(Motion::PageDown(10), false);
+        assert!(!view.is_cursor_visible(&editor, VIEWPORT));
     }
 
     #[test]
