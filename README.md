@@ -21,7 +21,27 @@ gestión de documentos en pestañas.
 - Barra de estado con línea:columna, lenguaje (por extensión), codificación y LF/CRLF.
 - Abre UTF-8, UTF-8 con BOM, UTF-16 LE/BE y Windows-1252, y guarda conservando la
   codificación y los finales de línea originales.
-- Confirmación al cerrar una pestaña o la aplicación con cambios sin guardar.
+- Confirmación al cerrar una pestaña con cambios sin guardar.
+
+**Fase 1.5 completada:**
+
+- **Sesión persistente**: al cerrar y volver a abrir, Lorca restaura las pestañas, la activa,
+  el cursor, el desplazamiento y los cambios sin guardar (incluidos los «Sin título»). Los
+  archivos originales no se tocan: el texto pendiente se guarda en copias de respaldo y la
+  app sale sin preguntar. Avisa si un archivo cambió o desapareció mientras estaba cerrada.
+- **Tema claro, oscuro o automático** (sigue al sistema en vivo). Se elige en la pantalla
+  de bienvenida del primer arranque y se cambia desde la barra de estado.
+
+### Datos de usuario
+
+| Sistema | Carpeta |
+|---|---|
+| macOS | `~/Library/Application Support/Lorca/` |
+| Windows | `%APPDATA%\Lorca\` |
+| Linux | `~/.config/lorca/` |
+
+Contiene `config.toml` (preferencias), `session.toml` (pestañas) y `backups/` (texto sin
+guardar). La variable de entorno `LORCA_DATA_DIR` permite usar otra carpeta.
 
 ### Atajos
 
@@ -66,14 +86,15 @@ Workspace de Cargo:
 ## Hoja de ruta
 
 1. **MVP** ✅: workspace, núcleo de edición, pestañas, guardar/abrir, atajos.
+   - **1.5** ✅: sesión persistente con cambios sin guardar y tema claro/oscuro/automático.
 2. **Lenguajes**: detección por extensión y shebang, selector manual en la barra de estado,
    resaltado de sintaxis.
 3. **Búsqueda**: panel buscar/reemplazar (⌘F, ⌘H), expresiones regulares, resaltado de
    coincidencias, siguiente/anterior, reemplazar todo; ir a línea (⌘G).
 4. **Formato**: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
    codificaciones, preview de Markdown en panel dividido, formatear SQL y JSON.
-5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta, restaurar
-   sesión, reordenar pestañas arrastrando, recarga si el archivo cambia en disco.
+5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta,
+   reordenar pestañas arrastrando, recarga si el archivo cambia en disco.
 6. **Avanzado**: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),
    configuración en TOML, empaquetado y CI para los tres sistemas.
 

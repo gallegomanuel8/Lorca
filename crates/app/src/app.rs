@@ -3,13 +3,28 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, space, text, tooltip};
-use iced::{Alignment, Element, Length, Subscription, Task, Theme, keyboard, window};
-use lorca_workspace::{Document, DocumentId, Workspace};
+use iced::theme::Mode;
+use iced::time::{Duration, Instant};
+use iced::widget::{
+    button, column, container, mouse_area, pick_list, row, scrollable, space, text, tooltip,
+};
+use iced::{Alignment, Element, Length, Subscription, Task, Theme, keyboard, system, window};
+use lorca_workspace::{Config, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir};
 
 use crate::dialogs::{self, SaveChoice};
 use crate::editor::{DocView, EditorAction, Viewport, apply_action, code_editor};
 use crate::shortcuts::shortcut;
+use crate::welcome;
+
+/// Pausa sin cambios tras la que se guarda la sesión.
+///
+/// Es corta porque en macOS ⌘Q (menú por defecto de winit) termina el proceso sin avisar
+/// a la aplicación: lo no guardado en la sesión en ese momento se perdería.
+const SESSION_IDLE: Duration = Duration::from_millis(300);
+/// Tiempo máximo con cambios sin guardar en la sesión aunque se siga tecleando.
+const SESSION_MAX_DELAY: Duration = Duration::from_secs(2);
+/// Frecuencia con la que se comprueba si toca guardar la sesión.
+const SESSION_TICK: Duration = Duration::from_millis(100);
 
 /// Qué hacer con un documento cuando termina el flujo de guardado o confirmación.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +64,14 @@ pub enum Message {
     Redo,
     CloseRequested,
     DismissNotice,
+    /// El modo claro/oscuro del sistema ha cambiado (o se ha consultado al arrancar).
+    SystemTheme(Mode),
+    ThemeSelected(ThemeMode),
+    /// Opción marcada en la pantalla de bienvenida (aún sin confirmar).
+    WelcomeChoose(ThemeMode),
+    WelcomeDone,
+    /// Latido para el guardado diferido de la sesión.
+    Tick,
 }
 
 /// Mensaje informativo o de error que se muestra en la barra de estado.
@@ -65,25 +88,79 @@ pub struct Lorca {
     notice: Option<Notice>,
     /// Hay un diálogo nativo abierto: se ignoran las órdenes que abrirían otro.
     dialog_open: bool,
-    /// Documentos con cambios que quedan por confirmar antes de salir.
+    /// Documentos con cambios que quedan por confirmar antes de salir. Solo se usa si
+    /// no se puede guardar la sesión.
     quit_queue: Option<VecDeque<DocumentId>>,
+    config: Config,
+    /// Directorio de configuración y sesión (`None` si el sistema no ofrece ninguno).
+    data_dir: Option<PathBuf>,
+    session: Option<SessionStore>,
+    /// Primer y último cambio aún no guardados en la sesión.
+    session_dirty: Option<(Instant, Instant)>,
+    system_mode: Mode,
+    /// Opción marcada en la pantalla de bienvenida; `Some` mientras se muestra.
+    welcome_choice: Option<ThemeMode>,
 }
 
 impl Lorca {
-    /// Estado inicial: abre los archivos pasados por línea de órdenes o un documento nuevo.
+    /// Estado inicial: carga la configuración, restaura la sesión anterior y abre los
+    /// archivos pasados por línea de órdenes.
     pub fn boot() -> (Self, Task<Message>) {
+        let data_dir = data_dir();
+        let mut problems = Vec::new();
+
+        let config = match &data_dir {
+            Some(dir) => Config::load(&dir.join(Config::FILE_NAME)).unwrap_or_else(|error| {
+                problems.push(error.to_string());
+                Config::default()
+            }),
+            None => {
+                problems.push(
+                    "No se encontró el directorio de configuración: la sesión no se guardará"
+                        .to_owned(),
+                );
+                Config::default()
+            }
+        };
+
+        let mut workspace = Workspace::new();
+        let mut views = HashMap::new();
+        let session = data_dir.clone().map(SessionStore::new);
+        if let Some(store) = &session {
+            match store.load() {
+                Ok(Some(saved)) => {
+                    let report = workspace.restore(&saved, |name| store.read_backup(name));
+                    for (id, scroll_x, scroll_y) in report.scrolls {
+                        views.insert(id, DocView { scroll_x, scroll_y });
+                    }
+                    problems.extend(report.warnings);
+                }
+                Ok(None) => {}
+                Err(error) => problems.push(error.to_string()),
+            }
+        }
+
         let mut app = Self {
-            workspace: Workspace::new(),
-            views: HashMap::new(),
+            workspace,
+            views,
             viewport: Viewport::default(),
             notice: None,
             dialog_open: false,
             quit_queue: None,
+            welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
+            config,
+            data_dir,
+            session,
+            session_dirty: None,
+            system_mode: Mode::None,
         };
+        if !problems.is_empty() {
+            app.show_error(problems.join(" · "));
+        }
         let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
         app.open_paths(&paths);
         app.ensure_document();
-        (app, Task::none())
+        (app, system::theme().map(Message::SystemTheme))
     }
 
     pub fn title(&self) -> String {
@@ -97,17 +174,32 @@ impl Lorca {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Dark
+        let mode = self
+            .welcome_choice
+            .or(self.config.theme)
+            .unwrap_or_default();
+        resolve_theme(mode, self.system_mode)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
+        let mut subscriptions = vec![
             keyboard::listen().filter_map(shortcut),
             window::close_requests().map(|_| Message::CloseRequested),
-        ])
+            system::theme_changes().map(Message::SystemTheme),
+        ];
+        if self.session_dirty.is_some() {
+            subscriptions.push(iced::time::every(SESSION_TICK).map(|_| Message::Tick));
+        }
+        Subscription::batch(subscriptions)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        if affects_session(&message) {
+            let now = Instant::now();
+            let first = self.session_dirty.map_or(now, |(first, _)| first);
+            self.session_dirty = Some((first, now));
+        }
+
         match message {
             Message::Editor(action) => {
                 self.apply_editor_action(action);
@@ -191,6 +283,11 @@ impl Lorca {
                 if self.dialog_open {
                     return Task::none();
                 }
+                // Con la sesión guardada no se pierde nada: se sale sin preguntar. Si no se
+                // puede guardar, se vuelve a preguntar documento por documento.
+                if self.persist_session().is_ok() {
+                    return iced::exit();
+                }
                 self.quit_queue = Some(self.workspace.modified_documents().into());
                 self.process_quit()
             }
@@ -198,7 +295,67 @@ impl Lorca {
                 self.notice = None;
                 Task::none()
             }
+            Message::SystemTheme(mode) => {
+                self.system_mode = mode;
+                Task::none()
+            }
+            Message::ThemeSelected(mode) => {
+                self.config.theme = Some(mode);
+                self.save_config();
+                Task::none()
+            }
+            Message::WelcomeChoose(mode) => {
+                self.welcome_choice = Some(mode);
+                Task::none()
+            }
+            Message::WelcomeDone => {
+                self.config.theme = Some(self.welcome_choice.take().unwrap_or_default());
+                self.save_config();
+                Task::none()
+            }
+            Message::Tick => {
+                if let Some((first, last)) = self.session_dirty {
+                    let now = Instant::now();
+                    if now - last >= SESSION_IDLE || now - first >= SESSION_MAX_DELAY {
+                        // El error ya se muestra en la barra de estado.
+                        let _ = self.persist_session();
+                    }
+                }
+                Task::none()
+            }
         }
+    }
+
+    // --- Sesión y configuración -------------------------------------------------------
+
+    /// Guarda la sesión ahora. En caso de error lo muestra y lo devuelve.
+    fn persist_session(&mut self) -> Result<(), ()> {
+        self.session_dirty = None;
+        let Some(store) = self.session.as_mut() else {
+            self.show_error("No se puede guardar la sesión: no hay directorio de datos".to_owned());
+            return Err(());
+        };
+        let views = &self.views;
+        let result = store.save(&self.workspace, |id| {
+            views
+                .get(&id)
+                .map_or((0.0, 0.0), |v| (v.scroll_x, v.scroll_y))
+        });
+        result.map_err(|error| self.show_error(format!("No se pudo guardar la sesión: {error}")))
+    }
+
+    fn save_config(&mut self) {
+        let Some(dir) = &self.data_dir else { return };
+        if let Err(error) = self.config.save(&dir.join(Config::FILE_NAME)) {
+            self.show_error(error.to_string());
+        }
+    }
+
+    fn show_error(&mut self, text: String) {
+        self.notice = Some(Notice {
+            text,
+            is_error: true,
+        });
     }
 
     // --- Edición ----------------------------------------------------------------------
@@ -376,6 +533,9 @@ impl Lorca {
     // --- Vista ------------------------------------------------------------------------
 
     pub fn view(&self) -> Element<'_, Message> {
+        if let Some(choice) = self.welcome_choice {
+            return welcome::view(choice, self.system_mode);
+        }
         column![self.tab_bar(), self.editor_area(), self.status_bar()].into()
     }
 
@@ -467,6 +627,16 @@ impl Lorca {
                 position.push_str(&format!(" ({selected} seleccionados)"));
             }
             let format = document.format();
+            items.push(
+                pick_list(
+                    ThemeMode::ALL,
+                    Some(self.config.theme.unwrap_or_default()),
+                    Message::ThemeSelected,
+                )
+                .text_size(12)
+                .padding([0, 6])
+                .into(),
+            );
             for label in [
                 position,
                 document.language().name().to_owned(),
@@ -506,5 +676,53 @@ fn tab_style(theme: &Theme, status: button::Status, is_active: bool) -> button::
         background: Some(background.into()),
         text_color,
         ..button::Style::default()
+    }
+}
+
+/// Tema de iced para un modo; en automático sigue al sistema (claro si no lo indica).
+pub fn resolve_theme(mode: ThemeMode, system: Mode) -> Theme {
+    match (mode, system) {
+        (ThemeMode::Dark, _) | (ThemeMode::Auto, Mode::Dark) => Theme::Dark,
+        (ThemeMode::Light, _) | (ThemeMode::Auto, _) => Theme::Light,
+    }
+}
+
+/// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
+fn affects_session(message: &Message) -> bool {
+    !matches!(
+        message,
+        Message::Tick
+            | Message::SystemTheme(_)
+            | Message::DismissNotice
+            | Message::CloseRequested
+            | Message::ThemeSelected(_)
+            | Message::WelcomeChoose(_)
+            | Message::WelcomeDone
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_theme_follows_system() {
+        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::Dark), Theme::Dark);
+        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::Light), Theme::Light);
+        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::None), Theme::Light);
+    }
+
+    #[test]
+    fn explicit_theme_ignores_system() {
+        assert_eq!(resolve_theme(ThemeMode::Light, Mode::Dark), Theme::Light);
+        assert_eq!(resolve_theme(ThemeMode::Dark, Mode::Light), Theme::Dark);
+    }
+
+    #[test]
+    fn housekeeping_messages_do_not_dirty_session() {
+        assert!(!affects_session(&Message::Tick));
+        assert!(!affects_session(&Message::SystemTheme(Mode::Dark)));
+        assert!(affects_session(&Message::NewDocument));
+        assert!(affects_session(&Message::Editor(EditorAction::SelectAll)));
     }
 }

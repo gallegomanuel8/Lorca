@@ -45,7 +45,15 @@ mensaje en español.
     compara con la revisión guardada (deshacer hasta lo guardado = sin cambios).
   - `display`: columnas visuales (tabuladores, caracteres anchos con `unicode-width`).
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
-  `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje).
+  `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje, `DiskStamp`).
+  - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
+    `DiskStamp` (mtime + tamaño) para detectar cambios en disco.
+  - `session`: `SessionStore` guarda `session.toml` y `backups/doc-N.txt` (solo documentos
+    modificados; solo reescribe si cambió la revisión; borra respaldos huérfanos).
+    `Workspace::restore` reabre de disco los no modificados y de respaldo los modificados
+    (estos quedan con `forced_modified`). Formato versionado con `SESSION_VERSION`.
+  - `config`: `Config` (`config.toml`), `ThemeMode` (auto/claro/oscuro). `theme = None`
+    significa primer arranque.
 - `app`
   - `app.rs`: estado `Lorca`, `Message`, `update`, `view`. Flujos de guardar/cerrar/salir
     encadenados con `Then` (`Nothing`, `CloseTab`, `ContinueQuit`).
@@ -57,9 +65,22 @@ mensaje en español.
     globales vía `keyboard::listen()` (solo reciben eventos **no capturados**, así que el
     widget no debe capturar Cmd+S, Cmd+Z, Ctrl+Tab…).
   - `dialogs.rs`: diálogos rfd asíncronos (`Task::perform`); `dialog_open` evita abrir dos.
+  - Sesión: cualquier mensaje que la afecte marca `session_dirty`; un `time::every`
+    (ejecutor smol) la guarda 300 ms tras el último cambio o cada 2 s como máximo, y al
+    cerrar la ventana. Cerrar la app no pregunta; si no se puede guardar la sesión, vuelve
+    al flujo de confirmación por documento (`quit_queue`). ⌘W sigue preguntando.
+  - Tema: `resolve_theme(ThemeMode, system Mode)`; el modo del sistema llega con
+    `system::theme()` al arrancar y `system::theme_changes()`. `welcome.rs` es la
+    pantalla del primer arranque.
+  - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)
 
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
 - La barra de desplazamiento es solo indicador (no se arrastra).
+- macOS: ⌘Q usa el menú por defecto de winit, que termina el proceso sin avisar a la app.
+  Solo se pierde lo tecleado en los últimos ~300 ms. Solución prevista: menú nativo propio
+  (crate `muda`) que enrute «Salir» por `Message::CloseRequested`.
+- Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
+- El historial de deshacer no se conserva entre sesiones.
 - Sin resaltado de sintaxis (Fase 2), ni búsqueda (Fase 3).

@@ -10,7 +10,12 @@ use crate::WorkspaceError;
 /// Directorio donde Lorca guarda configuración y sesión:
 /// `~/Library/Application Support/Lorca` (macOS), `%APPDATA%\Lorca` (Windows) o
 /// `~/.config/lorca` (Linux).
+///
+/// La variable de entorno `LORCA_DATA_DIR` lo sustituye (útil para pruebas y desarrollo).
 pub fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("LORCA_DATA_DIR").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
     let name = if cfg!(any(target_os = "macos", windows)) {
         "Lorca"
     } else {

@@ -6,6 +6,7 @@ mod app;
 mod dialogs;
 mod editor;
 mod shortcuts;
+mod welcome;
 
 use app::Lorca;
 
