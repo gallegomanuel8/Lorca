@@ -1,0 +1,39 @@
+# Bodas de sangre (1933): la navaja, el azahar y la luna.
+name = "Bodas de sangre"
+appearance = "dark"
+description = "Rojo sangre, azahar y luna"
+
+[palette]
+background = "#1a1416"
+text = "#ecdfe0"
+primary = "#c0283b"
+success = "#7fa37a"
+warning = "#e0a95a"
+danger = "#ff4d63"
+
+[editor]
+gutter = "#151012"
+current_line = "#251c1f"
+selection = "#8a1f2e88"
+cursor = "#ff6b7f"
+line_number = "#6a5458"
+
+[syntax]
+keyword = "#e05a6b"
+function = "#f2d6b3"
+type = "#c792a8"
+string = "#d9b38c"
+escape = "#c792a8"
+number = "#f08a5d"
+constant = "#f08a5d"
+comment = { color = "#7a6468", italic = true }
+property = "#e8a0a8"
+variable = "#f0c0c6"
+operator = "#c58a94"
+tag = "#e05a6b"
+attribute = "#d9b38c"
+heading = { color = "#ff6b7f", bold = true }
+emphasis = { color = "#f2d6b3", italic = true }
+strong = { color = "#ff6b7f", bold = true }
+link = "#e05a6b"
+code = "#d9b38c"

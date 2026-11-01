@@ -36,6 +36,59 @@ pub enum HighlightKind {
     Code,
 }
 
+impl HighlightKind {
+    pub const ALL: [Self; 19] = [
+        Self::Keyword,
+        Self::Function,
+        Self::Type,
+        Self::String,
+        Self::Escape,
+        Self::Number,
+        Self::Constant,
+        Self::Comment,
+        Self::Property,
+        Self::Variable,
+        Self::Operator,
+        Self::Punctuation,
+        Self::Tag,
+        Self::Attribute,
+        Self::Heading,
+        Self::Emphasis,
+        Self::Strong,
+        Self::Link,
+        Self::Code,
+    ];
+
+    /// Nombre estable de la categoría (claves de la tabla `[syntax]` de los temas).
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Keyword => "keyword",
+            Self::Function => "function",
+            Self::Type => "type",
+            Self::String => "string",
+            Self::Escape => "escape",
+            Self::Number => "number",
+            Self::Constant => "constant",
+            Self::Comment => "comment",
+            Self::Property => "property",
+            Self::Variable => "variable",
+            Self::Operator => "operator",
+            Self::Punctuation => "punctuation",
+            Self::Tag => "tag",
+            Self::Attribute => "attribute",
+            Self::Heading => "heading",
+            Self::Emphasis => "emphasis",
+            Self::Strong => "strong",
+            Self::Link => "link",
+            Self::Code => "code",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 /// Nombres de captura reconocidos y su categoría. tree-sitter-highlight asigna a cada
 /// captura el nombre reconocido más largo que sea prefijo suyo (`function.method` →
 /// `function`). Las capturas no listadas (p. ej. `variable`) quedan sin color.
@@ -400,6 +453,14 @@ mod tests {
 
     fn run(language: Language, text: &str) -> Highlights {
         highlight(language, text).unwrap().unwrap()
+    }
+
+    #[test]
+    fn kind_names_round_trip() {
+        for kind in HighlightKind::ALL {
+            assert_eq!(HighlightKind::from_name(kind.name()), Some(kind));
+        }
+        assert_eq!(HighlightKind::from_name("violeta"), None);
     }
 
     #[test]

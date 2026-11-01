@@ -10,6 +10,7 @@ mod view;
 mod widget;
 
 pub use action::{ClickKind, EditorAction, apply_action};
+pub use palette::{EditorColors, to_color};
 pub use view::{DocView, Viewport};
 pub use widget::{Decorations, ViewOptions, code_editor};
 

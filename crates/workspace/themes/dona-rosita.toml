@@ -1,0 +1,39 @@
+# Doña Rosita la soltera o el lenguaje de las flores (1935): la rosa mudable.
+name = "Doña Rosita la soltera"
+appearance = "light"
+description = "El lenguaje de las flores: rosa y verde hoja"
+
+[palette]
+background = "#fdf6f7"
+text = "#3a2a30"
+primary = "#c2577a"
+success = "#5f8f5a"
+warning = "#c58b2a"
+danger = "#b33a3a"
+
+[editor]
+gutter = "#f8eef0"
+current_line = "#f7ebee"
+selection = "#c2577a33"
+cursor = "#c2577a"
+line_number = "#b8a2a9"
+
+[syntax]
+keyword = "#b03a6a"
+function = "#7b4fa0"
+type = "#a0522d"
+string = "#4f7f52"
+escape = "#a0522d"
+number = "#c0623a"
+constant = "#c0623a"
+comment = { color = "#a08890", italic = true }
+property = "#8a4f6a"
+variable = "#9a3f50"
+operator = "#8a6a75"
+tag = "#b03a6a"
+attribute = "#7b4fa0"
+heading = { color = "#b03a6a", bold = true }
+emphasis = { italic = true }
+strong = { bold = true }
+link = "#7b4fa0"
+code = "#4f7f52"

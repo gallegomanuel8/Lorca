@@ -19,9 +19,9 @@ use lorca_core::{EditorState, LineEnding, Position, display};
 use lorca_syntax::Highlights;
 
 use super::keymap::{KeyCommand, map_key};
+use super::palette::EditorColors;
 use super::{
     ClickKind, DocView, EditorAction, FONT_SIZE, LINE_HEIGHT, TAB_WIDTH, TEXT_PADDING, Viewport,
-    palette,
 };
 
 /// Periodo de parpadeo del cursor.
@@ -46,6 +46,7 @@ pub fn code_editor<'a, Message>(
         highlights,
         decorations,
         options,
+        colors: None,
         on_action: Box::new(on_action),
     }
 }
@@ -80,6 +81,8 @@ pub struct CodeEditor<'a, Message> {
     highlights: Option<&'a Highlights>,
     decorations: Decorations<'a>,
     options: ViewOptions,
+    /// Colores del tema activo; sin ellos se derivan del tema de iced.
+    colors: Option<&'a EditorColors>,
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -192,7 +195,13 @@ impl Geometry {
     }
 }
 
-impl<Message> CodeEditor<'_, Message> {
+impl<'a, Message> CodeEditor<'a, Message> {
+    /// Usa los colores del tema activo.
+    pub fn colors(mut self, colors: &'a EditorColors) -> Self {
+        self.colors = Some(colors);
+        self
+    }
+
     /// Índice de carácter más cercano a un punto de la pantalla.
     fn index_at(&self, point: Point, geometry: &Geometry) -> usize {
         let buffer = self.editor.buffer();
@@ -475,7 +484,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         let buffer = self.editor.buffer();
         let line_count = buffer.len_lines();
         let geometry = Geometry::new(layout.bounds(), state.cell_width, line_count);
-        let colors = Colors::from_theme(theme);
+        let derived;
+        let colors = match self.colors {
+            Some(colors) => colors,
+            None => {
+                derived = EditorColors::new(None, theme);
+                &derived
+            }
+        };
         let view = self.view;
 
         fill(renderer, geometry.text_area, colors.background);
@@ -698,15 +714,15 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     if run.text.trim().is_empty() {
                         continue;
                     }
-                    let (color, font) = palette::style(run.style, colors.is_dark);
+                    let style = colors.style(run.style);
                     renderer.fill_text(
                         Text {
                             content: run.text,
-                            font,
+                            font: style.font,
                             ..text_style()
                         },
                         Point::new(geometry.cell_x(run.start_cell, view), y),
-                        color.unwrap_or(colors.text),
+                        style.color.unwrap_or(colors.text),
                         geometry.text_area,
                     );
                 }
@@ -772,72 +788,6 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
 impl<'a, Message: 'a> From<CodeEditor<'a, Message>> for Element<'a, Message, Theme, Renderer> {
     fn from(editor: CodeEditor<'a, Message>) -> Self {
         Element::new(editor)
-    }
-}
-
-/// Colores del editor derivados del tema.
-struct Colors {
-    background: Color,
-    gutter: Color,
-    text: Color,
-    line_number: Color,
-    line_number_active: Color,
-    current_line: Color,
-    selection: Color,
-    cursor: Color,
-    scrollbar: Color,
-    found: Color,
-    found_current: Color,
-    mark: Color,
-    bookmark: Color,
-    whitespace: Color,
-    guide: Color,
-    is_dark: bool,
-}
-
-impl Colors {
-    fn from_theme(theme: &Theme) -> Self {
-        let palette = theme.extended_palette();
-        let background = palette.background.base;
-        Self {
-            background: background.color,
-            gutter: palette.background.weakest.color,
-            text: background.text,
-            line_number: palette.background.strong.color,
-            line_number_active: background.text,
-            current_line: palette.background.weakest.color,
-            selection: Color {
-                a: 0.35,
-                ..palette.primary.base.color
-            },
-            cursor: palette.primary.strong.color,
-            is_dark: palette.is_dark,
-            found: Color {
-                a: 0.35,
-                ..palette.warning.base.color
-            },
-            found_current: Color {
-                a: 0.75,
-                ..palette.warning.strong.color
-            },
-            mark: Color {
-                a: 0.35,
-                ..palette.success.base.color
-            },
-            bookmark: palette.primary.base.color,
-            whitespace: Color {
-                a: 0.7,
-                ..palette.background.strong.color
-            },
-            guide: Color {
-                a: 0.35,
-                ..palette.background.strong.color
-            },
-            scrollbar: Color {
-                a: 0.5,
-                ..palette.background.strong.color
-            },
-        }
     }
 }
 

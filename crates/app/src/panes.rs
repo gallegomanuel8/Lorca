@@ -123,6 +123,7 @@ impl Lorca {
             options,
             move |action| Message::Editor(id, action),
         )
+        .colors(&self.active_theme.editor)
         .into();
         match self.preview_for(id) {
             Some(preview) => row![editor, rule::vertical(1), preview].into(),
@@ -345,9 +346,16 @@ impl Lorca {
         }
         for mode in lorca_workspace::ThemeMode::ALL {
             commands.push(Command::new(
-                format!("Tema: {}", mode.label()),
+                format!("Tema: modo {}", mode.label().to_lowercase()),
                 "",
                 Message::ThemeSelected(mode),
+            ));
+        }
+        for (index, spec) in self.themes.iter().enumerate() {
+            commands.push(Command::new(
+                format!("Tema: {}", spec.name),
+                "",
+                context(ContextAction::SetTheme(index)),
             ));
         }
         for language in Language::ALL {
@@ -398,6 +406,27 @@ impl Lorca {
     }
 
     // --- Menús contextuales -----------------------------------------------------------
+
+    /// Elige el tema `index` para su aspecto y, si no es el que se ve ahora, cambia el
+    /// modo para que se vea.
+    fn select_theme(&mut self, index: usize) {
+        let Some(spec) = self.themes.iter().nth(index) else {
+            return;
+        };
+        let appearance = spec.appearance;
+        let name = spec.name.clone();
+        match appearance {
+            lorca_workspace::Appearance::Light => self.config.light_theme = name,
+            lorca_workspace::Appearance::Dark => self.config.dark_theme = name,
+        }
+        if self.appearance() != appearance {
+            self.config.theme = Some(match appearance {
+                lorca_workspace::Appearance::Light => lorca_workspace::ThemeMode::Light,
+                lorca_workspace::Appearance::Dark => lorca_workspace::ThemeMode::Dark,
+            });
+        }
+        self.save_config();
+    }
 
     pub(super) fn open_context_menu(&mut self, position: Point, target: MenuTarget) {
         if let MenuTarget::Text(id) = target {
@@ -582,6 +611,35 @@ impl Lorca {
                     Some(ContextAction::ToggleIndentGuides),
                 ),
             ],
+            MenuTarget::Theme => {
+                let mode = self.config.theme.unwrap_or_default();
+                let mut items = vec![MenuItem::Header("Modo".to_owned())];
+                for option in lorca_workspace::ThemeMode::ALL {
+                    items.push(MenuItem::check(
+                        option.label(),
+                        option == mode,
+                        Some(ContextAction::SetThemeMode(option)),
+                    ));
+                }
+                for (title, appearance) in [
+                    ("Temas oscuros", lorca_workspace::Appearance::Dark),
+                    ("Temas claros", lorca_workspace::Appearance::Light),
+                ] {
+                    items.push(MenuItem::Separator);
+                    items.push(MenuItem::Header(title.to_owned()));
+                    let chosen = self.config.theme_name(appearance);
+                    for (index, spec) in self.themes.iter().enumerate() {
+                        if spec.appearance == appearance {
+                            items.push(MenuItem::check(
+                                &spec.name,
+                                spec.name == chosen,
+                                Some(ContextAction::SetTheme(index)),
+                            ));
+                        }
+                    }
+                }
+                items
+            }
             MenuTarget::Tab(id) => {
                 let selected = self.workspace.selected();
                 let tabs = self.workspace.tabs();
@@ -779,6 +837,15 @@ impl Lorca {
                         Err(error) => self.show_error(error.to_string()),
                     }
                 }
+                Task::none()
+            }
+            ContextAction::SetThemeMode(mode) => {
+                self.config.theme = Some(mode);
+                self.save_config();
+                Task::none()
+            }
+            ContextAction::SetTheme(index) => {
+                self.select_theme(index);
                 Task::none()
             }
             ContextAction::ToggleWhitespace => {

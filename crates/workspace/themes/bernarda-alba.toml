@@ -1,0 +1,39 @@
+# La casa de Bernarda Alba (1936): muros encalados y luto. Casi monocromo.
+name = "La casa de Bernarda Alba"
+appearance = "light"
+description = "Muros blancos y luto: casi monocromo"
+
+[palette]
+background = "#fbfaf7"
+text = "#1b1b1b"
+primary = "#3a3a3a"
+success = "#4f6f52"
+warning = "#b8862b"
+danger = "#9b2226"
+
+[editor]
+gutter = "#f3f1ec"
+current_line = "#f1efe9"
+selection = "#00000026"
+cursor = "#000000"
+line_number = "#a8a49c"
+
+[syntax]
+keyword = { color = "#000000", bold = true }
+function = "#2e2e2e"
+type = "#555555"
+string = "#6b5b4b"
+escape = "#7a3e2e"
+number = "#7a3e2e"
+constant = "#7a3e2e"
+comment = { color = "#9a9a9a", italic = true }
+property = "#444444"
+variable = "#4a4a4a"
+operator = "#555555"
+tag = { color = "#000000", bold = true }
+attribute = "#555555"
+heading = { color = "#000000", bold = true }
+emphasis = { italic = true }
+strong = { bold = true }
+link = "#3a3a3a"
+code = "#6b5b4b"

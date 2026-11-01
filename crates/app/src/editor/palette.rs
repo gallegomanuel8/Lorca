@@ -1,95 +1,156 @@
-//! Colores y estilos del resaltado de sintaxis para los temas claro y oscuro.
-//!
-//! Provisional hasta los temas configurables de la Fase 6.
+//! Colores del área de edición y del resaltado, a partir del tema activo.
 
 use iced::font::{Style, Weight};
-use iced::{Color, Font, color};
+use iced::{Color, Font, Theme};
 use lorca_syntax::HighlightKind;
+use lorca_workspace::{Rgba, ThemeSpec, TokenStyle};
 
-/// Color y fuente de un tramo. `None` como color significa «el color de texto del tema».
-pub fn style(kind: Option<HighlightKind>, is_dark: bool) -> (Option<Color>, Font) {
-    let Some(kind) = kind else {
-        return (None, Font::MONOSPACE);
-    };
-    let color = if is_dark { dark(kind) } else { light(kind) };
-    let font = match kind {
-        HighlightKind::Heading | HighlightKind::Strong => Font {
-            weight: Weight::Bold,
-            ..Font::MONOSPACE
-        },
-        HighlightKind::Emphasis => Font {
-            style: Style::Italic,
-            ..Font::MONOSPACE
-        },
-        _ => Font::MONOSPACE,
-    };
-    (color, font)
+/// Color y fuente de una categoría de resaltado. `None` como color significa «el color de
+/// texto del tema».
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SyntaxStyle {
+    pub color: Option<Color>,
+    pub font: Font,
 }
 
-/// Paleta oscura, inspirada en One Dark.
-fn dark(kind: HighlightKind) -> Option<Color> {
-    Some(match kind {
-        HighlightKind::Keyword => color!(0xc678dd),
-        HighlightKind::Function | HighlightKind::Link => color!(0x61afef),
-        HighlightKind::Type => color!(0xe5c07b),
-        HighlightKind::String | HighlightKind::Code => color!(0x98c379),
-        HighlightKind::Escape | HighlightKind::Operator => color!(0x56b6c2),
-        HighlightKind::Number | HighlightKind::Constant | HighlightKind::Attribute => {
-            color!(0xd19a66)
-        }
-        HighlightKind::Comment => color!(0x7f848e),
-        HighlightKind::Property | HighlightKind::Variable | HighlightKind::Tag => {
-            color!(0xe06c75)
-        }
-        HighlightKind::Heading => color!(0xe06c75),
-        HighlightKind::Strong => color!(0xd19a66),
-        HighlightKind::Emphasis => color!(0xc678dd),
-        HighlightKind::Punctuation => return None,
-    })
+/// Colores del editor ya resueltos (los que el tema no da se derivan de su paleta).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorColors {
+    pub background: Color,
+    pub gutter: Color,
+    pub text: Color,
+    pub line_number: Color,
+    pub line_number_active: Color,
+    pub current_line: Color,
+    pub selection: Color,
+    pub cursor: Color,
+    pub scrollbar: Color,
+    pub found: Color,
+    pub found_current: Color,
+    pub mark: Color,
+    pub bookmark: Color,
+    pub whitespace: Color,
+    pub guide: Color,
+    pub error: Color,
+    pub warning: Color,
+    pub info: Color,
+    syntax: [SyntaxStyle; HighlightKind::ALL.len()],
 }
 
-/// Paleta clara, inspirada en GitHub Light.
-fn light(kind: HighlightKind) -> Option<Color> {
-    Some(match kind {
-        HighlightKind::Keyword => color!(0xcf222e),
-        HighlightKind::Function => color!(0x8250df),
-        HighlightKind::Type | HighlightKind::Variable => color!(0x953800),
-        HighlightKind::String | HighlightKind::Code | HighlightKind::Link => color!(0x0a3069),
-        HighlightKind::Escape
-        | HighlightKind::Number
-        | HighlightKind::Constant
-        | HighlightKind::Property
-        | HighlightKind::Attribute
-        | HighlightKind::Heading => color!(0x0550ae),
-        HighlightKind::Comment => color!(0x6e7781),
-        HighlightKind::Tag => color!(0x116329),
-        HighlightKind::Operator
-        | HighlightKind::Punctuation
-        | HighlightKind::Strong
-        | HighlightKind::Emphasis => return None,
-    })
+pub fn to_color(rgba: Rgba) -> Color {
+    Color::from_rgba8(rgba.r, rgba.g, rgba.b, f32::from(rgba.a) / 255.0)
+}
+
+fn with_alpha(color: Color, a: f32) -> Color {
+    Color { a, ..color }
+}
+
+impl EditorColors {
+    /// Colores para `theme` (el tema de iced ya construido) con los ajustes de `spec`.
+    pub fn new(spec: Option<&ThemeSpec>, theme: &Theme) -> Self {
+        let palette = theme.extended_palette();
+        let background = palette.background.base;
+        let editor = spec.map(|s| s.editor).unwrap_or_default();
+        let pick = |value: Option<Rgba>, fallback: Color| value.map_or(fallback, to_color);
+        let syntax = HighlightKind::ALL
+            .map(|kind| syntax_style(kind, spec.and_then(|s| s.token(kind)).unwrap_or_default()));
+        Self {
+            background: pick(editor.background, background.color),
+            gutter: pick(editor.gutter, palette.background.weakest.color),
+            text: background.text,
+            line_number: pick(editor.line_number, palette.background.strong.color),
+            line_number_active: pick(editor.line_number_active, background.text),
+            current_line: pick(editor.current_line, palette.background.weakest.color),
+            selection: pick(
+                editor.selection,
+                with_alpha(palette.primary.base.color, 0.35),
+            ),
+            cursor: pick(editor.cursor, palette.primary.strong.color),
+            found: pick(editor.find, with_alpha(palette.warning.base.color, 0.35)),
+            found_current: pick(
+                editor.find_current,
+                with_alpha(palette.warning.strong.color, 0.75),
+            ),
+            mark: pick(editor.mark, with_alpha(palette.success.base.color, 0.35)),
+            bookmark: pick(editor.bookmark, palette.primary.base.color),
+            whitespace: pick(
+                editor.whitespace,
+                with_alpha(palette.background.strong.color, 0.7),
+            ),
+            guide: pick(
+                editor.guide,
+                with_alpha(palette.background.strong.color, 0.35),
+            ),
+            scrollbar: with_alpha(palette.background.strong.color, 0.5),
+            error: pick(editor.error, palette.danger.base.color),
+            warning: pick(editor.warning, palette.warning.base.color),
+            info: pick(editor.info, palette.primary.base.color),
+            syntax,
+        }
+    }
+
+    /// Color y fuente de un tramo.
+    pub fn style(&self, kind: Option<HighlightKind>) -> SyntaxStyle {
+        kind.and_then(|kind| self.syntax.get(kind as usize).copied())
+            .unwrap_or(SyntaxStyle {
+                color: None,
+                font: Font::MONOSPACE,
+            })
+    }
+}
+
+fn syntax_style(kind: HighlightKind, token: TokenStyle) -> SyntaxStyle {
+    // Sin indicación del tema, los títulos y la negrita de Markdown van en negrita y el
+    // énfasis en cursiva.
+    let bold = token.bold || matches!(kind, HighlightKind::Heading | HighlightKind::Strong);
+    let italic = token.italic || kind == HighlightKind::Emphasis;
+    SyntaxStyle {
+        color: token.color.map(to_color),
+        font: Font {
+            weight: if bold { Weight::Bold } else { Weight::Normal },
+            style: if italic { Style::Italic } else { Style::Normal },
+            ..Font::MONOSPACE
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lorca_workspace::ThemeSet;
+
+    fn colors(name: &str) -> EditorColors {
+        let set = ThemeSet::builtin();
+        let spec = set.get(name).unwrap();
+        EditorColors::new(Some(spec), &Theme::Dark)
+    }
 
     #[test]
     fn plain_text_uses_theme_color() {
-        assert_eq!(style(None, true), (None, Font::MONOSPACE));
+        let style = colors("Yerma").style(None);
+        assert_eq!(style.color, None);
+        assert_eq!(style.font, Font::MONOSPACE);
     }
 
     #[test]
-    fn keywords_are_colored_in_both_themes() {
-        assert!(style(Some(HighlightKind::Keyword), true).0.is_some());
-        assert!(style(Some(HighlightKind::Keyword), false).0.is_some());
-    }
-
-    #[test]
-    fn strong_is_bold() {
+    fn theme_colors_reach_syntax_and_editor() {
+        let yerma = colors("Yerma");
         assert_eq!(
-            style(Some(HighlightKind::Strong), false).1.weight,
+            yerma.style(Some(HighlightKind::Keyword)).color,
+            Some(Color::from_rgb8(0xd0, 0x8b, 0x4c))
+        );
+        assert_eq!(yerma.cursor, Color::from_rgb8(0xf0, 0xc2, 0x7a));
+        let comment = yerma.style(Some(HighlightKind::Comment));
+        assert_eq!(comment.font.style, Style::Italic);
+    }
+
+    #[test]
+    fn strong_is_bold_even_without_theme() {
+        let plain = EditorColors::new(None, &Theme::Light);
+        assert_eq!(
+            plain.style(Some(HighlightKind::Strong)).font.weight,
             Weight::Bold
         );
+        assert_eq!(plain.style(Some(HighlightKind::Keyword)).color, None);
     }
 }

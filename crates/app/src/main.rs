@@ -12,6 +12,7 @@ mod menu;
 mod palette;
 mod shortcut_labels;
 mod shortcuts;
+mod theme;
 mod watcher;
 mod welcome;
 

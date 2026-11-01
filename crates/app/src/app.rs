@@ -18,7 +18,8 @@ use lorca_formats::{PdfFonts, markdown_to_pdf};
 use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
 use lorca_workspace::{
-    Config, DiskStamp, Document, DocumentId, SessionStore, ThemeMode, Workspace, data_dir,
+    Config, DiskStamp, Document, DocumentId, SessionStore, THEMES_DIR, ThemeMode, ThemeSet,
+    Workspace, data_dir,
 };
 
 use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
@@ -28,6 +29,7 @@ use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::menu;
 use crate::palette::{self, Palette};
 use crate::shortcuts::shortcut;
+use crate::theme::{ActiveTheme, system_is_dark};
 use crate::watcher;
 use crate::welcome;
 
@@ -203,6 +205,9 @@ pub struct Lorca {
     system_mode: Mode,
     /// Opción marcada en la pantalla de bienvenida; `Some` mientras se muestra.
     welcome_choice: Option<ThemeMode>,
+    /// Temas disponibles (incluidos y del usuario) y el que se está mostrando.
+    themes: ThemeSet,
+    active_theme: ActiveTheme,
     highlights: HashMap<DocumentId, HighlightState>,
     find: FindState,
     /// Texto de «Ir a línea»; `Some` mientras la barra está abierta.
@@ -251,6 +256,17 @@ impl Lorca {
             }
         };
 
+        let themes = match &data_dir {
+            Some(dir) => {
+                let (themes, errors) = ThemeSet::load(&dir.join(THEMES_DIR));
+                problems.extend(errors.iter().map(ToString::to_string));
+                themes
+            }
+            None => ThemeSet::builtin(),
+        };
+        let appearance = config.theme.unwrap_or_default().appearance(None);
+        let active_theme = ActiveTheme::new(&themes, config.theme_name(appearance), appearance);
+
         let mut workspace = Workspace::new();
         let mut views = HashMap::new();
         let session = data_dir.clone().map(SessionStore::new);
@@ -282,6 +298,8 @@ impl Lorca {
             dialog_open: false,
             quit_queue: None,
             welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
+            themes,
+            active_theme,
             config,
             data_dir,
             session,
@@ -314,6 +332,7 @@ impl Lorca {
         app.open_paths(&paths);
         app.ensure_document();
         app.sync_panes();
+        app.refresh_theme();
         let highlight = app.schedule_highlight();
         (
             app,
@@ -336,11 +355,24 @@ impl Lorca {
     }
 
     pub fn theme(&self) -> Theme {
-        let mode = self
-            .welcome_choice
+        self.active_theme.iced.clone()
+    }
+
+    /// Aspecto (claro u oscuro) que toca mostrar ahora.
+    fn appearance(&self) -> lorca_workspace::Appearance {
+        self.welcome_choice
             .or(self.config.theme)
-            .unwrap_or_default();
-        resolve_theme(mode, self.system_mode)
+            .unwrap_or_default()
+            .appearance(system_is_dark(self.system_mode))
+    }
+
+    /// Reconstruye el tema activo si cambió el modo, el sistema o el tema elegido.
+    fn refresh_theme(&mut self) {
+        let appearance = self.appearance();
+        let name = self.config.theme_name(appearance);
+        if !self.active_theme.is(name, appearance) {
+            self.active_theme = ActiveTheme::new(&self.themes, name, appearance);
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -371,6 +403,7 @@ impl Lorca {
         self.sync_panes();
         self.refresh_search();
         self.refresh_previews();
+        self.refresh_theme();
         Task::batch([task, self.schedule_highlight()])
     }
 
@@ -1086,7 +1119,7 @@ impl Lorca {
 
     pub fn view(&self) -> Element<'_, Message> {
         if let Some(choice) = self.welcome_choice {
-            return welcome::view(choice, self.system_mode);
+            return welcome::view(choice, self.system_mode, &self.themes, &self.config);
         }
         let mut layout = column![self.tab_bar()];
         if let Some(input) = &self.goto {
@@ -1237,16 +1270,14 @@ impl Lorca {
         items.push(click_area(text("¶").size(13), |position| {
             Message::StatusMenu(MenuTarget::View, position)
         }));
-        items.push(
-            pick_list(
-                ThemeMode::ALL,
-                Some(self.config.theme.unwrap_or_default()),
-                Message::ThemeSelected,
-            )
-            .text_size(12)
-            .padding([0, 6])
-            .into(),
+        let theme_label = format!(
+            "{} · {}",
+            self.active_theme.name(),
+            self.config.theme.unwrap_or_default().label()
         );
+        items.push(click_area(text(theme_label).size(12), |position| {
+            Message::StatusMenu(MenuTarget::Theme, position)
+        }));
 
         container(row(items).spacing(18).align_y(Alignment::Center))
             .padding([3, 12])
@@ -1284,14 +1315,6 @@ fn tab_style(
     container::Style::default()
         .background(background)
         .color(text_color)
-}
-
-/// Tema de iced para un modo; en automático sigue al sistema (claro si no lo indica).
-pub fn resolve_theme(mode: ThemeMode, system: Mode) -> Theme {
-    match (mode, system) {
-        (ThemeMode::Dark, _) | (ThemeMode::Auto, Mode::Dark) => Theme::Dark,
-        (ThemeMode::Light, _) | (ThemeMode::Auto, _) => Theme::Light,
-    }
 }
 
 /// Flechas arriba/abajo mientras la paleta está abierta (el campo de texto no las usa).
@@ -1343,19 +1366,6 @@ fn affects_session(message: &Message) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn auto_theme_follows_system() {
-        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::Dark), Theme::Dark);
-        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::Light), Theme::Light);
-        assert_eq!(resolve_theme(ThemeMode::Auto, Mode::None), Theme::Light);
-    }
-
-    #[test]
-    fn explicit_theme_ignores_system() {
-        assert_eq!(resolve_theme(ThemeMode::Light, Mode::Dark), Theme::Light);
-        assert_eq!(resolve_theme(ThemeMode::Dark, Mode::Light), Theme::Dark);
-    }
 
     #[test]
     fn housekeeping_messages_do_not_dirty_session() {

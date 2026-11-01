@@ -1,0 +1,39 @@
+# Poeta en Nueva York (1940): acero, cristal y luces de neón.
+name = "Poeta en Nueva York"
+appearance = "dark"
+description = "Acero, cristal y neón"
+
+[palette]
+background = "#16191f"
+text = "#cfd6df"
+primary = "#5c8dd6"
+success = "#7fbf9a"
+warning = "#e3b55a"
+danger = "#e06c75"
+
+[editor]
+gutter = "#13161b"
+current_line = "#1d2129"
+selection = "#3a5a8c88"
+cursor = "#89ddff"
+line_number = "#4f5866"
+
+[syntax]
+keyword = "#7aa2f7"
+function = "#82cfff"
+type = "#e3b55a"
+string = "#9ece6a"
+escape = "#bb9af7"
+number = "#ff9e64"
+constant = "#ff9e64"
+comment = { color = "#5c6370", italic = true }
+property = "#bb9af7"
+variable = "#f7768e"
+operator = "#89ddff"
+tag = "#7aa2f7"
+attribute = "#e3b55a"
+heading = { color = "#7aa2f7", bold = true }
+emphasis = { color = "#bb9af7", italic = true }
+strong = { color = "#ff9e64", bold = true }
+link = "#82cfff"
+code = "#9ece6a"

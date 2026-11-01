@@ -1,0 +1,39 @@
+# Yerma (1934): tierra seca, ocre y olivo bajo el sol de Castilla.
+name = "Yerma"
+appearance = "dark"
+description = "Tierra seca: ocres, olivos y barro"
+
+[palette]
+background = "#1f1a16"
+text = "#e6d9c3"
+primary = "#c8873a"
+success = "#8a9a5b"
+warning = "#d9a441"
+danger = "#c4553a"
+
+[editor]
+gutter = "#1a1612"
+current_line = "#2a231d"
+selection = "#7a542a88"
+cursor = "#f0c27a"
+line_number = "#6e5f4f"
+
+[syntax]
+keyword = "#d08b4c"
+function = "#e0b565"
+type = "#c7b087"
+string = "#9aa86a"
+escape = "#d9a441"
+number = "#d9734e"
+constant = "#d9734e"
+comment = { color = "#7d6e5d", italic = true }
+property = "#c9b18d"
+variable = "#e39a7a"
+operator = "#c49a6c"
+tag = "#d08b4c"
+attribute = "#c7b087"
+heading = { color = "#e0b565", bold = true }
+emphasis = { color = "#d9a441", italic = true }
+strong = { color = "#d9734e", bold = true }
+link = "#c8873a"
+code = "#9aa86a"

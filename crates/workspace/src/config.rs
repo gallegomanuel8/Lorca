@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::WorkspaceError;
 use crate::storage::{read_optional, write_atomic};
+use crate::theme::{Appearance, DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME};
 
 /// Modo de color de la interfaz.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -21,6 +22,15 @@ pub enum ThemeMode {
 
 impl ThemeMode {
     pub const ALL: [Self; 3] = [Self::Auto, Self::Light, Self::Dark];
+
+    /// Aspecto que corresponde al modo; `system_dark` es el del sistema (`None` si no se
+    /// conoce, y entonces se usa el claro).
+    pub const fn appearance(self, system_dark: Option<bool>) -> Appearance {
+        match (self, system_dark) {
+            (Self::Dark, _) | (Self::Auto, Some(true)) => Appearance::Dark,
+            (Self::Light | Self::Auto, _) => Appearance::Light,
+        }
+    }
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -49,6 +59,10 @@ pub struct Config {
     pub show_line_endings: bool,
     /// Mostrar guías verticales de indentación.
     pub indent_guides: bool,
+    /// Tema que se usa con aspecto claro (modo claro, o automático con el sistema claro).
+    pub light_theme: String,
+    /// Tema que se usa con aspecto oscuro.
+    pub dark_theme: String,
 }
 
 impl Default for Config {
@@ -58,11 +72,21 @@ impl Default for Config {
             show_whitespace: false,
             show_line_endings: false,
             indent_guides: true,
+            light_theme: DEFAULT_LIGHT_THEME.to_owned(),
+            dark_theme: DEFAULT_DARK_THEME.to_owned(),
         }
     }
 }
 
 impl Config {
+    /// Nombre del tema elegido para un aspecto.
+    pub fn theme_name(&self, appearance: Appearance) -> &str {
+        match appearance {
+            Appearance::Light => &self.light_theme,
+            Appearance::Dark => &self.dark_theme,
+        }
+    }
+
     /// Nombre del archivo dentro del directorio de datos.
     pub const FILE_NAME: &'static str = "config.toml";
 
@@ -122,6 +146,16 @@ mod tests {
         assert_eq!(config.theme, Some(ThemeMode::Light));
         assert!(config.indent_guides);
         assert!(!config.show_whitespace);
+    }
+
+    #[test]
+    fn appearance_follows_mode_and_system() {
+        assert_eq!(ThemeMode::Auto.appearance(Some(true)), Appearance::Dark);
+        assert_eq!(ThemeMode::Auto.appearance(None), Appearance::Light);
+        assert_eq!(ThemeMode::Light.appearance(Some(true)), Appearance::Light);
+        assert_eq!(ThemeMode::Dark.appearance(Some(false)), Appearance::Dark);
+        let config = Config::default();
+        assert_eq!(config.theme_name(Appearance::Dark), DEFAULT_DARK_THEME);
     }
 
     #[test]

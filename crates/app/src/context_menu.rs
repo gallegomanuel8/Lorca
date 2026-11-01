@@ -30,6 +30,8 @@ pub enum MenuTarget {
     LineEnding(DocumentId),
     /// «¶» de la barra de estado: caracteres invisibles y guías.
     View,
+    /// Nombre del tema en la barra de estado.
+    Theme,
 }
 
 /// Menú abierto: posición (en la ventana) y objetivo.
@@ -74,6 +76,9 @@ pub enum ContextAction {
     ChangeCase(Case),
     TogglePreview,
     ExportPdf(DocumentId),
+    SetThemeMode(lorca_workspace::ThemeMode),
+    /// Índice del tema en el [`lorca_workspace::ThemeSet`].
+    SetTheme(usize),
 }
 
 /// Elemento de un menú.

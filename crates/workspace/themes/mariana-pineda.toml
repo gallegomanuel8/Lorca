@@ -1,0 +1,39 @@
+# Mariana Pineda (1927): papel de Granada y la bandera bordada en morado y verde.
+name = "Mariana Pineda"
+appearance = "light"
+description = "Papel claro, morado y verde bordados"
+
+[palette]
+background = "#f7f5ef"
+text = "#2a2733"
+primary = "#5b3f8c"
+success = "#3f7d4e"
+warning = "#b07d1a"
+danger = "#a8323e"
+
+[editor]
+gutter = "#efece4"
+current_line = "#eeeae0"
+selection = "#5b3f8c40"
+cursor = "#5b3f8c"
+line_number = "#a29daa"
+
+[syntax]
+keyword = "#5b3f8c"
+function = "#2f6f8f"
+type = "#8a5a1a"
+string = "#3f7d4e"
+escape = "#8a5a1a"
+number = "#a8323e"
+constant = "#a8323e"
+comment = { color = "#8c8796", italic = true }
+property = "#6a4f9a"
+variable = "#9a4a2e"
+operator = "#6b6577"
+tag = "#5b3f8c"
+attribute = "#8a5a1a"
+heading = { color = "#5b3f8c", bold = true }
+emphasis = { italic = true }
+strong = { bold = true }
+link = "#2f6f8f"
+code = "#3f7d4e"

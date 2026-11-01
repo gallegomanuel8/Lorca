@@ -1,0 +1,40 @@
+# Romancero gitano (1928): «Verde que te quiero verde. / Verde viento. Verdes ramas.»
+# Noche verde y luna de plata.
+name = "Romancero gitano"
+appearance = "dark"
+description = "Noche verde y luna de plata"
+
+[palette]
+background = "#0f1a1c"
+text = "#dbe4e0"
+primary = "#3fae8a"
+success = "#6cc08b"
+warning = "#e1c16e"
+danger = "#e06c75"
+
+[editor]
+gutter = "#0c1517"
+current_line = "#16262a"
+selection = "#2f6f5c99"
+cursor = "#c9e8f5"
+line_number = "#4a6662"
+
+[syntax]
+keyword = "#5fd3a8"
+function = "#9fd8f0"
+type = "#e1c16e"
+string = "#a6d189"
+escape = "#f0b27a"
+number = "#c3a6e8"
+constant = "#c3a6e8"
+comment = { color = "#5e7b78", italic = true }
+property = "#8fc7b9"
+variable = "#e8a0a8"
+operator = "#8fb8ad"
+tag = "#5fd3a8"
+attribute = "#e1c16e"
+heading = { color = "#5fd3a8", bold = true }
+emphasis = { color = "#c3a6e8", italic = true }
+strong = { color = "#f0b27a", bold = true }
+link = "#9fd8f0"
+code = "#a6d189"
