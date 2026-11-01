@@ -85,6 +85,22 @@ gestión de documentos en pestañas.
 - **MAYÚSCULAS / minúsculas / Tipo Título** de la selección.
 - **Vista previa de Markdown** al lado del editor, actualizada en vivo (enlaces clicables).
 
+**Fase 5 completada:**
+
+- **Exportar a PDF** la vista previa de Markdown (botón en su cabecera o menú contextual),
+  con las fuentes del sistema.
+- **Multicursor**: ⌥+clic añade un cursor, ⌘D selecciona la palabra y añade la siguiente
+  aparición, ⌥⌘↑/↓ añade cursores en columna, Esc vuelve a uno. Copiar y pegar reparten
+  una línea por cursor.
+- **Paleta de órdenes** (⇧⌘P) con búsqueda difusa sobre todas las acciones.
+- **Buscar en carpeta** (⇧⌘F): respeta `.gitignore`, ignora binarios; resultados
+  clicables en el panel.
+- **Reordenar pestañas** arrastrándolas.
+- **Recarga automática** si otro programa cambia un archivo abierto (pregunta si tienes
+  cambios sin guardar; avisa si se borró).
+- **Barra de menús nativa en macOS** (Archivo, Editar, Buscar, Ver, Ventana); ⌘Q guarda la
+  sesión antes de salir.
+
 ### Datos de usuario
 
 | Sistema | Carpeta |
@@ -156,8 +172,9 @@ Workspace de Cargo:
    - **3.5** ✅: menú contextual, selección de varias pestañas y pantalla dividida (2–4).
 4. **Formato** ✅: caracteres invisibles, guías de indentación, conversión LF/CRLF, otras
    codificaciones, vista previa de Markdown, formatear SQL y JSON, mayúsculas/minúsculas.
-5. **Productividad**: multicursor, paleta de órdenes (⌘⇧P), búsqueda en carpeta,
-   reordenar pestañas arrastrando, recarga si el archivo cambia en disco.
+5. **Productividad** ✅: multicursor, paleta de órdenes, búsqueda en carpeta, reordenar
+   pestañas arrastrando, recarga si el archivo cambia en disco, menús nativos (macOS) y
+   exportar Markdown a PDF.
 6. **Avanzado**: cliente LSP, temas («Yerma», «Bodas de sangre», «Romancero gitano»…),
    configuración en TOML, empaquetado y CI para los tres sistemas.
 

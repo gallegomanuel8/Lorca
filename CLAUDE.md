@@ -69,6 +69,16 @@ mensaje en español.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
   (sqlformat), `change_case`, `markdown_to_html` (pulldown-cmark; para exportar). La vista
   previa en pantalla usa el widget `markdown` de iced (que también usa pulldown-cmark).
+- `core` (multicursor): `Cursors` = selecciones ordenadas y fusionadas con una principal;
+  `selection()` es la principal y `selections()` todas. Toda edición pasa por
+  `EditorState::edit_each` (un `Change` por cursor, una transacción). El historial guarda
+  `Cursors` antes/después. `version()` cambia con cada edición (clave de cachés);
+  `revision()` solo sirve para saber si coincide con lo guardado.
+- `search`: también `search_folder` (crate `ignore`, respeta `.gitignore`, sin binarios
+  ni > 5 MB) y `build_hits` (filas de resultados, compartidas con «Buscar todo»).
+- `formats`: `markdown_to_pdf` con `genpdf` y fuentes del sistema (`PdfFonts::system`:
+  Arial/Courier en macOS y Windows, DejaVu en Linux). Ejemplo `md2pdf`. El PDF incrusta
+  las fuentes completas (≈6 MB).
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, nombre «Sin título N», formato, lenguaje, `DiskStamp`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
@@ -136,16 +146,22 @@ mensaje en español.
     revisión) se muestra junto al editor en `editor_for`.
   - Atajos y teclado en macOS: el editor no escribe nunca con ⌘ pulsado (⌥⌘L daría «¬») y
     solo trata ⌘C/X/V/A sin Mayús (⇧⌘V es la vista previa).
+  - Fase 5: `palette.rs` (búsqueda difusa, `palette_commands` en `panes.rs`),
+    `watcher.rs` (notify, vigila carpetas; `Message::FileChanged`), `menu.rs` (muda, solo
+    macOS, instalado con `Task::done(Message::InstallMenu)`), arrastre de pestañas con
+    `mouse_area` + `Message::MouseReleased` global.
+  - Probar la interfaz con osascript/clics simulados **roba el foco** al usuario: avisar
+    antes y no hacerlo mientras pueda estar usando el ordenador.
   - Para probar sin tocar los datos reales: `LORCA_DATA_DIR=/tmp/lorca cargo run -p lorca`.
 
 ## Limitaciones conocidas (Fase 1)
 
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
 - La barra de desplazamiento es solo indicador (no se arrastra).
-- macOS: ⌘Q usa el menú por defecto de winit, que termina el proceso sin avisar a la app.
-  Solo se pierde lo tecleado en los últimos ~300 ms. Solución prevista: menú nativo propio
-  (crate `muda`) que enrute «Salir» por `Message::CloseRequested`.
+- Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
+  en Linux).
 - Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
+- La sesión solo guarda el cursor principal (no todos los del multicursor).
 - El historial de deshacer no se conserva entre sesiones.
 - La vista previa de Markdown no sincroniza el desplazamiento con el editor ni se guarda en
   la sesión.
