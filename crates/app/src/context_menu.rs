@@ -32,6 +32,8 @@ pub enum MenuTarget {
     View,
     /// Nombre del tema en la barra de estado.
     Theme,
+    /// Menú de la barra de menús dibujada (Windows y Linux), por índice en [`crate::menu::BAR`].
+    MenuBar(usize),
 }
 
 /// Menú abierto: posición (en la ventana) y objetivo.
@@ -81,6 +83,8 @@ pub enum ContextAction {
     ShowHover,
     /// Índice del tema en el [`lorca_workspace::ThemeSet`].
     SetTheme(usize),
+    /// Opción de la barra de menús (identificador de [`crate::menu::message_for`]).
+    MenuCommand(&'static str),
 }
 
 /// Elemento de un menú.
@@ -226,6 +230,7 @@ pub fn context_area<'a>(
     Element::new(ContextArea {
         content: content.into(),
         button: mouse::Button::Right,
+        anchored: false,
         on_click: Box::new(on_right_click),
     })
 }
@@ -238,6 +243,21 @@ pub fn click_area<'a>(
     Element::new(ContextArea {
         content: content.into(),
         button: mouse::Button::Left,
+        anchored: false,
+        on_click: Box::new(on_click),
+    })
+}
+
+/// Como [`click_area`], pero publica la esquina inferior izquierda de `content` en vez de
+/// la posición del clic (para abrir un menú justo debajo, como en la barra de menús).
+pub fn anchor_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_click: impl Fn(Point) -> Message + 'a,
+) -> Element<'a, Message> {
+    Element::new(ContextArea {
+        content: content.into(),
+        button: mouse::Button::Left,
+        anchored: true,
         on_click: Box::new(on_click),
     })
 }
@@ -245,6 +265,8 @@ pub fn click_area<'a>(
 struct ContextArea<'a> {
     content: Element<'a, Message>,
     button: mouse::Button,
+    /// Publica la esquina inferior izquierda en vez de la posición del clic.
+    anchored: bool,
     on_click: Box<dyn Fn(Point) -> Message + 'a>,
 }
 
@@ -331,6 +353,12 @@ impl Widget<Message, Theme, Renderer> for ContextArea<'_> {
             && *button == self.button
             && let Some(position) = cursor.position_over(layout.bounds())
         {
+            let bounds = layout.bounds();
+            let position = if self.anchored {
+                Point::new(bounds.x, bounds.y + bounds.height)
+            } else {
+                position
+            };
             shell.publish((self.on_click)(position));
             shell.capture_event();
         }

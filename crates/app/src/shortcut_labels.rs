@@ -38,6 +38,13 @@ label!(ZOOM_RESET, "⌘0", "Ctrl+0");
 label!(SETTINGS, "⌘,", "Ctrl+,");
 label!(COMPLETE, "⌃Espacio", "Ctrl+Espacio");
 label!(HOVER, "⌘I", "Ctrl+I");
+label!(PALETTE, "⇧⌘P", "Ctrl+Mayús+P");
+label!(FIND_NEXT, "⌘G", "F3");
+label!(FIND_PREVIOUS, "⇧⌘G", "Mayús+F3");
+label!(QUIT, "⌘Q", "Alt+F4");
+pub const DEFINITION: &str = "F12";
+pub const NEXT_PROBLEM: &str = "F8";
+pub const PREVIOUS_PROBLEM: &str = "Mayús+F8";
 
 /// Texto de «mostrar el archivo» en el gestor de archivos del sistema.
 pub const REVEAL: &str = if cfg!(target_os = "macos") {

@@ -18,6 +18,7 @@ use super::{Lorca, Message, Then};
 use crate::context_menu::{ContextAction, ContextMenu, MenuItem, MenuTarget};
 use crate::editor::{Decorations, ViewOptions, code_editor};
 use crate::find;
+use crate::menu::{self, BarEntry};
 use crate::palette::{self, Command};
 use crate::shortcut_labels as keys;
 
@@ -704,6 +705,31 @@ impl Lorca {
                 }
                 items
             }
+            MenuTarget::MenuBar(index) => {
+                let Some(bar_menu) = menu::BAR.get(index) else {
+                    return Vec::new();
+                };
+                bar_menu
+                    .entries
+                    .iter()
+                    .map(|entry| match *entry {
+                        BarEntry::Separator => MenuItem::Separator,
+                        BarEntry::Item(id, label, shortcut) => {
+                            let action = Some(ContextAction::MenuCommand(id));
+                            let checked = match id {
+                                "whitespace" => Some(self.config.show_whitespace),
+                                "line_endings" => Some(self.config.show_line_endings),
+                                "guides" => Some(self.config.indent_guides),
+                                _ => None,
+                            };
+                            match checked {
+                                Some(checked) => MenuItem::check(label, checked, action),
+                                None => MenuItem::new(label, shortcut, action),
+                            }
+                        }
+                    })
+                    .collect()
+            }
             MenuTarget::Tab(id) => {
                 let selected = self.workspace.selected();
                 let tabs = self.workspace.tabs();
@@ -919,6 +945,9 @@ impl Lorca {
             ContextAction::SetTheme(index) => {
                 self.select_theme(index);
                 Task::none()
+            }
+            ContextAction::MenuCommand(id) => {
+                menu::message_for(id).map_or_else(Task::none, Task::done)
             }
             ContextAction::ToggleWhitespace => {
                 self.config.show_whitespace = !self.config.show_whitespace;

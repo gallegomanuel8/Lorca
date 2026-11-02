@@ -1,19 +1,155 @@
-//! Barra de menús nativa (solo macOS).
+//! Barra de menús: nativa en macOS y dibujada con iced en Windows y Linux.
 //!
 //! En macOS sustituye al menú por defecto de winit, cuyo «Salir» (⌘Q) terminaba el
 //! proceso sin avisar: aquí «Salir» pasa por `Message::CloseRequested`, que guarda la
 //! sesión. En Windows `muda` necesita código `unsafe` para engancharse a la ventana (el
-//! proyecto lo prohíbe) y en Linux, GTK; allí se usan los atajos, la paleta de órdenes y
-//! los menús contextuales.
+//! proyecto lo prohíbe) y en Linux, GTK; allí se dibuja una barra propia ([`bar`]) cuyos
+//! desplegables son menús contextuales (`MenuTarget::MenuBar`).
 
-use iced::Subscription;
+use iced::widget::{container, row, text};
+use iced::{Element, Subscription, Theme};
 
 use crate::app::{BookmarkAction, Message};
-use crate::context_menu::ContextAction;
+use crate::context_menu::{ContextAction, MenuTarget, anchor_area};
+use crate::shortcut_labels as keys;
+
+/// Alto de la barra de menús dibujada.
+pub const BAR_HEIGHT: f32 = 26.0;
+
+/// Elemento de un menú de la barra dibujada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarEntry {
+    /// Identificador de [`message_for`], texto y atajo.
+    Item(&'static str, &'static str, &'static str),
+    Separator,
+}
+
+/// Menú de la barra dibujada: título y elementos.
+#[derive(Debug, Clone, Copy)]
+pub struct BarMenu {
+    pub title: &'static str,
+    pub entries: &'static [BarEntry],
+}
+
+use BarEntry::{Item, Separator};
+
+/// Menús de la barra dibujada (Windows y Linux), con los mismos identificadores que la
+/// barra nativa de macOS.
+pub const BAR: &[BarMenu] = &[
+    BarMenu {
+        title: "Archivo",
+        entries: &[
+            Item("new", "Nuevo", keys::NEW),
+            Item("open", "Abrir…", keys::OPEN),
+            Separator,
+            Item("save", "Guardar", keys::SAVE),
+            Item("save_as", "Guardar como…", keys::SAVE_AS),
+            Item("export_pdf", "Exportar a PDF…", ""),
+            Separator,
+            Item("open_config", "Ajustes…", keys::SETTINGS),
+            Separator,
+            Item("close", "Cerrar pestaña", keys::CLOSE),
+            Item("quit", "Salir", keys::QUIT),
+        ],
+    },
+    BarMenu {
+        title: "Editar",
+        entries: &[
+            Item("undo", "Deshacer", keys::UNDO),
+            Item("redo", "Rehacer", keys::REDO),
+            Separator,
+            Item("cut", "Cortar", keys::CUT),
+            Item("copy", "Copiar", keys::COPY),
+            Item("paste", "Pegar", keys::PASTE),
+            Item("select_all", "Seleccionar todo", keys::SELECT_ALL),
+            Separator,
+            Item("format", "Formatear documento", keys::FORMAT),
+            Item("upper", "MAYÚSCULAS", keys::UPPER),
+            Item("lower", "minúsculas", keys::LOWER),
+        ],
+    },
+    BarMenu {
+        title: "Buscar",
+        entries: &[
+            Item("find", "Buscar…", keys::FIND),
+            Item("replace", "Reemplazar…", keys::REPLACE),
+            Item("find_folder", "Buscar en carpeta…", keys::FIND_IN_FOLDER),
+            Separator,
+            Item("find_next", "Buscar siguiente", keys::FIND_NEXT),
+            Item("find_previous", "Buscar anterior", keys::FIND_PREVIOUS),
+            Separator,
+            Item("goto", "Ir a línea…", keys::GOTO),
+            Item("bookmark", "Poner o quitar marcador", keys::BOOKMARK),
+        ],
+    },
+    BarMenu {
+        title: "Código",
+        entries: &[
+            Item("complete", "Autocompletar", keys::COMPLETE),
+            Item("hover", "Mostrar información", keys::HOVER),
+            Item("definition", "Ir a la definición", keys::DEFINITION),
+            Separator,
+            Item("next_problem", "Siguiente problema", keys::NEXT_PROBLEM),
+            Item(
+                "previous_problem",
+                "Problema anterior",
+                keys::PREVIOUS_PROBLEM,
+            ),
+            Separator,
+            Item("lsp_restart", "Reiniciar servidores de lenguaje", ""),
+        ],
+    },
+    BarMenu {
+        title: "Ver",
+        entries: &[
+            Item("palette", "Paleta de órdenes…", keys::PALETTE),
+            Separator,
+            Item("split", "Dividir pantalla / quitar división", keys::SPLIT),
+            Item("preview", "Vista previa de Markdown", keys::PREVIEW),
+            Separator,
+            Item("whitespace", "Espacios y tabuladores", ""),
+            Item("line_endings", "Finales de línea", ""),
+            Item("guides", "Guías de indentación", ""),
+            Separator,
+            Item("zoom_in", "Aumentar letra", keys::ZOOM_IN),
+            Item("zoom_out", "Reducir letra", keys::ZOOM_OUT),
+            Item("zoom_reset", "Tamaño de letra normal", keys::ZOOM_RESET),
+            Separator,
+            Item("new_theme", "Crear tema a partir del actual", ""),
+        ],
+    },
+];
+
+/// Barra de menús dibujada. `open` es el índice del menú desplegado, si lo hay.
+pub fn bar<'a>(open: Option<usize>) -> Element<'a, Message> {
+    let titles = BAR.iter().enumerate().map(|(index, menu)| {
+        let highlighted = open == Some(index);
+        let title = container(text(menu.title).size(13))
+            .height(BAR_HEIGHT)
+            .padding([4, 10])
+            .style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                if highlighted {
+                    container::Style::default()
+                        .background(palette.primary.weak.color)
+                        .color(palette.primary.weak.text)
+                } else {
+                    container::Style::default()
+                }
+            });
+        anchor_area(title, move |position| {
+            Message::StatusMenu(MenuTarget::MenuBar(index), position)
+        })
+    });
+    container(row(titles))
+        .width(iced::Length::Fill)
+        .style(|theme: &Theme| {
+            container::Style::default().background(theme.extended_palette().background.weak.color)
+        })
+        .into()
+}
 
 /// Mensaje de la aplicación para el identificador de una opción de menú.
-// Fuera de macOS no hay barra de menús: solo lo usan las pruebas.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn message_for(id: &str) -> Option<Message> {
     use lorca_formats::Case;
     let message = match id {
@@ -322,6 +458,17 @@ mod tests {
             assert!(message_for(id).is_some(), "sin mensaje: {id}");
         }
         assert!(message_for("desconocido").is_none());
+    }
+
+    #[test]
+    fn every_bar_item_has_a_message() {
+        for menu in BAR {
+            for entry in menu.entries {
+                if let BarEntry::Item(id, _, _) = entry {
+                    assert!(message_for(id).is_some(), "sin mensaje: {id}");
+                }
+            }
+        }
     }
 
     #[test]

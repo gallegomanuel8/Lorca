@@ -167,8 +167,10 @@ mensaje en español.
   - Atajos y teclado en macOS: el editor no escribe nunca con ⌘ pulsado (⌥⌘L daría «¬») y
     solo trata ⌘C/X/V/A sin Mayús (⇧⌘V es la vista previa).
   - Fase 5: `palette.rs` (búsqueda difusa, `palette_commands` en `panes.rs`),
-    `watcher.rs` (notify, vigila carpetas; `Message::FileChanged`), `menu.rs` (muda, solo
-    macOS, instalado con `Task::done(Message::InstallMenu)`), arrastre de pestañas con
+    `watcher.rs` (notify, vigila carpetas; `Message::FileChanged`), `menu.rs` (muda en
+    macOS, instalado con `Task::done(Message::InstallMenu)`; en Windows y Linux `bar` +
+    `BAR`, desplegables como `MenuTarget::MenuBar` y `ContextAction::MenuCommand(id)`),
+    arrastre de pestañas con
     `mouse_area` + `Message::MouseReleased` global.
   - Fase 6:
     - `theme.rs`: `ActiveTheme` (tema de iced + `EditorColors`), reconstruido en
@@ -201,6 +203,12 @@ mensaje en español.
   (`winresource`, solo Windows) y `png/lorca-256.png` como icono de la ventana
   (feature `image` de iced). Si `create-dmg` falla con «Recurso ocupado», queda montado
   un `/Volumes/Lorca` de un intento anterior: `hdiutil detach`.
+- Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
+  (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
+  componentes con «Abrir con Lorca» en el menú contextual de los archivos
+  (`HKCUSoftwareClasses*shellLorca`; en Windows 11, en «Mostrar más opciones»).
+- `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
+  (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
   (paquetes al publicar una etiqueta `v*`).
 - Código solo para macOS: lo que no se use fuera necesita
@@ -211,7 +219,8 @@ mensaje en español.
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
 - La barra de desplazamiento es solo indicador (no se arrastra).
 - Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
-  en Linux).
+  en Linux): se dibuja una con iced (`menu::bar`), sin teclas Alt ni paso de un menú a
+  otro al pasar el ratón.
 - Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
 - La sesión solo guarda el cursor principal (no todos los del multicursor).
 - El historial de deshacer no se conserva entre sesiones.

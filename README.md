@@ -40,7 +40,8 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 - **Deshacer por transacciones** (una palabra se deshace de una vez), números de línea,
   guías de indentación, espacios y finales de línea visibles.
 - **Paleta de órdenes** (⇧⌘P) con búsqueda difusa sobre todas las acciones.
-- **Menú contextual** en el texto y las pestañas; **barra de menús nativa** en macOS.
+- **Menú contextual** en el texto y las pestañas; **barra de menús** nativa en macOS y
+  dibujada en la ventana en Windows y Linux.
 
 ### Lenguajes y formato
 
@@ -81,8 +82,10 @@ cambian desde la barra de estado o la paleta, y puedes crear los tuyos.
 ## Instalación
 
 Cada versión publicada (etiqueta `vX.Y.Z`) deja en
-[releases](https://github.com/gallegomanuel8/Lorca/releases) los paquetes `.dmg`,
-`.msi`/`.exe` y `.deb`/AppImage. Mientras no haya ninguna, compílalo (abajo). Los
+[releases](https://github.com/gallegomanuel8/Lorca/releases) los paquetes `.dmg` (y un `.zip`
+portable con el `.app`),
+`.msi`/`.exe` y `.deb`/AppImage. El instalador `.exe` de Windows ofrece añadir «Abrir con
+Lorca» al menú contextual de los archivos. Mientras no haya ninguna, compílalo (abajo). Los
 paquetes no están firmados: en macOS, la primera vez abre la app con clic derecho →
 Abrir.
 

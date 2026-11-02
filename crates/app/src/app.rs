@@ -1317,7 +1317,19 @@ impl Lorca {
         if let Some(choice) = self.welcome_choice {
             return welcome::view(choice, self.system_mode, &self.themes, &self.config);
         }
-        let mut layout = column![self.tab_bar()];
+        // macOS tiene la barra de menús nativa; en el resto se dibuja dentro de la ventana.
+        let mut layout = column![];
+        if !cfg!(target_os = "macos") {
+            let open = match self.context_menu {
+                Some(ContextMenu {
+                    target: MenuTarget::MenuBar(index),
+                    ..
+                }) => Some(index),
+                _ => None,
+            };
+            layout = layout.push(menu::bar(open));
+        }
+        layout = layout.push(self.tab_bar());
         if let Some(input) = &self.goto {
             let lines = self
                 .workspace

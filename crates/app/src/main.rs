@@ -2,6 +2,10 @@
 //!
 //! Uso: `lorca [ARCHIVO...]` abre los archivos indicados en pestañas.
 
+// En Windows, sin esto el ejecutable es de consola y abre una ventana de cmd detrás de la
+// del editor. En depuración se mantiene la consola para ver los mensajes.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod context_menu;
 mod dialogs;
