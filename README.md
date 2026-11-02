@@ -85,7 +85,8 @@ Cada versión publicada (etiqueta `vX.Y.Z`) deja en
 [releases](https://github.com/gallegomanuel8/Lorca/releases) los paquetes `.dmg` (y un `.zip`
 portable con el `.app`),
 `.msi`/`.exe` y `.deb`/AppImage. El instalador `.exe` de Windows ofrece añadir «Abrir con
-Lorca» al menú contextual de los archivos. Mientras no haya ninguna, compílalo (abajo). Los
+Lorca» al menú contextual de los archivos; si Lorca ya está abierto, el archivo se abre
+en esa ventana. Mientras no haya ninguna, compílalo (abajo). Los
 paquetes no están firmados: en macOS, la primera vez abre la app con clic derecho →
 Abrir.
 

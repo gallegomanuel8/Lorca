@@ -11,6 +11,7 @@ mod context_menu;
 mod dialogs;
 mod editor;
 mod find;
+mod instance;
 mod key_filter;
 mod lsp_view;
 mod menu;
@@ -27,6 +28,11 @@ use app::Lorca;
 const ICON: &[u8] = include_bytes!("../../../assets/icons/png/lorca-256.png");
 
 fn main() -> anyhow::Result<()> {
+    // Si Lorca ya está abierto, le pasa los archivos y termina sin abrir otra ventana.
+    let paths: Vec<std::path::PathBuf> = std::env::args_os().skip(1).map(Into::into).collect();
+    if !instance::start(&paths) {
+        return Ok(());
+    }
     let window = iced::window::Settings {
         size: app::WINDOW_SIZE,
         position: iced::window::Position::Centered,

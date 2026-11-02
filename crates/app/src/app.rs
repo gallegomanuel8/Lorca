@@ -81,6 +81,8 @@ pub enum Message {
     NewDocument,
     Open,
     FilesPicked(Vec<PathBuf>),
+    /// Otra ejecución de Lorca (p. ej. «Abrir con Lorca») pide abrir estos archivos aquí.
+    OpenedElsewhere(Vec<PathBuf>),
     Save,
     SaveAs,
     SavePathPicked {
@@ -413,6 +415,7 @@ impl Lorca {
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
             watcher::watch(self.watched()),
             crate::lsp_view::events(),
+            crate::instance::events(),
         ];
         if self.palette.is_some() {
             subscriptions.push(event::listen_with(palette_keys));
@@ -497,6 +500,14 @@ impl Lorca {
                 self.dialog_open = false;
                 self.open_paths(&paths);
                 Task::none()
+            }
+            Message::OpenedElsewhere(paths) => {
+                self.open_paths(&paths);
+                // Trae la ventana al frente (Windows puede limitarse a hacer parpadear su
+                // botón en la barra de tareas).
+                window::latest().and_then(|id| {
+                    Task::batch([window::minimize(id, false), window::gain_focus(id)])
+                })
             }
             Message::Save => match self.workspace.active_id() {
                 Some(id) => self.save(id, Then::Nothing),

@@ -87,6 +87,12 @@ mensaje en español.
     modificados; solo reescribe si cambió la revisión; borra respaldos huérfanos).
     `Workspace::restore` reabre de disco los no modificados y de respaldo los modificados
     (estos quedan con `forced_modified`). Formato versionado con `SESSION_VERSION`.
+  - `instance`: instancia única. `claim(data_dir, rutas)` → `Launch::{Primary, Forwarded,
+    Standalone}`. La principal escucha en `127.0.0.1` (puerto y clave aleatoria en
+    `<datos>/instance`); las siguientes envían clave + rutas absolutas separadas por `\0` y
+    esperan `ok`. Archivo obsoleto o sin respuesta = nueva principal. En `app`,
+    `instance.rs` lo arranca en `main` y entrega `Message::OpenedElsewhere` (abre y trae la
+    ventana con `window::gain_focus`).
   - `config`: `Config` (`config.toml`), `ThemeMode` (auto/claro/oscuro;
     `ThemeMode::appearance`). `theme = None` significa primer arranque. También
     `light_theme`/`dark_theme`, `font_size`, `tab_width`, `insert_spaces` (con métodos que
@@ -221,7 +227,9 @@ mensaje en español.
 - Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
   en Linux): se dibuja una con iced (`menu::bar`), sin teclas Alt ni paso de un menú a
   otro al pasar el ratón.
-- Dos instancias de Lorca a la vez comparten y sobrescriben la misma sesión.
+- Instancia única por carpeta de datos: con Lorca abierto, `cargo run` (sin otro
+  `LORCA_DATA_DIR`) no abre ventana, sino que pasa los archivos a la instancia abierta. Dos
+  arranques exactamente simultáneos pueden quedar como dos instancias.
 - La sesión solo guarda el cursor principal (no todos los del multicursor).
 - El historial de deshacer no se conserva entre sesiones.
 - La vista previa de Markdown no sincroniza el desplazamiento con el editor ni se guarda en

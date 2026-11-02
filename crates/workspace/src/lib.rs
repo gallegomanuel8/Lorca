@@ -7,6 +7,7 @@
 mod config;
 mod document;
 mod error;
+pub mod instance;
 mod session;
 mod storage;
 mod theme;
