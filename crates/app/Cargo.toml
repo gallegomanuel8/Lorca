@@ -50,3 +50,8 @@ minimum-system-version = "11.0"
 
 [package.metadata.packager.deb]
 section = "editors"
+
+# Plantilla propia (ver su cabecera): añade la opción «Abrir con Lorca» del menú contextual.
+[package.metadata.packager.nsis]
+template = "windows/installer.nsi"
+languages = ["Spanish"]
