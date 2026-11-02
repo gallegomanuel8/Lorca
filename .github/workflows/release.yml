@@ -22,7 +22,9 @@ jobs:
         include:
           - os: macos-latest
             formats: app,dmg
-            files: target/packages/*.dmg
+            files: |
+              target/packages/*.dmg
+              target/packages/*-portable.zip
           - os: windows-latest
             formats: nsis,wix
             files: |
@@ -49,6 +51,13 @@ jobs:
       - name: Empaquetar
         working-directory: crates/app
         run: cargo packager --release --formats ${{ matrix.formats }}
+      # Versión portable de macOS: el .app comprimido, para usarlo sin instalar el .dmg.
+      # ditto conserva los atributos y enlaces del bundle (zip no siempre lo hace).
+      - name: Portable de macOS
+        if: runner.os == 'macOS'
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "lorca") | .version')
+          ditto -c -k --keepParent target/packages/Lorca.app "target/packages/Lorca_${version}_$(uname -m)-portable.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: lorca-${{ runner.os }}
