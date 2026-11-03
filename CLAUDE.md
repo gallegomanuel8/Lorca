@@ -218,7 +218,7 @@ mensaje en español.
 - Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos
-  (`HKCUSoftwareClasses*shellorca`; en Windows 11, en «Mostrar más opciones»).
+  (`HKCU\Software\Classes\*\shell\Lorca`; en Windows 11, en «Mostrar más opciones»).
 - `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
