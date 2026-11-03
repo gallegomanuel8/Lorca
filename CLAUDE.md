@@ -245,6 +245,9 @@ mensaje en español.
   (`winresource`, solo Windows) y `png/lorca-256.png` como icono de la ventana
   (feature `image` de iced). Si `create-dmg` falla con «Recurso ocupado», queda montado
   un `/Volumes/Lorca` de un intento anterior: `hdiutil detach`.
+- `lorca.icns` se genera con `assets/icons/macos/generar-icns.sh` desde
+  `macos/Lorca.icon` (Icon Composer): desde macOS 26 un `.icns` sin la forma de Apple sale
+  dentro de un cuadro claro.
 - Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos

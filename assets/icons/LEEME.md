@@ -8,6 +8,16 @@ Copia esta carpeta en tu proyecto como `assets/icons/`.
 | `lorca.icns` | macOS (bundle `.app` / `.dmg`). Con el margen de la plantilla de Apple |
 | `png/lorca-*.png` | Linux (AppImage, .deb) y el icono de la ventana en tiempo de ejecución |
 | `png/lorca-macos-1024.png` | Original 1024 px con margen macOS, por si regeneras el `.icns` |
+| `macos/Lorca.icon` | Origen del icono de macOS en formato de Icon Composer (capa `retrato.png` sobre fondo negro) |
+| `macos/generar-icns.sh` | Regenera `lorca.icns` desde `Lorca.icon` (necesita Xcode 26 o posterior) |
+
+## macOS 26 y posteriores
+
+macOS dibuja dentro de un cuadro claro los iconos `.icns` que no tienen su forma
+(«squircle»). Por eso `lorca.icns` no se hace a mano: `macos/generar-icns.sh` compila
+`Lorca.icon` con `actool`, pide al sistema que lo dibuje a 1024 px (ya con la forma y la
+sombra de Apple) y monta el `.icns` con todos los tamaños. Tras cambiar el retrato, vuelve a
+ejecutarlo.
 
 ## 1. Icono de la ventana (iced)
 
