@@ -43,6 +43,12 @@ pub enum EditorAction {
         dx: f32,
         dy: f32,
     },
+    /// Posición absoluta en los ejes indicados (arrastre de las barras de desplazamiento).
+    /// Absoluta para que varios movimientos seguidos antes de redibujar no se acumulen.
+    ScrollTo {
+        x: Option<f32>,
+        y: Option<f32>,
+    },
     Viewport(Viewport),
     /// ⌥+clic: añade un cursor.
     AddCursor {
@@ -88,6 +94,10 @@ pub fn apply_action(
     match action {
         EditorAction::Scroll { dx, dy } => {
             view.scroll_by(dx, dy, viewport, editor.buffer());
+            return Ok(());
+        }
+        EditorAction::ScrollTo { x, y } => {
+            view.scroll_to(x, y, viewport, editor.buffer());
             return Ok(());
         }
         // La aplicación guarda el viewport; aquí solo se reajusta el desplazamiento.

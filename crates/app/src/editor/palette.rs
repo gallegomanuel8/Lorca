@@ -81,7 +81,7 @@ impl EditorColors {
                 editor.guide,
                 with_alpha(palette.background.strong.color, 0.35),
             ),
-            scrollbar: with_alpha(palette.background.strong.color, 0.5),
+            scrollbar: with_alpha(palette.background.strong.color, 0.9),
             error: pick(editor.error, palette.danger.base.color),
             warning: pick(editor.warning, palette.warning.base.color),
             info: pick(editor.info, palette.primary.base.color),

@@ -122,6 +122,12 @@ mensaje en español.
     publica `EditorAction`; `apply_action` las aplica al núcleo. El desplazamiento vive en
     `DocView` (por documento, en la app), no en el núcleo.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
+  - Barras de desplazamiento (`editor/scrollbar.rs`: `Track`, cálculo puro con pruebas):
+    vertical y horizontal (esta solo si alguna línea no cabe; entonces el `Viewport` pierde
+    su alto). Se pintan en una capa propia porque dentro de una capa iced dibuja el texto
+    encima de los rectángulos. Arrastrar publica `EditorAction::ScrollTo` (absoluto, para
+    que varios movimientos antes de redibujar no se acumulen). La línea más larga se cachea
+    en el estado del widget por `EditorState::version()` (se recalcula en `layout`).
   - `editor/keymap.rs`: teclas de edición que captura el widget. `shortcuts.rs`: atajos
     globales vía `keyboard::listen()` (solo reciben eventos **no capturados**, así que el
     widget no debe capturar Cmd+S, Cmd+Z, Ctrl+Tab…).
@@ -212,7 +218,7 @@ mensaje en español.
 - Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos
-  (`HKCUSoftwareClasses*shellLorca`; en Windows 11, en «Mostrar más opciones»).
+  (`HKCUSoftwareClasses*shellorca`; en Windows 11, en «Mostrar más opciones»).
 - `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
@@ -223,7 +229,9 @@ mensaje en español.
 ## Limitaciones conocidas
 
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
-- La barra de desplazamiento es solo indicador (no se arrastra).
+- Las barras de desplazamiento no tienen flechas ni desplazan por páginas al mantener
+  pulsado: un clic en la guía centra el tirador ahí. La horizontal mide caracteres, no
+  columnas visuales (una línea con muchos tabuladores puede quedarse corta).
 - Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
   en Linux): se dibuja una con iced (`menu::bar`), sin teclas Alt ni paso de un menú a
   otro al pasar el ratón.

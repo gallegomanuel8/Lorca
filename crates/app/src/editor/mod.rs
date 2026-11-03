@@ -6,6 +6,7 @@
 mod action;
 mod keymap;
 mod palette;
+mod scrollbar;
 mod view;
 mod widget;
 

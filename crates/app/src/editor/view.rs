@@ -25,6 +25,23 @@ pub struct DocView {
     pub viewport: Viewport,
 }
 
+/// Longitud (en caracteres) de la línea más larga del documento.
+pub fn longest_line(buffer: &Buffer) -> usize {
+    (0..buffer.len_lines())
+        .map(|line| buffer.line_len(line))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Desplazamiento máximo (horizontal, vertical) para un documento de `lines` líneas cuya
+/// línea más larga tiene `longest` caracteres.
+pub fn max_scroll(viewport: Viewport, lines: usize, longest: usize) -> (f32, f32) {
+    let max_y = lines.saturating_sub(1) as f32 * viewport.metrics.line_height;
+    let content_width = longest as f32 * viewport.cell_width;
+    let max_x = (content_width - viewport.width * 0.5).max(0.0);
+    (max_x, max_y)
+}
+
 impl DocView {
     /// Desplaza la vista y la mantiene dentro de los límites del documento.
     pub fn scroll_by(&mut self, dx: f32, dy: f32, viewport: Viewport, buffer: &Buffer) {
@@ -33,18 +50,29 @@ impl DocView {
         self.clamp(viewport, buffer);
     }
 
+    /// Lleva la vista a una posición absoluta en los ejes indicados (barras de
+    /// desplazamiento) y la mantiene dentro de los límites.
+    pub fn scroll_to(
+        &mut self,
+        x: Option<f32>,
+        y: Option<f32>,
+        viewport: Viewport,
+        buffer: &Buffer,
+    ) {
+        if let Some(x) = x {
+            self.scroll_x = x;
+        }
+        if let Some(y) = y {
+            self.scroll_y = y;
+        }
+        self.clamp(viewport, buffer);
+    }
+
     /// Limita el desplazamiento: verticalmente hasta que la última línea quede arriba;
     /// horizontalmente hasta el final de la línea más larga.
     pub fn clamp(&mut self, viewport: Viewport, buffer: &Buffer) {
-        let max_y = buffer.len_lines().saturating_sub(1) as f32 * viewport.metrics.line_height;
+        let (max_x, max_y) = max_scroll(viewport, buffer.len_lines(), longest_line(buffer));
         self.scroll_y = self.scroll_y.clamp(0.0, max_y);
-
-        let longest = (0..buffer.len_lines())
-            .map(|line| buffer.line_len(line))
-            .max()
-            .unwrap_or(0);
-        let content_width = longest as f32 * viewport.cell_width;
-        let max_x = (content_width - viewport.width * 0.5).max(0.0);
         self.scroll_x = self.scroll_x.clamp(0.0, max_x);
     }
 
@@ -148,6 +176,22 @@ mod tests {
         assert_eq!(view.scroll_y, 2.0 * LINE_HEIGHT);
         view.scroll_by(1e6, 0.0, VIEWPORT, &buffer);
         assert_eq!(view.scroll_x, 0.0);
+    }
+
+    #[test]
+    fn scroll_to_sets_only_the_given_axes() {
+        let buffer = Buffer::from_text(&format!("{}\n", "a".repeat(100)).repeat(10));
+        let mut view = DocView::default();
+        view.scroll_to(Some(40.0), None, VIEWPORT, &buffer);
+        assert_eq!((view.scroll_x, view.scroll_y), (40.0, 0.0));
+        view.scroll_to(None, Some(1e6), VIEWPORT, &buffer);
+        assert_eq!(view.scroll_x, 40.0);
+        assert_eq!(view.scroll_y, 10.0 * LINE_HEIGHT);
+        // Límite horizontal: final de la línea más larga menos media vista.
+        assert_eq!(
+            max_scroll(VIEWPORT, 11, 100).0,
+            100.0 * VIEWPORT.cell_width - VIEWPORT.width * 0.5
+        );
     }
 
     #[test]

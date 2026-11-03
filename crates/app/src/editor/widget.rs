@@ -21,12 +21,12 @@ use lorca_syntax::Highlights;
 use super::action::CompletionKey;
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
+use super::scrollbar::{Axis, SCROLLBAR_SIZE, Track};
+use super::view::{longest_line, max_scroll};
 use super::{ClickKind, DocView, EditorAction, Metrics, TEXT_PADDING, Viewport};
 
 /// Periodo de parpadeo del cursor.
 const BLINK_MILLIS: u128 = 530;
-/// Anchura de la barra de desplazamiento vertical (solo indicador).
-const SCROLLBAR_WIDTH: f32 = 6.0;
 
 /// Crea el widget de edición para un documento.
 pub fn code_editor<'a, Message>(
@@ -131,6 +131,11 @@ struct State {
     reported: Option<Viewport>,
     reported_cursor: Option<Point>,
     preedit: Option<input_method::Preedit>,
+    /// Línea más larga (en caracteres) para la versión del documento indicada.
+    longest: Option<(u64, usize)>,
+    /// Arrastre de una barra de desplazamiento: eje y distancia del puntero al inicio del
+    /// tirador.
+    scroll_drag: Option<(Axis, f32)>,
 }
 
 impl Default for State {
@@ -148,6 +153,8 @@ impl Default for State {
             reported: None,
             reported_cursor: None,
             preedit: None,
+            longest: None,
+            scroll_drag: None,
         }
     }
 }
@@ -159,6 +166,10 @@ impl State {
             .saturating_duration_since(self.blink_epoch)
             .as_millis();
         (elapsed / BLINK_MILLIS).is_multiple_of(2)
+    }
+
+    fn longest(&self) -> usize {
+        self.longest.map_or(0, |(_, longest)| longest)
     }
 
     fn restart_blink(&mut self) {
@@ -174,10 +185,19 @@ struct Geometry {
     text_area: Rectangle,
     cell: f32,
     metrics: Metrics,
+    line_count: usize,
+    /// Caracteres de la línea más larga (para la barra horizontal).
+    longest: usize,
 }
 
 impl Geometry {
-    fn new(bounds: Rectangle, cell: f32, line_count: usize, metrics: Metrics) -> Self {
+    fn new(
+        bounds: Rectangle,
+        cell: f32,
+        line_count: usize,
+        longest: usize,
+        metrics: Metrics,
+    ) -> Self {
         let digits = line_count.to_string().len().max(3);
         let gutter_width = (digits as f32 + 2.0) * cell;
         let gutter = Rectangle {
@@ -195,6 +215,8 @@ impl Geometry {
             text_area,
             cell,
             metrics,
+            line_count,
+            longest,
         }
     }
 
@@ -206,13 +228,95 @@ impl Geometry {
         self.text_area.x + TEXT_PADDING + cells as f32 * self.cell - view.scroll_x
     }
 
+    /// Anchura útil para el texto (sin la barra vertical).
+    fn text_width(&self) -> f32 {
+        (self.text_area.width - TEXT_PADDING - SCROLLBAR_SIZE).max(0.0)
+    }
+
+    /// `true` si alguna línea no cabe a lo ancho: entonces hay barra horizontal.
+    fn has_horizontal_bar(&self) -> bool {
+        self.longest as f32 * self.cell > self.text_width()
+    }
+
     fn viewport(&self) -> Viewport {
+        let bar = if self.has_horizontal_bar() {
+            SCROLLBAR_SIZE
+        } else {
+            0.0
+        };
         Viewport {
-            width: (self.text_area.width - TEXT_PADDING - SCROLLBAR_WIDTH).max(0.0),
-            height: self.bounds.height,
+            width: self.text_width(),
+            height: (self.bounds.height - bar).max(0.0),
             cell_width: self.cell,
             metrics: self.metrics,
         }
+    }
+
+    /// Barra vertical (rectángulo y tirador), si el documento no cabe a lo alto.
+    fn vertical_bar(&self, view: DocView) -> Option<(Rectangle, Track)> {
+        let viewport = self.viewport();
+        let (_, max_y) = max_scroll(viewport, self.line_count, self.longest);
+        let rect = Rectangle {
+            x: self.bounds.x + self.bounds.width - SCROLLBAR_SIZE,
+            y: self.bounds.y,
+            width: SCROLLBAR_SIZE,
+            height: viewport.height,
+        };
+        let content = self.line_count as f32 * self.metrics.line_height;
+        Track::new(
+            rect.y,
+            rect.height,
+            viewport.height,
+            content,
+            max_y,
+            view.scroll_y,
+        )
+        .map(|track| (rect, track))
+    }
+
+    /// Barra horizontal (rectángulo y tirador), si alguna línea no cabe a lo ancho.
+    fn horizontal_bar(&self, view: DocView) -> Option<(Rectangle, Track)> {
+        let viewport = self.viewport();
+        let (max_x, _) = max_scroll(viewport, self.line_count, self.longest);
+        let rect = Rectangle {
+            x: self.text_area.x,
+            y: self.bounds.y + self.bounds.height - SCROLLBAR_SIZE,
+            width: (self.text_area.width - SCROLLBAR_SIZE).max(0.0),
+            height: SCROLLBAR_SIZE,
+        };
+        let content = self.longest as f32 * self.cell;
+        Track::new(
+            rect.x,
+            rect.width,
+            viewport.width,
+            content,
+            max_x,
+            view.scroll_x,
+        )
+        .map(|track| (rect, track))
+    }
+
+    /// Barra bajo `point`, si la hay.
+    fn bar_at(&self, point: Point, view: DocView) -> Option<(Axis, Track)> {
+        if let Some((rect, track)) = self.vertical_bar(view)
+            && rect.contains(point)
+        {
+            return Some((Axis::Vertical, track));
+        }
+        if let Some((rect, track)) = self.horizontal_bar(view)
+            && rect.contains(point)
+        {
+            return Some((Axis::Horizontal, track));
+        }
+        None
+    }
+
+    fn bar(&self, axis: Axis, view: DocView) -> Option<Track> {
+        match axis {
+            Axis::Vertical => self.vertical_bar(view),
+            Axis::Horizontal => self.horizontal_bar(view),
+        }
+        .map(|(_, track)| track)
     }
 
     fn page_lines(&self) -> usize {
@@ -309,6 +413,11 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             state.cell_width = measure_cell_width(metrics);
             state.measured_for = metrics.font_size;
         }
+        // Recorrer todas las líneas solo cuando cambia el documento, no en cada evento.
+        let version = self.editor.version();
+        if state.longest.is_none_or(|(cached, _)| cached != version) {
+            state.longest = Some((version, longest_line(self.editor.buffer())));
+        }
         layout::atomic(limits, Length::Fill, Length::Fill)
     }
 
@@ -328,6 +437,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             layout.bounds(),
             state.cell_width,
             self.editor.buffer().len_lines(),
+            state.longest(),
             self.options.metrics,
         );
 
@@ -340,6 +450,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             Event::Window(window::Event::Unfocused) => {
                 state.window_focused = false;
                 state.dragging = false;
+                state.scroll_drag = None;
                 shell.request_redraw();
             }
             Event::Window(window::Event::RedrawRequested(now)) => {
@@ -452,6 +563,21 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 let Some(position) = cursor.position_over(geometry.bounds) else {
                     return;
                 };
+                // Barras de desplazamiento: el tirador se arrastra; un clic en la guía lo
+                // centra en ese punto y sigue arrastrando.
+                if let Some((axis, track)) = geometry.bar_at(position, self.view) {
+                    let along = along(axis, position);
+                    let grab = if track.is_on_thumb(along) {
+                        along - track.thumb_start
+                    } else {
+                        let grab = track.thumb_length / 2.0;
+                        self.publish(shell, scroll_to(axis, track.scroll_at(along - grab)));
+                        grab
+                    };
+                    state.scroll_drag = Some((axis, grab));
+                    shell.capture_event();
+                    return;
+                }
                 let click = mouse::Click::new(position, mouse::Button::Left, state.last_click);
                 state.last_click = Some(click);
                 state.dragging = true;
@@ -488,6 +614,15 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 state.restart_blink();
                 shell.capture_event();
             }
+            Event::Mouse(mouse::Event::CursorMoved { position }) if state.scroll_drag.is_some() => {
+                if let Some((axis, grab)) = state.scroll_drag
+                    && let Some(track) = geometry.bar(axis, self.view)
+                {
+                    let target = track.scroll_at(along(axis, *position) - grab);
+                    self.publish(shell, scroll_to(axis, target));
+                }
+                shell.capture_event();
+            }
             Event::Mouse(mouse::Event::CursorMoved { position }) if state.dragging => {
                 let index = self.index_at(*position, &geometry);
                 if index != self.editor.selection().head {
@@ -504,6 +639,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.dragging = false;
+                state.scroll_drag = None;
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(geometry.bounds) =>
@@ -543,6 +679,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             layout.bounds(),
             state.cell_width,
             line_count,
+            state.longest(),
             self.options.metrics,
         );
         let derived;
@@ -832,30 +969,16 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     );
                 }
             }
+        });
 
-            // Indicador de posición vertical.
-            let content_height =
-                line_count as f32 * geometry.metrics.line_height + geometry.bounds.height;
-            if line_count as f32 * geometry.metrics.line_height > geometry.bounds.height {
-                let height = geometry.bounds.height;
-                let thumb_height = (height * height / content_height).max(24.0);
-                let max_scroll =
-                    (line_count.saturating_sub(1)) as f32 * geometry.metrics.line_height;
-                let progress = if max_scroll > 0.0 {
-                    view.scroll_y / max_scroll
-                } else {
-                    0.0
-                };
-                fill(
-                    renderer,
-                    Rectangle {
-                        x: geometry.bounds.x + geometry.bounds.width - SCROLLBAR_WIDTH,
-                        y: geometry.bounds.y + progress * (height - thumb_height),
-                        width: SCROLLBAR_WIDTH,
-                        height: thumb_height,
-                    },
-                    colors.scrollbar,
-                );
+        // Barras de desplazamiento en una capa propia: dentro de una capa iced pinta el
+        // texto encima de los rectángulos, y las líneas largas las taparían.
+        renderer.with_layer(geometry.bounds, |renderer| {
+            if let Some((rect, track)) = geometry.vertical_bar(view) {
+                draw_bar(renderer, Axis::Vertical, rect, track, colors);
+            }
+            if let Some((rect, track)) = geometry.horizontal_bar(view) {
+                draw_bar(renderer, Axis::Horizontal, rect, track, colors);
             }
         });
     }
@@ -873,9 +996,16 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             layout.bounds(),
             state.cell_width,
             self.editor.buffer().len_lines(),
+            state.longest(),
             self.options.metrics,
         );
-        if cursor.is_over(geometry.text_area) {
+        // Sobre las barras (o arrastrándolas), la flecha normal en vez del cursor de texto.
+        let on_bar = cursor
+            .position()
+            .is_some_and(|point| geometry.bar_at(point, self.view).is_some());
+        if on_bar || state.scroll_drag.is_some() {
+            mouse::Interaction::default()
+        } else if cursor.is_over(geometry.text_area) {
             mouse::Interaction::Text
         } else {
             mouse::Interaction::default()
@@ -1094,6 +1224,67 @@ fn completion_key(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option
         keyboard::Key::Named(Named::Enter | Named::Tab) => Some(CompletionKey::Accept),
         _ => None,
     }
+}
+
+/// Coordenada de `point` a lo largo del eje de una barra.
+fn along(axis: Axis, point: Point) -> f32 {
+    match axis {
+        Axis::Vertical => point.y,
+        Axis::Horizontal => point.x,
+    }
+}
+
+/// Acción que lleva la vista a `scroll` en el eje de una barra.
+fn scroll_to(axis: Axis, scroll: f32) -> EditorAction {
+    match axis {
+        Axis::Vertical => EditorAction::ScrollTo {
+            x: None,
+            y: Some(scroll),
+        },
+        Axis::Horizontal => EditorAction::ScrollTo {
+            x: Some(scroll),
+            y: None,
+        },
+    }
+}
+
+/// Dibuja una barra: la guía (opaca, con el color del canal de números para que no se vea
+/// el texto por debajo) y, encima, el tirador.
+fn draw_bar(
+    renderer: &mut Renderer,
+    axis: Axis,
+    rect: Rectangle,
+    track: Track,
+    colors: &EditorColors,
+) {
+    fill(renderer, rect, colors.gutter);
+    // El tirador se separa 2 px de los bordes de la guía para que se distinga.
+    let thumb = match axis {
+        Axis::Vertical => Rectangle {
+            x: rect.x + 2.0,
+            y: track.thumb_start,
+            width: rect.width - 4.0,
+            height: track.thumb_length,
+        },
+        Axis::Horizontal => Rectangle {
+            x: track.thumb_start,
+            y: rect.y + 2.0,
+            width: track.thumb_length,
+            height: rect.height - 4.0,
+        },
+    };
+    renderer::Renderer::fill_quad(
+        renderer,
+        Quad {
+            bounds: thumb,
+            border: iced::Border {
+                radius: 3.0.into(),
+                ..iced::Border::default()
+            },
+            ..Quad::default()
+        },
+        Background::Color(colors.scrollbar),
+    );
 }
 
 fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {
