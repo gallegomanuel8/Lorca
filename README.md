@@ -86,9 +86,10 @@ Cada versión publicada (etiqueta `vX.Y.Z`) deja en
 portable con el `.app`),
 `.msi`/`.exe` y `.deb`/AppImage. El instalador `.exe` de Windows ofrece añadir «Abrir con
 Lorca» al menú contextual de los archivos; si Lorca ya está abierto, el archivo se abre
-en esa ventana. Mientras no haya ninguna, compílalo (abajo). Los
-paquetes no están firmados: en macOS, la primera vez abre la app con clic derecho →
-Abrir.
+en esa ventana. Mientras no haya ninguna, compílalo (abajo). La app
+de macOS va firmada ad hoc, sin certificado de desarrollador: la primera vez que la abras
+macOS dirá que no puede verificar al desarrollador; ve a Ajustes del Sistema → Privacidad y
+seguridad y pulsa «Abrir igualmente».
 
 Para el autocompletado y los diagnósticos instala el servidor de tu lenguaje, por
 ejemplo `brew install rust-analyzer` o `rustup component add rust-analyzer`.
@@ -251,8 +252,9 @@ cargo packager --release --formats nsis,wix  # Windows (.exe y .msi)
 cargo packager --release --formats deb,appimage
 ```
 
-Los paquetes quedan en `target/packages/`. No están firmados: en macOS, la primera vez
-abre la app con clic derecho → Abrir. Los iconos están en `assets/icons/`.
+Los paquetes quedan en `target/packages/`. La app de macOS se firma ad hoc (la release usa
+un certificado Developer ID y la notariza si el repositorio tiene los secretos de Apple;
+ver `CLAUDE.md`). Los iconos están en `assets/icons/`.
 
 ### Integración continua
 
