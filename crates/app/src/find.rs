@@ -6,12 +6,12 @@
 use std::ops::Range;
 
 use iced::widget::{
-    Id, button, checkbox, column, container, pick_list, row, scrollable, space, text, text_input,
+    Id, button, checkbox, column, container, row, rule, scrollable, space, text, text_input,
     tooltip,
 };
 use iced::{Alignment, Element, Font, Length, Theme};
 use lorca_search::{Hit, SearchMode, SearchOptions};
-use lorca_workspace::DocumentId;
+use lorca_workspace::{DocumentId, SearchConfig};
 
 use crate::app::Message;
 use crate::key_filter::filter_command_keys;
@@ -55,6 +55,32 @@ impl Default for FindState {
             mark_lines: false,
             error: None,
             status: None,
+        }
+    }
+}
+
+impl FindState {
+    /// Aplica las opciones guardadas en la configuración (no toca el texto buscado).
+    pub fn apply_config(&mut self, config: &SearchConfig) {
+        self.options = SearchOptions {
+            mode: SearchMode::from_id(&config.mode).unwrap_or_default(),
+            match_case: config.match_case,
+            whole_word: config.whole_word,
+            dot_matches_newline: config.dot_matches_newline,
+        };
+        self.wrap = config.wrap_around;
+        self.mark_lines = config.mark_lines;
+    }
+
+    /// Opciones actuales para guardarlas en la configuración.
+    pub fn to_config(&self) -> SearchConfig {
+        SearchConfig {
+            mode: self.options.mode.id().to_owned(),
+            match_case: self.options.match_case,
+            whole_word: self.options.whole_word,
+            dot_matches_newline: self.options.dot_matches_newline,
+            wrap_around: self.wrap,
+            mark_lines: self.mark_lines,
         }
     }
 }
@@ -140,7 +166,18 @@ fn find(message: FindMessage) -> Message {
     Message::Find(message)
 }
 
+/// Anchura de la columna de etiquetas («Buscar», «Reemplazar»…).
+const LABEL_WIDTH: f32 = 84.0;
+/// Anchura del contador («3 de 17»).
+const STATUS_WIDTH: f32 = 140.0;
+/// Anchura de la zona de botones de las dos primeras filas (para que los campos de buscar
+/// y reemplazar midan lo mismo).
+const ACTIONS_WIDTH: f32 = 430.0;
+
 /// Barra de búsqueda. `counter` es «3 de 17», «17 coincidencias», etc.
+///
+/// Cuatro filas con una columna de etiquetas: buscar (con navegación y búsquedas
+/// globales), reemplazar, opciones y marcas.
 pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Element<'a, Message> {
     let options = state.options;
     let small = |label: &'a str, message: FindMessage| {
@@ -154,23 +191,24 @@ pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Eleme
             .label(label)
             .text_size(12)
             .size(14)
+            .spacing(6)
             .on_toggle(move |value| find(message(value)))
     };
 
-    let pattern = text_input("Buscar", &state.pattern)
+    let pattern = text_input("Texto a buscar", &state.pattern)
         .id(Id::new(PATTERN_ID))
         .on_input(|value| find(FindMessage::PatternChanged(value)))
         .on_submit(find(FindMessage::Submit))
         .size(13)
         .padding([4, 8])
-        .width(Length::FillPortion(3));
-    let replacement = text_input("Reemplazar con", &state.replacement)
+        .width(Length::Fill);
+    let replacement = text_input("Texto de sustitución", &state.replacement)
         .id(Id::new(REPLACEMENT_ID))
         .on_input(|value| find(FindMessage::ReplacementChanged(value)))
         .on_submit(find(FindMessage::Replace))
         .size(13)
         .padding([4, 8])
-        .width(Length::FillPortion(3));
+        .width(Length::Fill);
 
     let status_text = match (&state.error, &state.status) {
         (Some(error), _) => error.clone(),
@@ -189,43 +227,19 @@ pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Eleme
         }
     });
 
-    let mut options_row = row![
-        pick_list(SearchMode::ALL, Some(options.mode), |mode| find(
-            FindMessage::ModeSelected(mode)
-        ))
-        .text_size(12)
-        .padding([2, 6]),
-        toggle("Aa", options.match_case, FindMessage::ToggleCase),
-        toggle("Palabra", options.whole_word, FindMessage::ToggleWord),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center);
-    if options.mode == SearchMode::Regex {
-        options_row = options_row.push(toggle(
-            ". = \\n",
-            options.dot_matches_newline,
-            FindMessage::ToggleDotNewline,
-        ));
-    }
-    options_row = options_row
-        .push(toggle(
-            "En selección",
-            state.scope.is_some(),
-            FindMessage::ToggleInSelection,
-        ))
-        .push(toggle("Dar la vuelta", state.wrap, FindMessage::ToggleWrap));
-
-    let first = row![
-        filter_command_keys(pattern),
-        status.width(Length::Fixed(150.0)),
+    let search_actions = row![
         with_tip(small("↑", FindMessage::Previous), "Anterior (⇧F3)"),
         with_tip(small("↓", FindMessage::Next), "Siguiente (F3)"),
+        space().width(Length::Fixed(6.0)),
         small("Contar", FindMessage::Count),
-        small(
-            "Buscar todo",
-            FindMessage::FindAll {
-                all_documents: false
-            }
+        with_tip(
+            small(
+                "Buscar todo",
+                FindMessage::FindAll {
+                    all_documents: false
+                }
+            ),
+            "Listar las coincidencias de este documento"
         ),
         with_tip(
             small(
@@ -243,34 +257,97 @@ pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Eleme
                 .on_press(Message::FindInFolder),
             "Buscar en todos los archivos de una carpeta (⇧⌘F)"
         ),
-        button(text("×").size(14))
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center);
+
+    let close = with_tip(
+        button(text("×").size(16))
             .padding([0, 6])
             .style(button::text)
             .on_press(find(FindMessage::Close)),
+        "Cerrar (Esc)",
+    );
+
+    let search_row = row![
+        label("Buscar"),
+        filter_command_keys(pattern),
+        container(status).width(Length::Fixed(STATUS_WIDTH)),
+        container(search_actions).width(Length::Fixed(ACTIONS_WIDTH)),
+        close,
     ]
-    .spacing(6)
+    .spacing(8)
     .align_y(Alignment::Center);
 
-    let second = row![
-        filter_command_keys(replacement),
-        space().width(Length::Fixed(150.0)),
+    let replace_actions = row![
         small("Reemplazar", FindMessage::Replace),
         small("Reemplazar todo", FindMessage::ReplaceAll),
     ]
-    .spacing(6)
+    .spacing(4)
+    .align_y(Alignment::Center);
+    let replace_row = row![
+        label("Reemplazar"),
+        filter_command_keys(replacement),
+        space().width(Length::Fixed(STATUS_WIDTH)),
+        container(replace_actions).width(Length::Fixed(ACTIONS_WIDTH)),
+        // Hueco del botón de cerrar, para que los campos queden alineados.
+        space().width(Length::Fixed(21.0)),
+    ]
+    .spacing(8)
     .align_y(Alignment::Center);
 
-    let marks = row![
-        options_row,
-        space::horizontal(),
-        small("Marcar todo", FindMessage::MarkAll),
+    let mut option_toggles = row![
         toggle(
-            "Marcar líneas",
+            "Mayúsculas/minúsculas",
+            options.match_case,
+            FindMessage::ToggleCase
+        ),
+        toggle(
+            "Palabra completa",
+            options.whole_word,
+            FindMessage::ToggleWord
+        ),
+    ]
+    .spacing(16)
+    .align_y(Alignment::Center);
+    if options.mode == SearchMode::Regex {
+        option_toggles = option_toggles.push(toggle(
+            ". incluye saltos de línea",
+            options.dot_matches_newline,
+            FindMessage::ToggleDotNewline,
+        ));
+    }
+    option_toggles = option_toggles
+        .push(toggle(
+            "Solo en la selección",
+            state.scope.is_some(),
+            FindMessage::ToggleInSelection,
+        ))
+        .push(toggle(
+            "Dar la vuelta al llegar al final",
+            state.wrap,
+            FindMessage::ToggleWrap,
+        ));
+    let options_row = row![
+        label("Modo"),
+        mode_selector(options.mode),
+        space().width(Length::Fixed(12.0)),
+        option_toggles,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let marks_row = row![
+        label("Marcas"),
+        small("Marcar todo", FindMessage::MarkAll),
+        small("Borrar marcas", FindMessage::ClearMarks),
+        toggle(
+            "Marcar también las líneas",
             state.mark_lines,
             FindMessage::ToggleMarkLines
         ),
-        small("Borrar marcas", FindMessage::ClearMarks),
-        text(format!("Marcadores: {bookmarks}")).size(12),
+        space::horizontal(),
+        text(format!("Líneas marcadas: {bookmarks}")).size(12),
         with_tip(
             small("Copiar", FindMessage::CopyBookmarkedLines),
             "Copiar las líneas marcadas"
@@ -287,7 +364,51 @@ pub fn bar<'a>(state: &'a FindState, counter: String, bookmarks: usize) -> Eleme
     .spacing(8)
     .align_y(Alignment::Center);
 
-    panel(column![first, second, marks].spacing(6))
+    panel(
+        column![
+            search_row,
+            replace_row,
+            rule::horizontal(1),
+            options_row,
+            marks_row,
+        ]
+        .spacing(6),
+    )
+}
+
+/// Etiqueta de una fila de la barra de búsqueda.
+fn label(content: &str) -> Element<'_, Message> {
+    text(content)
+        .size(12)
+        .width(Length::Fixed(LABEL_WIDTH))
+        .style(|theme: &Theme| text::Style {
+            color: Some(theme.extended_palette().background.strong.text),
+        })
+        .into()
+}
+
+/// Botones Normal / Extendido / Regex con el modo elegido resaltado.
+fn mode_selector<'a>(current: SearchMode) -> Element<'a, Message> {
+    let tips = [
+        "Texto tal cual",
+        "Admite \\n, \\t, \\0, \\xHH y \\uHHHH",
+        "Expresión regular",
+    ];
+    let buttons = SearchMode::ALL.into_iter().zip(tips).map(|(mode, tip)| {
+        let selected = mode == current;
+        with_tip(
+            button(text(mode.label()).size(12))
+                .padding([3, 10])
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .on_press(find(FindMessage::ModeSelected(mode))),
+            tip,
+        )
+    });
+    row(buttons).spacing(1).into()
 }
 
 /// Barra «Ir a línea».
@@ -445,6 +566,25 @@ fn with_tip<'a>(content: impl Into<Element<'a, Message>>, tip: &'a str) -> Eleme
 #[allow(clippy::single_range_in_vec_init)] // Las listas de un solo rango son intencionadas.
 mod tests {
     use super::*;
+
+    #[test]
+    fn options_round_trip_through_config() {
+        let mut state = FindState::default();
+        state.options.mode = SearchMode::Extended;
+        state.options.match_case = true;
+        state.wrap = false;
+        let mut restored = FindState::default();
+        restored.apply_config(&state.to_config());
+        assert_eq!(restored.options, state.options);
+        assert!(!restored.wrap);
+        // Un modo desconocido en el archivo vuelve al normal.
+        let config = SearchConfig {
+            mode: "otro".to_owned(),
+            ..SearchConfig::default()
+        };
+        restored.apply_config(&config);
+        assert_eq!(restored.options.mode, SearchMode::Normal);
+    }
 
     #[test]
     fn goto_parsing() {

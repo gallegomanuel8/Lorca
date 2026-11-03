@@ -292,6 +292,8 @@ impl Lorca {
         let appearance = config.theme.unwrap_or_default().appearance(None);
         let active_theme = ActiveTheme::new(&themes, config.theme_name(appearance), appearance);
 
+        let mut find = FindState::default();
+        find.apply_config(&config.search);
         let mut workspace = Workspace::new();
         let mut views = HashMap::new();
         let session = data_dir.clone().map(SessionStore::new);
@@ -331,7 +333,7 @@ impl Lorca {
             session_dirty: None,
             system_mode: Mode::None,
             highlights: HashMap::new(),
-            find: FindState::default(),
+            find,
             goto: None,
             focus: Focus::Editor,
             results: None,
@@ -979,6 +981,9 @@ impl Lorca {
             }
             Ok(config) => self.config = config,
             Err(error) => self.show_error(error.to_string()),
+        }
+        if self.find.to_config() != self.config.search {
+            self.find.apply_config(&self.config.search);
         }
         // Otros servidores: se paran y se lanzan los nuevos en la siguiente sincronización.
         if self.config.lsp != previous_lsp {

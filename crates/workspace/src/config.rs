@@ -75,6 +75,37 @@ pub struct Config {
     pub insert_spaces: bool,
     /// Servidores de lenguaje (LSP).
     pub lsp: LspConfig,
+    /// Últimas opciones elegidas en la barra de búsqueda.
+    pub search: SearchConfig,
+}
+
+/// Opciones de la barra de búsqueda que se recuerdan entre sesiones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchConfig {
+    /// Modo: `normal`, `extended` o `regex`.
+    pub mode: String,
+    pub match_case: bool,
+    pub whole_word: bool,
+    /// En modo regex, `.` también coincide con saltos de línea.
+    pub dot_matches_newline: bool,
+    /// Al llegar al final, seguir desde el principio.
+    pub wrap_around: bool,
+    /// «Marcar todo» pone también marcadores en las líneas.
+    pub mark_lines: bool,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            mode: "normal".to_owned(),
+            match_case: false,
+            whole_word: false,
+            dot_matches_newline: false,
+            wrap_around: true,
+            mark_lines: false,
+        }
+    }
 }
 
 /// Configuración de los servidores de lenguaje.
@@ -130,6 +161,7 @@ impl Default for Config {
             tab_width: 4,
             insert_spaces: true,
             lsp: LspConfig::default(),
+            search: SearchConfig::default(),
         }
     }
 }
@@ -229,6 +261,7 @@ mod tests {
         assert_eq!(config.theme, Some(ThemeMode::Light));
         assert!(config.indent_guides);
         assert!(config.wrap_plain_text);
+        assert_eq!(config.search, SearchConfig::default());
         assert!(!config.show_whitespace);
     }
 

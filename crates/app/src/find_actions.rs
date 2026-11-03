@@ -276,6 +276,15 @@ impl Lorca {
         view.jump_to_cursor(&document.editor, view.viewport);
     }
 
+    /// Guarda las opciones de la barra de búsqueda para la próxima vez.
+    fn remember_find_options(&mut self) {
+        let search = self.find.to_config();
+        if search != self.config.search {
+            self.config.search = search;
+            self.save_config();
+        }
+    }
+
     pub(super) fn handle_find(&mut self, message: FindMessage) -> Task<Message> {
         match message {
             FindMessage::PatternChanged(pattern) => {
@@ -287,12 +296,30 @@ impl Lorca {
                 self.find.replacement = replacement;
                 self.focus = Focus::FindBar;
             }
-            FindMessage::ToggleCase(value) => self.find.options.match_case = value,
-            FindMessage::ToggleWord(value) => self.find.options.whole_word = value,
-            FindMessage::ModeSelected(mode) => self.find.options.mode = mode,
-            FindMessage::ToggleDotNewline(value) => self.find.options.dot_matches_newline = value,
-            FindMessage::ToggleWrap(value) => self.find.wrap = value,
-            FindMessage::ToggleMarkLines(value) => self.find.mark_lines = value,
+            FindMessage::ToggleCase(value) => {
+                self.find.options.match_case = value;
+                self.remember_find_options();
+            }
+            FindMessage::ToggleWord(value) => {
+                self.find.options.whole_word = value;
+                self.remember_find_options();
+            }
+            FindMessage::ModeSelected(mode) => {
+                self.find.options.mode = mode;
+                self.remember_find_options();
+            }
+            FindMessage::ToggleDotNewline(value) => {
+                self.find.options.dot_matches_newline = value;
+                self.remember_find_options();
+            }
+            FindMessage::ToggleWrap(value) => {
+                self.find.wrap = value;
+                self.remember_find_options();
+            }
+            FindMessage::ToggleMarkLines(value) => {
+                self.find.mark_lines = value;
+                self.remember_find_options();
+            }
             FindMessage::ToggleInSelection(enabled) => {
                 let selection = self
                     .workspace

@@ -22,6 +22,20 @@ pub enum SearchMode {
 impl SearchMode {
     pub const ALL: [Self; 3] = [Self::Normal, Self::Extended, Self::Regex];
 
+    /// Identificador estable para guardar en la configuración.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Extended => "extended",
+            Self::Regex => "regex",
+        }
+    }
+
+    /// Inverso de [`SearchMode::id`].
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Normal => "Normal",
@@ -226,6 +240,14 @@ impl CharCounter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mode_ids_round_trip() {
+        for mode in SearchMode::ALL {
+            assert_eq!(SearchMode::from_id(mode.id()), Some(mode));
+        }
+        assert_eq!(SearchMode::from_id("otro"), None);
+    }
 
     fn query(pattern: &str, options: SearchOptions) -> SearchQuery {
         SearchQuery::new(pattern, options).unwrap()
