@@ -1,60 +1,66 @@
 // Dibuja las capas del icono de la aplicación (1024 px, fondo transparente) para
-// Lorca.icon: una luna creciente (la del «Romancero gitano») y líneas de texto con un
-// cursor. El fondo verde («Verde que te quiero verde») es el degradado de icon.json.
+// Lorca.icon: los signos `< >` de las etiquetas de código y, entre ellos, una luna
+// creciente roja (la luna de Lorca: «Romance de la luna, luna», Bodas de sangre). Colores
+// de Mariana Pineda: tinta negra y rojo sobre marfil (el degradado de icon.json).
 //
 // Uso, desde esta carpeta: swift dibujar-capas.swift && sh generar-icns.sh
 
 import AppKit
-import CoreGraphics
 
-let S: CGFloat = 1024
-let ivory = CGColor(srgbRed: 0.95, green: 0.92, blue: 0.85, alpha: 1)
-let gold = CGColor(srgbRed: 0.85, green: 0.66, blue: 0.29, alpha: 1)
+let size: CGFloat = 1024
+let ink = NSColor(srgbRed: 0x1d / 255, green: 0x1d / 255, blue: 0x1d / 255, alpha: 1)
+let red = NSColor(srgbRed: 0xb3 / 255, green: 0x26 / 255, blue: 0x2e / 255, alpha: 1)
 
-func image(_ draw: (CGContext) -> Void) -> CGImage {
-    let ctx = CGContext(data: nil, width: Int(S), height: Int(S), bitsPerComponent: 8, bytesPerRow: 0,
-                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    // Origen arriba a la izquierda.
-    ctx.translateBy(x: 0, y: S); ctx.scaleBy(x: 1, y: -1)
-    draw(ctx)
-    return ctx.makeImage()!
+/// Dibuja una capa con el origen arriba a la izquierda y la guarda en PNG.
+func layer(_ path: String, _ draw: () -> Void) {
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size), bitsPerSample: 8,
+        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: 0)!
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.cgContext.translateBy(x: 0, y: size)
+    context.cgContext.scaleBy(x: 1, y: -1)
+    draw()
+    NSGraphicsContext.restoreGraphicsState()
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
 }
 
-func save(_ img: CGImage, _ name: String) {
-    let rep = NSBitmapImageRep(cgImage: img)
-    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: name))
+/// Trazo grueso con extremos y esquinas redondeados.
+func stroke(_ points: [CGPoint], width: CGFloat, color: NSColor) {
+    let path = NSBezierPath()
+    path.move(to: points[0])
+    for point in points.dropFirst() { path.line(to: point) }
+    path.lineWidth = width
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+    color.setStroke()
+    path.stroke()
 }
 
-func moon(_ ctx: CGContext) {
-    // Luna creciente: círculo menos otro desplazado.
-    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-    ctx.setFillColor(ivory)
-    ctx.fillEllipse(in: CGRect(x: 500, y: 130, width: 380, height: 380))
-    ctx.setBlendMode(.clear)
-    ctx.fillEllipse(in: CGRect(x: 610, y: 90, width: 330, height: 330))
-    ctx.setBlendMode(.normal)
-    ctx.endTransparencyLayer()
+/// Luna creciente: un círculo menos otro desplazado hacia arriba a la derecha.
+func crescent(center: CGPoint, radius: CGFloat, color: NSColor) {
+    let context = NSGraphicsContext.current!.cgContext
+    context.beginTransparencyLayer(auxiliaryInfo: nil)
+    color.setFill()
+    context.fillEllipse(in: CGRect(x: center.x - radius, y: center.y - radius,
+                                   width: 2 * radius, height: 2 * radius))
+    context.setBlendMode(.clear)
+    let cut = radius * 0.86
+    context.fillEllipse(in: CGRect(x: center.x - cut + radius * 0.42, y: center.y - cut - radius * 0.22,
+                                   width: 2 * cut, height: 2 * cut))
+    context.setBlendMode(.normal)
+    context.endTransparencyLayer()
 }
 
-func lines(_ ctx: CGContext) {
-    let h: CGFloat = 66
-    let rows: [(CGFloat, CGFloat, CGFloat, CGColor)] = [
-        (190, 450, 380, ivory),
-        (290, 560, 440, gold),
-        (290, 670, 300, ivory),
-        (190, 780, 260, ivory),
-    ]
-    for (x, y, w, color) in rows {
-        ctx.setFillColor(color)
-        ctx.addPath(CGPath(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerWidth: h / 2, cornerHeight: h / 2, transform: nil))
-        ctx.fillPath()
-    }
-    // Cursor de texto tras la última línea.
-    ctx.setFillColor(gold)
-    ctx.addPath(CGPath(roundedRect: CGRect(x: 488, y: 753, width: 38, height: 120), cornerWidth: 14, cornerHeight: 14, transform: nil))
-    ctx.fillPath()
+layer("Lorca.icon/Assets/signos.png") {
+    let width: CGFloat = 92
+    stroke([CGPoint(x: 330, y: 330), CGPoint(x: 170, y: 512), CGPoint(x: 330, y: 694)],
+           width: width, color: ink)
+    stroke([CGPoint(x: 694, y: 330), CGPoint(x: 854, y: 512), CGPoint(x: 694, y: 694)],
+           width: width, color: ink)
 }
-
-save(image(moon), "Lorca.icon/Assets/luna.png")
-save(image(lines), "Lorca.icon/Assets/lineas.png")
+layer("Lorca.icon/Assets/luna.png") {
+    crescent(center: CGPoint(x: 512, y: 512), radius: 168, color: red)
+}

@@ -7,14 +7,14 @@ Copia esta carpeta en tu proyecto como `assets/icons/`.
 | `lorca.icns` | Icono de la aplicación en macOS (bundle `.app` / `.dmg`) |
 | `lorca.ico` | Windows (ejecutable e instalador). Incluye 16, 24, 32, 48, 64, 128 y 256 px |
 | `png/lorca-*.png` | Linux (AppImage, .deb) y el icono de la ventana en tiempo de ejecución |
-| `macos/Lorca.icon` | Origen del icono (Icon Composer): degradado verde y dos capas, luna y líneas |
+| `macos/Lorca.icon` | Origen del icono (Icon Composer): degradado marfil y dos capas, signos `< >` y luna |
 | `macos/dibujar-capas.swift` | Dibuja las capas de `Lorca.icon` |
 | `macos/generar-icns.sh` | Genera `lorca.icns`, `lorca.ico` y `png/` desde `Lorca.icon` (Xcode 26 o posterior) |
 | `retrato/` | Retrato de Lorca hecho con caracteres: el README y «Acerca de» (no es el icono de la app) |
 
-El icono de la aplicación es una luna creciente (la del *Romancero gitano*) sobre verde
-(«Verde que te quiero verde») con líneas de texto y un cursor: se distingue a cualquier
-tamaño y dice que es un editor. Para cambiarlo: edita `dibujar-capas.swift` (o el degradado
+El icono de la aplicación son los signos `< >` de las etiquetas de código con una luna
+creciente roja entre ellos (la luna de Lorca: «Romance de la luna, luna», *Bodas de
+sangre*), en los colores del tema *Mariana Pineda*: tinta negra y rojo sobre marfil. Para cambiarlo: edita `dibujar-capas.swift` (o el degradado
 de `icon.json`) y ejecuta, desde `macos/`:
 
 ```sh

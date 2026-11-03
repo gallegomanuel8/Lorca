@@ -245,7 +245,8 @@ mensaje en español.
   (`winresource`, solo Windows) y `png/lorca-256.png` como icono de la ventana
   (feature `image` de iced). Si `create-dmg` falla con «Recurso ocupado», queda montado
   un `/Volumes/Lorca` de un intento anterior: `hdiutil detach`.
-- Icono de la app (luna y líneas de texto sobre verde): `lorca.icns`, `lorca.ico` y
+- Icono de la app (`< ☾ >`: signos negros y luna roja sobre marfil, colores de Mariana
+  Pineda): `lorca.icns`, `lorca.ico` y
   `png/` se generan con `assets/icons/macos/generar-icns.sh` desde `macos/Lorca.icon`
   (Icon Composer; capas de `dibujar-capas.swift`). Desde macOS 26 un `.icns` sin la forma
   de Apple sale dentro de un cuadro claro. El retrato de Lorca (`assets/icons/retrato/`)
