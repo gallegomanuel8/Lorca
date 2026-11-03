@@ -252,6 +252,12 @@ mensaje en español.
   de Apple sale dentro de un cuadro claro. El retrato de Lorca (`assets/icons/retrato/`)
   queda para el README y «Acerca de» (`menu::native::portrait`, crate `image` solo en
   macOS).
+- Firma de macOS: `signing-identity = "-"` (ad hoc) en `crates/app/Cargo.toml`, para que el
+  bundle quede sellado (sin firma, macOS dice que la app descargada está «dañada»).
+  `release.yml` la sustituye por el certificado Developer ID y notariza si existen los
+  secretos `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE` (.p12 en base64),
+  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD` (contraseña de app) y
+  `APPLE_TEAM_ID`.
 - Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos

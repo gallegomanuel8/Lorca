@@ -47,6 +47,10 @@ icons = [
 binaries = [{ path = "lorca", main = true }]
 
 [package.metadata.packager.macos]
+# Firma ad hoc («-»): sella el bundle para que macOS no lo dé por dañado. La release la
+# sustituye por el certificado Developer ID si el repositorio tiene los secretos (ver
+# release.yml); sin ellos, la primera vez hay que permitir la app en Ajustes → Privacidad.
+signing-identity = "-"
 minimum-system-version = "11.0"
 
 [package.metadata.packager.deb]

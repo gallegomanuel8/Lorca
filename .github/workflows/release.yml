@@ -12,6 +12,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Firma y notarización de macOS con un certificado Developer ID, si el repositorio tiene
+  # los secretos (ver README). Sin ellos la app va firmada ad hoc.
+  DEVELOPER_ID: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
 
 jobs:
   package:
@@ -49,8 +52,24 @@ jobs:
         with:
           tool: cargo-packager
       - name: Empaquetar
+        if: runner.os != 'macOS' || env.DEVELOPER_ID != 'true'
         working-directory: crates/app
         run: cargo packager --release --formats ${{ matrix.formats }}
+      # cargo-packager importa el certificado (.p12 en base64) en un llavero temporal, firma
+      # el .app y el .dmg con la identidad indicada y notariza con el Apple ID.
+      - name: Empaquetar, firmar y notarizar (macOS)
+        if: runner.os == 'macOS' && env.DEVELOPER_ID == 'true'
+        working-directory: crates/app
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          sed -i '' "s|^signing-identity = .*|signing-identity = \"$APPLE_SIGNING_IDENTITY\"|" Cargo.toml
+          cargo packager --release --formats ${{ matrix.formats }}
       # Versión portable de macOS: el .app comprimido, para usarlo sin instalar el .dmg.
       # ditto conserva los atributos y enlaces del bundle (zip no siempre lo hace).
       - name: Portable de macOS
