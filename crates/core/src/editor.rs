@@ -209,6 +209,23 @@ impl EditorState {
         self.set_selection(Selection::new(anchor, index));
     }
 
+    /// Lleva cada cursor al índice que devuelve `target` a partir de su cabeza (p. ej.
+    /// movimientos por filas visuales con ajuste de línea). Con `extend`, extiende las
+    /// selecciones.
+    pub fn move_cursors_to(&mut self, extend: bool, mut target: impl FnMut(usize) -> usize) {
+        let moved = self
+            .selections()
+            .iter()
+            .map(|selection| {
+                let head = target(selection.head);
+                let anchor = if extend { selection.anchor } else { head };
+                Selection::new(anchor, head)
+            })
+            .collect();
+        let primary = self.cursors.primary_index();
+        self.set_cursors(Cursors::new(moved, primary));
+    }
+
     /// Añade un cursor en `index` (⌥+clic). Pasa a ser el principal.
     pub fn add_cursor(&mut self, index: usize) {
         let mut selections = self.selections().to_vec();

@@ -3,6 +3,7 @@
 //! Es un submódulo de `app` para poder usar su estado privado.
 
 use std::path::Path;
+use std::sync::LazyLock;
 
 use iced::widget::{
     button, column, container, markdown, pane_grid, row, rule, scrollable, space, text,
@@ -16,7 +17,7 @@ use lorca_workspace::DocumentId;
 
 use super::{Lorca, Message, Then};
 use crate::context_menu::{ContextAction, ContextMenu, MenuItem, MenuTarget};
-use crate::editor::{Decorations, ViewOptions, code_editor};
+use crate::editor::{Decorations, DocView, ViewOptions, code_editor};
 use crate::find;
 use crate::menu::{self, BarEntry};
 use crate::palette::{self, Command};
@@ -84,7 +85,9 @@ impl Lorca {
             return text("").into();
         };
         let is_active = self.workspace.active_id() == Some(id);
-        let view = self.views.get(&id).copied().unwrap_or_default();
+        // Vista vacía para un documento que aún no tiene la suya.
+        static NO_VIEW: LazyLock<DocView> = LazyLock::new(DocView::default);
+        let view = self.views.get(&id).unwrap_or(&NO_VIEW);
         let highlights = self
             .highlights
             .get(&id)
@@ -333,6 +336,11 @@ impl Lorca {
                 "Ver: Guías de indentación",
                 "",
                 context(ContextAction::ToggleIndentGuides),
+            ),
+            Command::new(
+                "Ver: Ajuste de línea en texto plano",
+                "",
+                context(ContextAction::ToggleWordWrap),
             ),
             Command::new(
                 "Finales de línea: LF",
@@ -675,6 +683,11 @@ impl Lorca {
                     self.config.indent_guides,
                     Some(ContextAction::ToggleIndentGuides),
                 ),
+                MenuItem::check(
+                    "Ajuste de línea en texto plano",
+                    self.config.wrap_plain_text,
+                    Some(ContextAction::ToggleWordWrap),
+                ),
             ],
             MenuTarget::Theme => {
                 let mode = self.config.theme.unwrap_or_default();
@@ -720,6 +733,7 @@ impl Lorca {
                                 "whitespace" => Some(self.config.show_whitespace),
                                 "line_endings" => Some(self.config.show_line_endings),
                                 "guides" => Some(self.config.indent_guides),
+                                "wrap" => Some(self.config.wrap_plain_text),
                                 _ => None,
                             };
                             match checked {
@@ -961,6 +975,11 @@ impl Lorca {
             }
             ContextAction::ToggleIndentGuides => {
                 self.config.indent_guides = !self.config.indent_guides;
+                self.save_config();
+                Task::none()
+            }
+            ContextAction::ToggleWordWrap => {
+                self.config.wrap_plain_text = !self.config.wrap_plain_text;
                 self.save_config();
                 Task::none()
             }

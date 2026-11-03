@@ -1,6 +1,6 @@
 //! Estado de vista de un documento (desplazamiento), separado del modelo.
 
-use lorca_core::{Buffer, EditorState, display};
+use lorca_core::{Buffer, EditorState, Rows, WrapLayout};
 
 use super::Metrics;
 
@@ -15,14 +15,52 @@ pub struct Viewport {
     pub metrics: Metrics,
 }
 
-/// Vista de un documento: desplazamiento (en píxeles) y últimas medidas conocidas.
+/// Ajuste de línea de un documento: si está activo y las filas calculadas para la
+/// última versión y anchura conocidas.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WrapCache {
+    pub enabled: bool,
+    /// Versión del documento y filas calculadas para ella.
+    layout: Option<(u64, WrapLayout)>,
+}
+
+impl WrapCache {
+    /// Recalcula las filas si cambió el documento, la anchura o el tabulador. Sin ajuste
+    /// (o sin medidas todavía) las descarta.
+    pub fn refresh(&mut self, editor: &EditorState, viewport: Viewport) {
+        if !self.enabled || viewport.width <= 0.0 || viewport.cell_width <= 0.0 {
+            self.layout = None;
+            return;
+        }
+        let width = ((viewport.width / viewport.cell_width).floor() as usize).max(1);
+        let tab_width = viewport.metrics.tab_width;
+        let version = editor.version();
+        let fresh = self.layout.as_ref().is_some_and(|(cached, layout)| {
+            *cached == version && layout.width() == width && layout.tab_width() == tab_width
+        });
+        if !fresh {
+            let layout = WrapLayout::new(editor.buffer(), width, tab_width);
+            self.layout = Some((version, layout));
+        }
+    }
+
+    pub fn layout(&self) -> Option<&WrapLayout> {
+        self.layout.as_ref().map(|(_, layout)| layout)
+    }
+}
+
+/// Vista de un documento: desplazamiento (en píxeles), últimas medidas conocidas y ajuste
+/// de línea.
 ///
 /// Cada documento tiene la suya porque, con la pantalla dividida, cada panel mide distinto.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DocView {
     pub scroll_x: f32,
     pub scroll_y: f32,
     pub viewport: Viewport,
+    pub wrap: WrapCache,
+    /// Celda que mantienen ↑/↓ al pasar por filas más cortas (con ajuste de línea).
+    pub goal_cells: Option<usize>,
 }
 
 /// Longitud (en caracteres) de la línea más larga del documento.
@@ -33,21 +71,30 @@ pub fn longest_line(buffer: &Buffer) -> usize {
         .unwrap_or(0)
 }
 
-/// Desplazamiento máximo (horizontal, vertical) para un documento de `lines` líneas cuya
-/// línea más larga tiene `longest` caracteres.
-pub fn max_scroll(viewport: Viewport, lines: usize, longest: usize) -> (f32, f32) {
-    let max_y = lines.saturating_sub(1) as f32 * viewport.metrics.line_height;
+/// Desplazamiento máximo (horizontal, vertical) para un documento de `rows` filas cuya
+/// fila más larga tiene `longest` caracteres.
+pub fn max_scroll(viewport: Viewport, rows: usize, longest: usize) -> (f32, f32) {
+    let max_y = rows.saturating_sub(1) as f32 * viewport.metrics.line_height;
     let content_width = longest as f32 * viewport.cell_width;
     let max_x = (content_width - viewport.width * 0.5).max(0.0);
     (max_x, max_y)
 }
 
 impl DocView {
+    /// Filas visuales del documento (con el ajuste de línea calculado, si lo hay).
+    pub fn rows<'a>(&'a self, editor: &'a EditorState) -> Rows<'a> {
+        Rows::new(
+            editor.buffer(),
+            self.wrap.layout(),
+            self.viewport.metrics.tab_width,
+        )
+    }
+
     /// Desplaza la vista y la mantiene dentro de los límites del documento.
-    pub fn scroll_by(&mut self, dx: f32, dy: f32, viewport: Viewport, buffer: &Buffer) {
+    pub fn scroll_by(&mut self, dx: f32, dy: f32, viewport: Viewport, editor: &EditorState) {
         self.scroll_x += dx;
         self.scroll_y += dy;
-        self.clamp(viewport, buffer);
+        self.clamp(viewport, editor);
     }
 
     /// Lleva la vista a una posición absoluta en los ejes indicados (barras de
@@ -57,7 +104,7 @@ impl DocView {
         x: Option<f32>,
         y: Option<f32>,
         viewport: Viewport,
-        buffer: &Buffer,
+        editor: &EditorState,
     ) {
         if let Some(x) = x {
             self.scroll_x = x;
@@ -65,13 +112,20 @@ impl DocView {
         if let Some(y) = y {
             self.scroll_y = y;
         }
-        self.clamp(viewport, buffer);
+        self.clamp(viewport, editor);
     }
 
-    /// Limita el desplazamiento: verticalmente hasta que la última línea quede arriba;
-    /// horizontalmente hasta el final de la línea más larga.
-    pub fn clamp(&mut self, viewport: Viewport, buffer: &Buffer) {
-        let (max_x, max_y) = max_scroll(viewport, buffer.len_lines(), longest_line(buffer));
+    /// Limita el desplazamiento: verticalmente hasta que la última fila quede arriba;
+    /// horizontalmente hasta el final de la línea más larga (nada con ajuste de línea).
+    pub fn clamp(&mut self, viewport: Viewport, editor: &EditorState) {
+        self.wrap.refresh(editor, viewport);
+        let rows = self.rows(editor);
+        let longest = if rows.is_wrapped() {
+            0
+        } else {
+            longest_line(editor.buffer())
+        };
+        let (max_x, max_y) = max_scroll(viewport, rows.count(), longest);
         self.scroll_y = self.scroll_y.clamp(0.0, max_y);
         self.scroll_x = self.scroll_x.clamp(0.0, max_x);
     }
@@ -81,7 +135,8 @@ impl DocView {
         if viewport.height <= 0.0 {
             return false;
         }
-        let top = editor.cursor().line as f32 * viewport.metrics.line_height;
+        let (row, _) = self.rows(editor).locate(editor.selection().head);
+        let top = row as f32 * viewport.metrics.line_height;
         top >= self.scroll_y
             && top + viewport.metrics.line_height <= self.scroll_y + viewport.height
     }
@@ -92,8 +147,10 @@ impl DocView {
         if viewport.height <= 0.0 {
             return;
         }
+        self.wrap.refresh(editor, viewport);
         if !self.is_cursor_visible(editor, viewport) {
-            let top = editor.cursor().line as f32 * viewport.metrics.line_height;
+            let (row, _) = self.rows(editor).locate(editor.selection().head);
+            let top = row as f32 * viewport.metrics.line_height;
             self.scroll_y = (top - viewport.height / 3.0).max(0.0);
         }
         self.reveal_cursor(editor, viewport);
@@ -104,17 +161,22 @@ impl DocView {
         if viewport.height <= 0.0 || viewport.width <= 0.0 {
             return;
         }
-        let position = editor.cursor();
+        self.wrap.refresh(editor, viewport);
+        let rows = self.rows(editor);
+        let (row, cells) = rows.locate(editor.selection().head);
+        let wrapped = rows.is_wrapped();
 
-        let top = position.line as f32 * viewport.metrics.line_height;
+        let top = row as f32 * viewport.metrics.line_height;
         if top < self.scroll_y {
             self.scroll_y = top;
         } else if top + viewport.metrics.line_height > self.scroll_y + viewport.height {
             self.scroll_y = (top + viewport.metrics.line_height - viewport.height).max(0.0);
         }
 
-        let line = editor.buffer().line_text(position.line);
-        let cells = display::visual_column(&line, position.column, viewport.metrics.tab_width);
+        if wrapped {
+            self.scroll_x = 0.0;
+            return;
+        }
         let x = cells as f32 * viewport.cell_width;
         let margin = viewport.cell_width * 4.0;
         if x < self.scroll_x {
@@ -168,7 +230,7 @@ mod tests {
 
     #[test]
     fn scroll_is_clamped() {
-        let buffer = Buffer::from_text("a\nb\nc");
+        let buffer = EditorState::from_text("a\nb\nc");
         let mut view = DocView::default();
         view.scroll_by(-50.0, -50.0, VIEWPORT, &buffer);
         assert_eq!(view, DocView::default());
@@ -180,7 +242,7 @@ mod tests {
 
     #[test]
     fn scroll_to_sets_only_the_given_axes() {
-        let buffer = Buffer::from_text(&format!("{}\n", "a".repeat(100)).repeat(10));
+        let buffer = EditorState::from_text(&format!("{}\n", "a".repeat(100)).repeat(10));
         let mut view = DocView::default();
         view.scroll_to(Some(40.0), None, VIEWPORT, &buffer);
         assert_eq!((view.scroll_x, view.scroll_y), (40.0, 0.0));
@@ -234,5 +296,42 @@ mod tests {
                 ..DocView::default()
             }
         );
+    }
+
+    fn wrapped_view() -> (EditorState, DocView) {
+        // 80 px / 8 px = 10 celdas por fila.
+        let editor = EditorState::from_text(&"palabra ".repeat(30));
+        let mut view = DocView {
+            viewport: VIEWPORT,
+            ..DocView::default()
+        };
+        view.wrap.enabled = true;
+        view.wrap.refresh(&editor, VIEWPORT);
+        (editor, view)
+    }
+
+    #[test]
+    fn wrapped_rows_scroll_vertically_only() {
+        let (mut editor, mut view) = wrapped_view();
+        assert_eq!(view.rows(&editor).count(), 30);
+        editor.move_cursor(Motion::DocumentEnd, false);
+        view.reveal_cursor(&editor, VIEWPORT);
+        assert_eq!(view.scroll_x, 0.0);
+        assert_eq!(view.scroll_y, 30.0 * LINE_HEIGHT - VIEWPORT.height);
+        view.scroll_by(1e6, 1e6, VIEWPORT, &editor);
+        assert_eq!(view.scroll_x, 0.0);
+        assert_eq!(view.scroll_y, 29.0 * LINE_HEIGHT);
+    }
+
+    #[test]
+    fn wrap_follows_edits_and_can_be_disabled() {
+        let (mut editor, mut view) = wrapped_view();
+        editor.select_all();
+        editor.insert_text("corto").unwrap();
+        view.reveal_cursor(&editor, VIEWPORT);
+        assert_eq!(view.rows(&editor).count(), 1);
+        view.wrap.enabled = false;
+        view.wrap.refresh(&editor, VIEWPORT);
+        assert!(!view.rows(&editor).is_wrapped());
     }
 }

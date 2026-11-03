@@ -15,7 +15,7 @@ use iced::{
 };
 use std::ops::Range;
 
-use lorca_core::{EditorState, LineEnding, Position, display};
+use lorca_core::{EditorState, LineEnding, Row, Rows, display};
 use lorca_syntax::Highlights;
 
 use super::action::CompletionKey;
@@ -31,7 +31,7 @@ const BLINK_MILLIS: u128 = 530;
 /// Crea el widget de edición para un documento.
 pub fn code_editor<'a, Message>(
     editor: &'a EditorState,
-    view: DocView,
+    view: &'a DocView,
     focused: bool,
     highlights: Option<&'a Highlights>,
     decorations: Decorations<'a>,
@@ -94,7 +94,7 @@ pub struct Decorations<'a> {
 /// Widget de edición. Ver el módulo [`crate::editor`].
 pub struct CodeEditor<'a, Message> {
     editor: &'a EditorState,
-    view: DocView,
+    view: &'a DocView,
     focused: bool,
     /// Resaltado del documento; puede ir una revisión por detrás mientras se recalcula.
     highlights: Option<&'a Highlights>,
@@ -189,19 +189,15 @@ struct Geometry {
     text_area: Rectangle,
     cell: f32,
     metrics: Metrics,
-    line_count: usize,
-    /// Caracteres de la línea más larga (para la barra horizontal).
+    /// Filas visuales (líneas, o más con ajuste de línea).
+    row_count: usize,
+    /// Caracteres de la línea más larga (para la barra horizontal; 0 con ajuste de línea).
     longest: usize,
 }
 
 impl Geometry {
-    fn new(
-        bounds: Rectangle,
-        cell: f32,
-        line_count: usize,
-        longest: usize,
-        metrics: Metrics,
-    ) -> Self {
+    fn new(bounds: Rectangle, cell: f32, rows: Rows<'_>, longest: usize, metrics: Metrics) -> Self {
+        let line_count = rows.row(rows.count()).line + 1;
         let digits = line_count.to_string().len().max(3);
         let gutter_width = (digits as f32 + 2.0) * cell;
         let gutter = Rectangle {
@@ -219,16 +215,16 @@ impl Geometry {
             text_area,
             cell,
             metrics,
-            line_count,
-            longest,
+            row_count: rows.count(),
+            longest: if rows.is_wrapped() { 0 } else { longest },
         }
     }
 
-    fn line_y(&self, line: usize, view: DocView) -> f32 {
-        self.bounds.y + line as f32 * self.metrics.line_height - view.scroll_y
+    fn row_y(&self, row: usize, view: &DocView) -> f32 {
+        self.bounds.y + row as f32 * self.metrics.line_height - view.scroll_y
     }
 
-    fn cell_x(&self, cells: usize, view: DocView) -> f32 {
+    fn cell_x(&self, cells: usize, view: &DocView) -> f32 {
         self.text_area.x + TEXT_PADDING + cells as f32 * self.cell - view.scroll_x
     }
 
@@ -257,16 +253,16 @@ impl Geometry {
     }
 
     /// Barra vertical (rectángulo y tirador), si el documento no cabe a lo alto.
-    fn vertical_bar(&self, view: DocView) -> Option<(Rectangle, Track)> {
+    fn vertical_bar(&self, view: &DocView) -> Option<(Rectangle, Track)> {
         let viewport = self.viewport();
-        let (_, max_y) = max_scroll(viewport, self.line_count, self.longest);
+        let (_, max_y) = max_scroll(viewport, self.row_count, self.longest);
         let rect = Rectangle {
             x: self.bounds.x + self.bounds.width - SCROLLBAR_SIZE,
             y: self.bounds.y,
             width: SCROLLBAR_SIZE,
             height: viewport.height,
         };
-        let content = self.line_count as f32 * self.metrics.line_height;
+        let content = self.row_count as f32 * self.metrics.line_height;
         Track::new(
             rect.y,
             rect.height,
@@ -279,9 +275,9 @@ impl Geometry {
     }
 
     /// Barra horizontal (rectángulo y tirador), si alguna línea no cabe a lo ancho.
-    fn horizontal_bar(&self, view: DocView) -> Option<(Rectangle, Track)> {
+    fn horizontal_bar(&self, view: &DocView) -> Option<(Rectangle, Track)> {
         let viewport = self.viewport();
-        let (max_x, _) = max_scroll(viewport, self.line_count, self.longest);
+        let (max_x, _) = max_scroll(viewport, self.row_count, self.longest);
         let rect = Rectangle {
             x: self.text_area.x,
             y: self.bounds.y + self.bounds.height - SCROLLBAR_SIZE,
@@ -301,7 +297,7 @@ impl Geometry {
     }
 
     /// Barra bajo `point`, si la hay.
-    fn bar_at(&self, point: Point, view: DocView) -> Option<(Axis, Track)> {
+    fn bar_at(&self, point: Point, view: &DocView) -> Option<(Axis, Track)> {
         if let Some((rect, track)) = self.vertical_bar(view)
             && rect.contains(point)
         {
@@ -315,7 +311,7 @@ impl Geometry {
         None
     }
 
-    fn bar(&self, axis: Axis, view: DocView) -> Option<Track> {
+    fn bar(&self, axis: Axis, view: &DocView) -> Option<Track> {
         match axis {
             Axis::Vertical => self.vertical_bar(view),
             Axis::Horizontal => self.horizontal_bar(view),
@@ -337,24 +333,38 @@ impl<'a, Message> CodeEditor<'a, Message> {
         self
     }
 
+    /// Filas visuales del documento (con el ajuste de línea de la vista, si lo hay).
+    fn rows(&self) -> Rows<'a> {
+        Rows::new(
+            self.editor.buffer(),
+            self.view.wrap.layout(),
+            self.options.metrics.tab_width,
+        )
+    }
+
+    fn geometry(&self, bounds: Rectangle, state: &State) -> Geometry {
+        Geometry::new(
+            bounds,
+            state.cell_width,
+            self.rows(),
+            state.longest(),
+            self.options.metrics,
+        )
+    }
+
     /// Índice de carácter más cercano a un punto de la pantalla.
     fn index_at(&self, point: Point, geometry: &Geometry) -> usize {
-        let buffer = self.editor.buffer();
+        let rows = self.rows();
         let y = point.y - geometry.bounds.y + self.view.scroll_y;
-        let line = if y <= 0.0 {
+        let row = if y <= 0.0 {
             0
         } else {
             (y / geometry.metrics.line_height) as usize
         };
-        let line = line.min(buffer.len_lines().saturating_sub(1));
+        let row = row.min(rows.count().saturating_sub(1));
         let cells =
             (point.x - geometry.text_area.x - TEXT_PADDING + self.view.scroll_x) / geometry.cell;
-        let column = display::char_column_at_visual(
-            &buffer.line_text(line),
-            cells.max(0.0),
-            geometry.metrics.tab_width,
-        );
-        buffer.position_to_char(Position::new(line, column))
+        rows.index_at(row, cells)
     }
 
     /// Rectángulo del cursor principal en pantalla.
@@ -364,13 +374,10 @@ impl<'a, Message> CodeEditor<'a, Message> {
 
     /// Rectángulo de un cursor situado en el índice `head`.
     fn cursor_rect_at(&self, head: usize, geometry: &Geometry) -> Rectangle {
-        let buffer = self.editor.buffer();
-        let position = buffer.char_to_position(head);
-        let line = buffer.line_text(position.line);
-        let cells = display::visual_column(&line, position.column, geometry.metrics.tab_width);
+        let (row, cells) = self.rows().locate(head);
         Rectangle {
             x: geometry.cell_x(cells, self.view).floor(),
-            y: geometry.line_y(position.line, self.view),
+            y: geometry.row_y(row, self.view),
             width: 2.0,
             height: geometry.metrics.line_height,
         }
@@ -437,13 +444,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         _viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
-        let geometry = Geometry::new(
-            layout.bounds(),
-            state.cell_width,
-            self.editor.buffer().len_lines(),
-            state.longest(),
-            self.options.metrics,
-        );
+        let geometry = self.geometry(layout.bounds(), state);
 
         match event {
             Event::Window(window::Event::Focused) => {
@@ -702,13 +703,8 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         let state = tree.state.downcast_ref::<State>();
         let buffer = self.editor.buffer();
         let line_count = buffer.len_lines();
-        let geometry = Geometry::new(
-            layout.bounds(),
-            state.cell_width,
-            line_count,
-            state.longest(),
-            self.options.metrics,
-        );
+        let rows = self.rows();
+        let geometry = self.geometry(layout.bounds(), state);
         let derived;
         let colors = match self.colors {
             Some(colors) => colors,
@@ -722,12 +718,18 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         fill(renderer, geometry.text_area, colors.background);
         fill(renderer, geometry.gutter, colors.gutter);
 
-        let first_line = (view.scroll_y / geometry.metrics.line_height)
+        let first_row = (view.scroll_y / geometry.metrics.line_height)
             .floor()
             .max(0.0) as usize;
-        let last_line = (((view.scroll_y + geometry.bounds.height) / geometry.metrics.line_height)
+        let last_row = (((view.scroll_y + geometry.bounds.height) / geometry.metrics.line_height)
             .ceil() as usize)
-            .min(line_count);
+            .min(rows.count());
+        // Filas visibles con su línea, su texto y sus índices en el documento.
+        let visible: Vec<VisibleRow> = (first_row..last_row)
+            .map(|index| VisibleRow::new(&rows, index, &geometry, view))
+            .collect();
+        let first_line = visible.first().map_or(0, |v| v.row.line);
+        let last_line = visible.last().map_or(0, |v| v.row.line + 1);
         let first_cell = (view.scroll_x / geometry.cell).floor().max(0.0) as usize;
         let visible_cells = (geometry.text_area.width / geometry.cell).ceil() as usize + 2;
 
@@ -737,7 +739,8 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
 
         // Números de línea.
         renderer.with_layer(geometry.gutter, |renderer| {
-            for line in first_line..last_line {
+            for visible in visible.iter().filter(|v| v.row.is_first()) {
+                let line = visible.row.line;
                 let color = if line == cursor_line {
                     colors.line_number_active
                 } else {
@@ -750,8 +753,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         Quad {
                             bounds: Rectangle {
                                 x: geometry.gutter.x + geometry.cell * 0.4,
-                                y: geometry.line_y(line, view)
-                                    + (geometry.metrics.line_height - size) / 2.0,
+                                y: visible.y + (geometry.metrics.line_height - size) / 2.0,
                                 width: size,
                                 height: size,
                             },
@@ -773,7 +775,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     },
                     Point::new(
                         geometry.gutter.x + geometry.gutter.width - geometry.cell,
-                        geometry.line_y(line, view),
+                        visible.y,
                     ),
                     color,
                     geometry.gutter,
@@ -794,11 +796,17 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
 
         // Texto, selección y cursor.
         renderer.with_layer(geometry.text_area, |renderer| {
-            for line in first_line..last_line {
-                let y = geometry.line_y(line, view);
-                let text = buffer.line_text(line);
-                let line_start = buffer.line_start(line);
-                let line_end = line_start + text.chars().count();
+            for visible in &visible {
+                let VisibleRow {
+                    row,
+                    ref text,
+                    line_start,
+                    line_end,
+                    y,
+                } = *visible;
+                let line = row.line;
+                // Hay un salto de línea real al final de la fila (no un corte del ajuste).
+                let newline = row.last && line + 1 < line_count;
 
                 if line == cursor_line && selection.is_empty() && self.focused {
                     fill(
@@ -814,9 +822,10 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
 
                 let decorations = self.decorations;
                 let line_ranges = LineRanges {
-                    text: &text,
+                    text,
                     line_start,
                     line_end,
+                    newline,
                     y,
                 };
                 line_ranges.fill(renderer, &geometry, view, decorations.marks, colors.mark);
@@ -850,13 +859,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     let start = selected.start.max(line_start) - line_start;
                     let end = selected.end.min(line_end) - line_start;
                     let mut end_cells =
-                        display::visual_column(&text, end, geometry.metrics.tab_width);
+                        display::visual_column(text, end, geometry.metrics.tab_width);
                     // Si la selección incluye el salto de línea, se marca una celda más.
-                    if selected.end > line_end {
+                    if selected.end > line_end && newline {
                         end_cells += 1;
                     }
                     let start_cells =
-                        display::visual_column(&text, start, geometry.metrics.tab_width);
+                        display::visual_column(text, start, geometry.metrics.tab_width);
                     let x = geometry.cell_x(start_cells, view);
                     fill(
                         renderer,
@@ -870,7 +879,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     );
                 }
 
-                if let Some(&indent) = guides.get(line - first_line) {
+                if let Some(&indent) = guides.get(line - first_line).filter(|_| row.is_first()) {
                     for column in (0..indent).step_by(geometry.metrics.tab_width) {
                         fill(
                             renderer,
@@ -889,7 +898,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         renderer,
                         &geometry,
                         view,
-                        &text,
+                        text,
                         y,
                         first_cell,
                         visible_cells,
@@ -897,10 +906,10 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     );
                 }
                 if let Some(ending) = self.options.line_ending
-                    && line + 1 < line_count
+                    && newline
                 {
                     let cells =
-                        display::visual_column(&text, usize::MAX, geometry.metrics.tab_width);
+                        display::visual_column(text, usize::MAX, geometry.metrics.tab_width);
                     let label = ending.label();
                     let x = geometry.cell_x(cells, view) + 4.0;
                     let width = label.len() as f32 * 6.0 + 6.0;
@@ -938,11 +947,13 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 let spans = self.highlights.map_or(&[][..], |h| h.line(line));
                 let mut next_span = 0;
                 let runs = display::visible_runs(
-                    &text,
+                    text,
                     first_cell,
                     visible_cells,
                     geometry.metrics.tab_width,
                     |index| {
+                        // Los tramos usan columnas de la línea; la fila puede empezar después.
+                        let index = index + row.start;
                         while spans.get(next_span).is_some_and(|s| s.end <= index) {
                             next_span += 1;
                         }
@@ -952,6 +963,14 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                             .map(|s| s.kind)
                     },
                 );
+                for underline in self.decorations.underlines {
+                    let color = match underline.kind {
+                        UnderlineKind::Error => colors.error,
+                        UnderlineKind::Warning => colors.warning,
+                        UnderlineKind::Info => colors.info,
+                    };
+                    line_ranges.underline(renderer, &geometry, view, &underline.range, color);
+                }
                 for run in runs {
                     if run.text.trim().is_empty() {
                         continue;
@@ -968,23 +987,6 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                         geometry.text_area,
                     );
                 }
-            }
-
-            for underline in self.decorations.underlines {
-                let color = match underline.kind {
-                    UnderlineKind::Error => colors.error,
-                    UnderlineKind::Warning => colors.warning,
-                    UnderlineKind::Info => colors.info,
-                };
-                draw_underline(
-                    renderer,
-                    &geometry,
-                    view,
-                    buffer,
-                    underline,
-                    first_line..last_line,
-                    color,
-                );
             }
 
             if self.focused && state.window_focused && state.cursor_visible() {
@@ -1019,13 +1021,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
-        let geometry = Geometry::new(
-            layout.bounds(),
-            state.cell_width,
-            self.editor.buffer().len_lines(),
-            state.longest(),
-            self.options.metrics,
-        );
+        let geometry = self.geometry(layout.bounds(), state);
         // Sobre las barras (o arrastrándolas), la flecha normal en vez del cursor de texto.
         let on_bar = cursor
             .position()
@@ -1084,7 +1080,7 @@ fn leading_indent(text: &str, tab_width: usize) -> Option<usize> {
 fn draw_whitespace(
     renderer: &mut Renderer,
     geometry: &Geometry,
-    view: DocView,
+    view: &DocView,
     text: &str,
     y: f32,
     first_cell: usize,
@@ -1142,82 +1138,69 @@ fn draw_whitespace(
     }
 }
 
-/// Una línea visible, para pintar los tramos de rangos que caen en ella.
-struct LineRanges<'a> {
-    text: &'a str,
+/// Fila visible: su línea y tramo, su texto y sus índices de carácter en el documento.
+struct VisibleRow {
+    row: Row,
+    text: String,
     line_start: usize,
-    /// Índice del salto de línea (o del final del texto).
     line_end: usize,
     y: f32,
 }
 
-impl LineRanges<'_> {
-    /// Pinta la parte de cada rango que cae en la línea. Si un rango sigue en la línea
-    /// siguiente, se marca también la celda del salto.
-    fn fill(
-        &self,
-        renderer: &mut Renderer,
-        geometry: &Geometry,
-        view: DocView,
-        ranges: &[Range<usize>],
-        color: Color,
-    ) {
-        let first = ranges.partition_point(|r| r.end <= self.line_start);
-        for range in ranges.iter().skip(first) {
-            if range.start > self.line_end {
-                break;
-            }
-            let start = range.start.max(self.line_start) - self.line_start;
-            let end = range.end.min(self.line_end) - self.line_start;
-            let start_cells = display::visual_column(self.text, start, geometry.metrics.tab_width);
-            let mut end_cells = display::visual_column(self.text, end, geometry.metrics.tab_width);
-            if range.end > self.line_end {
-                end_cells += 1;
-            }
-            fill(
-                renderer,
-                Rectangle {
-                    x: geometry.cell_x(start_cells, view),
-                    y: self.y,
-                    width: end_cells.saturating_sub(start_cells) as f32 * geometry.cell,
-                    height: geometry.metrics.line_height,
-                },
-                color,
-            );
+impl VisibleRow {
+    fn new(rows: &Rows<'_>, index: usize, geometry: &Geometry, view: &DocView) -> Self {
+        let row = rows.row(index);
+        let text = rows.text(row);
+        let line_start = rows.buffer().line_start(row.line) + row.start;
+        let line_end = line_start + text.chars().count();
+        Self {
+            row,
+            text,
+            line_start,
+            line_end,
+            y: geometry.row_y(index, view),
         }
     }
 }
 
-/// Línea ondulada bajo la parte visible de un rango (puede ocupar varias líneas). Un rango
-/// vacío marca una celda.
-fn draw_underline(
-    renderer: &mut Renderer,
-    geometry: &Geometry,
-    view: DocView,
-    buffer: &lorca_core::Buffer,
-    underline: &Underline,
-    visible: Range<usize>,
-    color: Color,
-) {
-    let tab_width = geometry.metrics.tab_width;
-    let start = buffer.char_to_position(underline.range.start);
-    let end = buffer.char_to_position(underline.range.end);
-    for line in start.line.max(visible.start)..=end.line.min(visible.end.saturating_sub(1)) {
-        let text = buffer.line_text(line);
-        let from = if line == start.line { start.column } else { 0 };
-        let to = if line == end.line {
-            end.column
-        } else {
-            text.chars().count()
-        };
-        let x0 = geometry.cell_x(display::visual_column(&text, from, tab_width), view);
-        let mut cells = display::visual_column(&text, to, tab_width)
-            .saturating_sub(display::visual_column(&text, from, tab_width));
-        if cells == 0 {
-            cells = 1;
+/// Una fila visible, para pintar los tramos de rangos que caen en ella.
+struct LineRanges<'a> {
+    text: &'a str,
+    line_start: usize,
+    /// Índice del salto de línea (o del final del texto o de la fila).
+    line_end: usize,
+    /// La fila termina en un salto de línea real (no en un corte del ajuste de línea).
+    newline: bool,
+    y: f32,
+}
+
+impl LineRanges<'_> {
+    /// Línea ondulada bajo la parte de `range` que cae en la fila. Un rango vacío marca
+    /// una celda.
+    fn underline(
+        &self,
+        renderer: &mut Renderer,
+        geometry: &Geometry,
+        view: &DocView,
+        range: &Range<usize>,
+        color: Color,
+    ) {
+        if range.start > self.line_end
+            || range.end < self.line_start
+            || (!range.is_empty() && range.end == self.line_start)
+        {
+            return;
         }
+        let tab_width = geometry.metrics.tab_width;
+        let from = range.start.max(self.line_start) - self.line_start;
+        let to = range.end.min(self.line_end) - self.line_start;
+        let from_cells = display::visual_column(self.text, from, tab_width);
+        let cells = display::visual_column(self.text, to, tab_width)
+            .saturating_sub(from_cells)
+            .max(1);
+        let x0 = geometry.cell_x(from_cells, view);
         let width = cells as f32 * geometry.cell;
-        let base = geometry.line_y(line, view) + geometry.metrics.line_height - 3.0;
+        let base = self.y + geometry.metrics.line_height - 3.0;
         // Ondas de 2 píxeles: un tramo arriba y otro abajo, alternos.
         let step: f32 = 2.0;
         let mut x = x0;
@@ -1235,6 +1218,41 @@ fn draw_underline(
             );
             x += step;
             up = !up;
+        }
+    }
+
+    /// Pinta la parte de cada rango que cae en la línea. Si un rango sigue en la línea
+    /// siguiente, se marca también la celda del salto.
+    fn fill(
+        &self,
+        renderer: &mut Renderer,
+        geometry: &Geometry,
+        view: &DocView,
+        ranges: &[Range<usize>],
+        color: Color,
+    ) {
+        let first = ranges.partition_point(|r| r.end <= self.line_start);
+        for range in ranges.iter().skip(first) {
+            if range.start > self.line_end {
+                break;
+            }
+            let start = range.start.max(self.line_start) - self.line_start;
+            let end = range.end.min(self.line_end) - self.line_start;
+            let start_cells = display::visual_column(self.text, start, geometry.metrics.tab_width);
+            let mut end_cells = display::visual_column(self.text, end, geometry.metrics.tab_width);
+            if range.end > self.line_end && self.newline {
+                end_cells += 1;
+            }
+            fill(
+                renderer,
+                Rectangle {
+                    x: geometry.cell_x(start_cells, view),
+                    y: self.y,
+                    width: end_cells.saturating_sub(start_cells) as f32 * geometry.cell,
+                    height: geometry.metrics.line_height,
+                },
+                color,
+            );
         }
     }
 }

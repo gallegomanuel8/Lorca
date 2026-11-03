@@ -17,6 +17,7 @@ mod line_ending;
 mod position;
 mod selection;
 mod text_format;
+mod wrap;
 
 pub use bookmarks::Bookmarks;
 pub use buffer::Buffer;
@@ -30,3 +31,4 @@ pub use line_ending::LineEnding;
 pub use position::Position;
 pub use selection::Selection;
 pub use text_format::{LoadedText, TextFormat, load_bytes, save_bytes};
+pub use wrap::{Row, Rows, WrapLayout, wrap_line};

@@ -73,6 +73,7 @@ pub enum ContextAction {
     ToggleWhitespace,
     ToggleLineEndings,
     ToggleIndentGuides,
+    ToggleWordWrap,
     FormatDocument,
     MinifyJson,
     ChangeCase(Case),

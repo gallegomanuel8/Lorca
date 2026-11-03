@@ -93,18 +93,31 @@ pub fn apply_action(
     view: &mut DocView,
     viewport: Viewport,
 ) -> Result<(), CoreError> {
+    // La celda deseada de ↑/↓ solo se conserva entre movimientos verticales seguidos.
+    if !matches!(
+        action,
+        EditorAction::Move {
+            motion: Motion::Up | Motion::Down | Motion::PageUp(_) | Motion::PageDown(_),
+            ..
+        } | EditorAction::Viewport(_)
+            | EditorAction::CursorPoint(_)
+            | EditorAction::Scroll { .. }
+            | EditorAction::ScrollTo { .. }
+    ) {
+        view.goal_cells = None;
+    }
     match action {
         EditorAction::Scroll { dx, dy } => {
-            view.scroll_by(dx, dy, viewport, editor.buffer());
+            view.scroll_by(dx, dy, viewport, editor);
             return Ok(());
         }
         EditorAction::ScrollTo { x, y } => {
-            view.scroll_to(x, y, viewport, editor.buffer());
+            view.scroll_to(x, y, viewport, editor);
             return Ok(());
         }
         // La aplicación guarda el viewport; aquí solo se reajusta el desplazamiento.
         EditorAction::Viewport(viewport) => {
-            view.clamp(viewport, editor.buffer());
+            view.clamp(viewport, editor);
             return Ok(());
         }
         // Como en Notepad++: si el clic derecho cae fuera de la selección, mueve el cursor.
@@ -121,7 +134,12 @@ pub fn apply_action(
             }
             return Ok(());
         }
-        EditorAction::Move { motion, extend } => editor.move_cursor(motion, extend),
+        EditorAction::Move { motion, extend } => {
+            view.wrap.refresh(editor, viewport);
+            if !move_by_rows(motion, extend, editor, view) {
+                editor.move_cursor(motion, extend);
+            }
+        }
         EditorAction::Click {
             index,
             kind,
@@ -179,6 +197,54 @@ pub fn apply_action(
     }
     view.reveal_cursor(editor, viewport);
     Ok(())
+}
+
+/// Con ajuste de línea, ↑/↓, Re Pág/Av Pág, Inicio y Fin se mueven por filas visuales (como
+/// en el Bloc de notas). Devuelve `false` si no hay ajuste o el movimiento no es de estos.
+fn move_by_rows(
+    motion: Motion,
+    extend: bool,
+    editor: &mut EditorState,
+    view: &mut DocView,
+) -> bool {
+    let rows = view.rows(editor);
+    if !rows.is_wrapped() {
+        return false;
+    }
+    let single = editor.selections().len() == 1;
+    let goal = if single { view.goal_cells } else { None };
+    let delta = match motion {
+        Motion::Up => Some(-1),
+        Motion::Down => Some(1),
+        Motion::PageUp(lines) => Some(-isize::try_from(lines).unwrap_or(isize::MAX)),
+        Motion::PageDown(lines) => Some(isize::try_from(lines).unwrap_or(isize::MAX)),
+        _ => None,
+    };
+    let heads: Vec<usize> = editor.selections().iter().map(|s| s.head).collect();
+    let targets: Vec<usize> = match (motion, delta) {
+        (_, Some(delta)) => heads
+            .iter()
+            .map(|&head| rows.vertical_target(head, delta, goal))
+            .collect(),
+        (Motion::LineEnd, None) => heads.iter().map(|&head| rows.row_bounds(head).1).collect(),
+        // En la primera fila de la línea, Inicio funciona como siempre (salta la sangría).
+        (Motion::LineStart, None) => {
+            let (row, _) = rows.locate(editor.selection().head);
+            if rows.row(row).is_first() {
+                return false;
+            }
+            heads.iter().map(|&head| rows.row_bounds(head).0).collect()
+        }
+        _ => return false,
+    };
+    let new_goal = match (delta, single) {
+        (Some(_), true) => Some(goal.unwrap_or_else(|| rows.locate(editor.selection().head).1)),
+        _ => None,
+    };
+    let mut targets = targets.into_iter();
+    editor.move_cursors_to(extend, |head| targets.next().unwrap_or(head));
+    view.goal_cells = new_goal;
+    true
 }
 
 #[cfg(test)]
@@ -299,5 +365,43 @@ mod tests {
         e.set_selection(lorca_core::Selection::new(1, 4));
         run(&mut e, vec![EditorAction::CollapseSelection]);
         assert_eq!(e.selection(), lorca_core::Selection::cursor(4));
+    }
+
+    #[test]
+    fn wrapped_text_moves_by_rows() {
+        // 400 px / 8 px = 50 celdas: «palabra » × 10 son 80 caracteres → 2 filas.
+        let mut e = EditorState::from_text(&"palabra ".repeat(10));
+        let mut view = DocView {
+            viewport: VIEWPORT,
+            ..DocView::default()
+        };
+        view.wrap.enabled = true;
+        let down = EditorAction::Move {
+            motion: Motion::Down,
+            extend: false,
+        };
+        apply_action(down.clone(), &mut e, &mut view, VIEWPORT).unwrap();
+        // Primera fila: 6 palabras (48 caracteres); baja a la celda 0 de la segunda.
+        assert_eq!(e.selection().head, 48);
+        let end = EditorAction::Move {
+            motion: Motion::LineEnd,
+            extend: false,
+        };
+        apply_action(end, &mut e, &mut view, VIEWPORT).unwrap();
+        assert_eq!(e.selection().head, 80);
+        let up = EditorAction::Move {
+            motion: Motion::Up,
+            extend: false,
+        };
+        apply_action(up, &mut e, &mut view, VIEWPORT).unwrap();
+        assert_eq!(e.selection().head, 32);
+        // Inicio en una fila que no es la primera va al principio de la fila.
+        apply_action(down, &mut e, &mut view, VIEWPORT).unwrap();
+        let home = EditorAction::Move {
+            motion: Motion::LineStart,
+            extend: false,
+        };
+        apply_action(home, &mut e, &mut view, VIEWPORT).unwrap();
+        assert_eq!(e.selection().head, 48);
     }
 }

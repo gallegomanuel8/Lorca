@@ -43,6 +43,12 @@ mensaje en español.
     llama a `History::seal()`. Sin temporizadores.
   - `History::revision()` identifica el estado del texto; `Document::is_modified` lo
     compara con la revisión guardada (deshacer hasta lo guardado = sin cambios).
+  - `wrap`: ajuste de línea. `wrap_line` corta por espacios (las palabras más largas que
+    la fila se parten; los espacios finales sobresalen) y `WrapLayout` guarda las filas
+    del documento para una anchura en celdas. `Rows` traduce entre filas visuales e
+    índices con o sin ajuste (sin él, fila = línea); una posición justo en un corte se ve
+    al principio de la fila siguiente. `EditorState::move_cursors_to` mueve cada cursor
+    a un destino calculado fuera. `examples/bench_wrap.rs`: ≈4 ms por MB en release.
   - `display`: columnas visuales (tabuladores, caracteres anchos con `unicode-width`).
 - `syntax`
   - `Language`: `id`/`from_id` (sesión), `from_name` (alias de bloques de código Markdown),
@@ -128,6 +134,13 @@ mensaje en español.
     publica `EditorAction`; `apply_action` las aplica al núcleo. El desplazamiento vive en
     `DocView` (por documento, en la app), no en el núcleo.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
+  - Ajuste de línea (`Config::wrap_plain_text`, «Ver → Ajuste de línea en texto
+    plano»): solo en documentos de texto plano. `DocView` (ya no es `Copy`; el widget lo
+    recibe por referencia) guarda un `WrapCache` (filas por versión y anchura) que
+    `refresh_wraps` activa o desactiva al final de cada `update`. Desplazamiento, cursor,
+    clics y dibujo trabajan con filas (`Rows`); el número de línea solo en la primera
+    fila. ↑/↓, Re Pág/Av Pág, Fin e Inicio (fuera de la primera fila) se mueven por filas
+    (`move_by_rows`, con `goal_cells` para mantener la columna). Sin barra horizontal.
   - Barras de desplazamiento (`editor/scrollbar.rs`: `Track`, cálculo puro con pruebas):
     vertical y horizontal (esta solo si alguna línea no cabe; entonces el `Viewport` pierde
     su alto). Se pintan en una capa propia porque dentro de una capa iced dibuja el texto

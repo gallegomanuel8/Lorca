@@ -449,6 +449,7 @@ impl Lorca {
         self.sync_panes();
         self.refresh_search();
         self.refresh_previews();
+        self.refresh_wraps();
         self.refresh_theme();
         self.sync_lsp();
         self.refresh_diagnostics();
@@ -1068,6 +1069,28 @@ impl Lorca {
         }
         if let Err(error) = result {
             self.show_error(error.to_string());
+        }
+    }
+
+    /// Activa el ajuste de línea en los documentos de texto plano (si la configuración lo
+    /// pide) y recalcula las filas de los visibles.
+    fn refresh_wraps(&mut self) {
+        let visible = self.visible_documents();
+        for (id, view) in &mut self.views {
+            let Some(document) = self.workspace.document(*id) else {
+                continue;
+            };
+            let enabled = self.config.wrap_plain_text && document.language() == Language::PlainText;
+            let changed = view.wrap.enabled != enabled;
+            view.wrap.enabled = enabled;
+            if changed {
+                // Al activarlo no hay desplazamiento horizontal; al quitarlo, menos filas.
+                let viewport = view.viewport;
+                view.clamp(viewport, &document.editor);
+                view.reveal_cursor(&document.editor, viewport);
+            } else if visible.contains(id) {
+                view.wrap.refresh(&document.editor, view.viewport);
+            }
         }
     }
 
