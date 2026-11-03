@@ -58,6 +58,12 @@ mensaje en español.
     inyectado llega troceado.
   - `examples/bench_highlight.rs` mide rendimiento (≈35 ms para 6 600 líneas de Rust en
     release).
+  - `Language::guess(texto)` (`guess.rs`): deduce el lenguaje por el contenido (shebang,
+    JSON validado con su gramática, HTML y puntos por líneas; empate o poca puntuación =
+    texto plano). Se usa al pegar en un documento de texto plano no elegido a mano
+    (`EditorAction::Paste`, `Document::guess_language_from_paste`); el lenguaje deducido
+    se mantiene aunque la ruta no lo indique hasta vaciar el documento y se guarda en la
+    sesión (`language_guessed`).
 - `search`
   - `SearchQuery::new(patrón, SearchOptions)`: todos los modos se compilan a `regex`
     (Normal = `regex::escape`, Extendido = `unescape_extended` + escape, Regex tal cual),

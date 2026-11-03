@@ -1,5 +1,6 @@
 //! Detección de lenguaje y resaltado de sintaxis con tree-sitter.
 
+mod guess;
 mod highlight;
 mod language;
 

@@ -29,6 +29,8 @@ pub enum EditorAction {
         index: usize,
     },
     Insert(String),
+    /// Como `Insert`, pero con texto del portapapeles (puede deducir el lenguaje).
+    Paste(String),
     Newline,
     Indent,
     Backspace,
@@ -138,7 +140,7 @@ pub fn apply_action(
             editor.add_cursor_vertical(up);
         }
         // Con tantos cursores como líneas pegadas, se reparte una línea a cada uno.
-        EditorAction::Insert(text) if editor.selections().len() > 1 => {
+        EditorAction::Insert(text) | EditorAction::Paste(text) if editor.selections().len() > 1 => {
             let lines: Vec<String> = text
                 .trim_end_matches('\n')
                 .split('\n')
@@ -150,7 +152,7 @@ pub fn apply_action(
                 editor.insert_text(&text)?;
             }
         }
-        EditorAction::Insert(text) => editor.insert_text(&text)?,
+        EditorAction::Insert(text) | EditorAction::Paste(text) => editor.insert_text(&text)?,
         EditorAction::Newline => editor.insert_newline()?,
         EditorAction::Indent => editor.insert_text(INDENT)?,
         EditorAction::Backspace => editor.backspace()?,

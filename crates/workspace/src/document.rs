@@ -30,6 +30,9 @@ pub struct Document {
     language: Language,
     /// `true` si el usuario eligió el lenguaje a mano: ya no se detecta automáticamente.
     language_manual: bool,
+    /// `true` si el lenguaje se dedujo del texto pegado: se conserva aunque la ruta no lo
+    /// indique (hasta que el documento quede vacío).
+    language_guessed: bool,
     /// Revisión del historial en el momento de abrir o guardar.
     saved_revision: u64,
     /// Cambios que no pasan por el historial (p. ej. cambiar la codificación).
@@ -48,6 +51,7 @@ impl Document {
             format: TextFormat::default(),
             language: Language::PlainText,
             language_manual: false,
+            language_guessed: false,
             saved_revision: 0,
             forced_modified: false,
             disk_stamp: None,
@@ -61,6 +65,7 @@ impl Document {
             saved_revision: editor.revision(),
             language: Language::detect(Some(&path), &editor.buffer().line_text(0)),
             language_manual: false,
+            language_guessed: false,
             editor,
             disk_stamp: DiskStamp::of(&path),
             path: Some(path),
@@ -86,6 +91,7 @@ impl Document {
             saved_revision: editor.revision(),
             language: Language::detect(path.as_deref(), &editor.buffer().line_text(0)),
             language_manual: false,
+            language_guessed: false,
             editor,
             untitled_number: if path.is_some() {
                 None
@@ -133,13 +139,46 @@ impl Document {
         self.language_manual = true;
     }
 
+    pub fn is_language_guessed(&self) -> bool {
+        self.language_guessed
+    }
+
     /// Vuelve a detectar el lenguaje (ruta y shebang) salvo que se haya elegido a mano.
-    /// Es barato: solo mira la ruta y la primera línea.
+    /// Un lenguaje deducido al pegar se mantiene si la ruta y el shebang no dicen otro y
+    /// el documento no está vacío. Es barato: solo mira la ruta y la primera línea.
     pub fn refresh_language(&mut self) {
-        if !self.language_manual {
-            self.language =
-                Language::detect(self.path.as_deref(), &self.editor.buffer().line_text(0));
+        if self.language_manual {
+            return;
         }
+        let detected = Language::detect(self.path.as_deref(), &self.editor.buffer().line_text(0));
+        if self.language_guessed
+            && detected == Language::PlainText
+            && !self.editor.buffer().is_empty()
+        {
+            return;
+        }
+        self.language = detected;
+        self.language_guessed = false;
+    }
+
+    /// Si el documento es texto plano (no elegido a mano), deduce el lenguaje del texto
+    /// pegado. Devuelve el lenguaje nuevo si lo ha cambiado.
+    pub fn guess_language_from_paste(&mut self, pasted: &str) -> Option<Language> {
+        if self.language_manual || self.language != Language::PlainText {
+            return None;
+        }
+        let guessed = Language::guess(pasted);
+        if guessed == Language::PlainText {
+            return None;
+        }
+        self.set_guessed_language(guessed);
+        Some(guessed)
+    }
+
+    /// Fija un lenguaje deducido (al pegar o al restaurar la sesión).
+    pub(crate) fn set_guessed_language(&mut self, language: Language) {
+        self.language = language;
+        self.language_guessed = true;
     }
 
     /// Nombre que se muestra en la pestaña: el nombre del archivo o "Sin título N".
@@ -207,6 +246,38 @@ mod tests {
         assert_eq!(doc.language(), Language::PlainText);
         doc.refresh_language();
         assert_eq!(doc.language(), Language::Python);
+    }
+
+    #[test]
+    fn pasted_text_sets_language_until_emptied() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        doc.editor.insert_text("{\"a\": 1}").unwrap();
+        doc.refresh_language();
+        assert_eq!(
+            doc.guess_language_from_paste("{\"a\": 1}"),
+            Some(Language::Json)
+        );
+        assert_eq!(doc.language(), Language::Json);
+        // Seguir editando no lo devuelve a texto plano.
+        doc.editor.insert_text(" ").unwrap();
+        doc.refresh_language();
+        assert_eq!(doc.language(), Language::Json);
+        // Ya tiene lenguaje: otro pegado no lo cambia.
+        assert_eq!(doc.guess_language_from_paste("SELECT * FROM t;"), None);
+        // Vacío, vuelve a no tener lenguaje.
+        doc.editor.select_all();
+        doc.editor.backspace().unwrap();
+        doc.refresh_language();
+        assert_eq!(doc.language(), Language::PlainText);
+        assert!(!doc.is_language_guessed());
+    }
+
+    #[test]
+    fn pasting_respects_manual_language() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        doc.set_language(Language::PlainText);
+        assert_eq!(doc.guess_language_from_paste("{\"a\": 1}"), None);
+        assert_eq!(doc.language(), Language::PlainText);
     }
 
     #[test]

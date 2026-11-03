@@ -714,10 +714,9 @@ impl Lorca {
             }
             Message::Paste(contents) => {
                 if let Some(contents) = contents
-                    && let Some(document) = self.workspace.active_mut()
-                    && let Err(error) = document.editor.insert_text(&contents)
+                    && let Some(id) = self.workspace.active_id()
                 {
-                    self.show_error(error.to_string());
+                    self.apply_editor_action(id, EditorAction::Paste(contents));
                 }
                 Task::none()
             }
@@ -1049,11 +1048,24 @@ impl Lorca {
             keep_cursor_visible = view.is_cursor_visible(&document.editor, view.viewport);
             view.viewport = viewport;
         }
+        // Pegar en un documento sin lenguaje lo deduce del texto pegado.
+        let pasted = match &action {
+            EditorAction::Paste(text) if document.language() == Language::PlainText => {
+                Some(text.clone())
+            }
+            _ => None,
+        };
         let result = apply_action(action, &mut document.editor, view, view.viewport);
         if keep_cursor_visible {
             view.reveal_cursor(&document.editor, view.viewport);
         }
         document.refresh_language();
+        if let Some(pasted) = pasted
+            && result.is_ok()
+            && let Some(language) = document.guess_language_from_paste(&pasted)
+        {
+            self.show_info(format!("Lenguaje detectado: {language}"));
+        }
         if let Err(error) = result {
             self.show_error(error.to_string());
         }

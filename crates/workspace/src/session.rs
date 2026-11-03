@@ -46,6 +46,9 @@ pub struct SessionDocument {
     /// Lenguaje elegido a mano (identificador de `Language::id`), si lo hay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// `true` si `language` se dedujo al pegar (no se eligió a mano).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub language_guessed: bool,
     /// Huella del archivo en disco en el que se basan los cambios sin guardar.
     pub disk_stamp: Option<DiskStamp>,
 }
@@ -157,9 +160,9 @@ impl SessionStore {
                 head: selection.head,
                 scroll_x,
                 scroll_y,
-                language: document
-                    .is_language_manual()
+                language: (document.is_language_manual() || document.is_language_guessed())
                     .then(|| document.language().id().to_owned()),
+                language_guessed: document.is_language_guessed(),
                 disk_stamp: document.disk_stamp(),
             });
         }
@@ -212,8 +215,12 @@ impl Workspace {
                     document
                         .editor
                         .set_selection(Selection::new(saved.anchor, saved.head));
-                    if let Some(language) = saved.language.as_deref().and_then(Language::from_id) {
-                        document.set_language(language);
+                    match saved.language.as_deref().and_then(Language::from_id) {
+                        Some(language) if saved.language_guessed => {
+                            document.set_guessed_language(language);
+                        }
+                        Some(language) => document.set_language(language),
+                        None => {}
                     }
                 }
                 report.scrolls.push((id, saved.scroll_x, saved.scroll_y));
@@ -483,6 +490,21 @@ mod tests {
     }
 
     #[test]
+    fn guessed_language_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new();
+        ws.new_document();
+        let doc = ws.active_mut().unwrap();
+        doc.editor.insert_text("SELECT * FROM t;").unwrap();
+        doc.guess_language_from_paste("SELECT * FROM t;");
+        let (restored, _) = save_and_restore(&ws, dir.path());
+        let doc = restored.active().unwrap();
+        assert_eq!(doc.language(), Language::Sql);
+        assert!(doc.is_language_guessed());
+        assert!(!doc.is_language_manual());
+    }
+
+    #[test]
     fn manual_language_survives_restart() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = Workspace::new();
@@ -569,6 +591,7 @@ mod tests {
                 scroll_x: 0.0,
                 scroll_y: 0.0,
                 language: None,
+                language_guessed: false,
                 disk_stamp: None,
             }],
         };

@@ -543,7 +543,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     }
                     KeyCommand::Paste => {
                         if let Some(contents) = clipboard.read(clipboard::Kind::Standard) {
-                            self.publish(shell, EditorAction::Insert(contents));
+                            self.publish(shell, EditorAction::Paste(contents));
                         }
                     }
                 }
