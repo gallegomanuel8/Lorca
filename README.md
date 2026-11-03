@@ -1,7 +1,7 @@
 # Lorca
 
 <p align="center">
-  <img src="assets/icons/png/lorca-256.png" width="128" alt="Icono de Lorca: retrato de Federico García Lorca dibujado con caracteres de código">
+  <img src="assets/icons/retrato/lorca-256.png" width="128" alt="Retrato de Federico García Lorca dibujado con caracteres de código">
 </p>
 
 <p align="center"><em>Verde que te quiero verde.</em></p>

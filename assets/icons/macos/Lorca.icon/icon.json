@@ -1,20 +1,13 @@
 {
   "fill" : {
-    "solid" : "srgb:0.00000,0.00000,0.00000,1.00000"
+    "linear-gradient" : [
+      "srgb:0.16000,0.42000,0.31000,1.00000",
+      "srgb:0.05000,0.20000,0.14000,1.00000"
+    ]
   },
   "groups" : [
-    {
-      "layers" : [
-        {
-          "image-name" : "retrato.png",
-          "name" : "retrato"
-        }
-      ]
-    }
+    { "layers" : [ { "image-name" : "lineas.png", "name" : "lineas" } ] },
+    { "layers" : [ { "image-name" : "luna.png", "name" : "luna" } ] }
   ],
-  "supported-platforms" : {
-    "squares" : [
-      "macOS"
-    ]
-  }
+  "supported-platforms" : { "squares" : [ "macOS" ] }
 }

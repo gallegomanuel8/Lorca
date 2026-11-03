@@ -237,6 +237,18 @@ mod native {
         Submenu::with_items(label, true, items).map_err(|e| e.to_string())
     }
 
+    /// Retrato de Lorca hecho con caracteres: lo muestra «Acerca de» (el icono de la
+    /// aplicación es otro, más fácil de distinguir en el Dock).
+    const PORTRAIT: &[u8] = include_bytes!("../../../assets/icons/retrato/lorca-512.png");
+
+    fn portrait() -> Option<muda::Icon> {
+        let image = image::load_from_memory_with_format(PORTRAIT, image::ImageFormat::Png)
+            .ok()?
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        muda::Icon::from_rgba(image.into_raw(), width, height).ok()
+    }
+
     /// Crea e instala la barra de menús. Debe llamarse en el hilo principal, después de
     /// que la aplicación haya arrancado (así sustituye al menú por defecto de winit).
     pub fn install() -> Result<NativeMenu, String> {
@@ -245,6 +257,7 @@ mod native {
             name: Some("Lorca".to_owned()),
             version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             comments: Some("Verde que te quiero verde.".to_owned()),
+            icon: portrait(),
             ..AboutMetadata::default()
         };
         let app = submenu(

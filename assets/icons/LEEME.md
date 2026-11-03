@@ -4,20 +4,29 @@ Copia esta carpeta en tu proyecto como `assets/icons/`.
 
 | Archivo | Uso |
 |---|---|
+| `lorca.icns` | Icono de la aplicación en macOS (bundle `.app` / `.dmg`) |
 | `lorca.ico` | Windows (ejecutable e instalador). Incluye 16, 24, 32, 48, 64, 128 y 256 px |
-| `lorca.icns` | macOS (bundle `.app` / `.dmg`). Con el margen de la plantilla de Apple |
 | `png/lorca-*.png` | Linux (AppImage, .deb) y el icono de la ventana en tiempo de ejecución |
-| `png/lorca-macos-1024.png` | Original 1024 px con margen macOS, por si regeneras el `.icns` |
-| `macos/Lorca.icon` | Origen del icono de macOS en formato de Icon Composer (capa `retrato.png` sobre fondo negro) |
-| `macos/generar-icns.sh` | Regenera `lorca.icns` desde `Lorca.icon` (necesita Xcode 26 o posterior) |
+| `macos/Lorca.icon` | Origen del icono (Icon Composer): degradado verde y dos capas, luna y líneas |
+| `macos/dibujar-capas.swift` | Dibuja las capas de `Lorca.icon` |
+| `macos/generar-icns.sh` | Genera `lorca.icns`, `lorca.ico` y `png/` desde `Lorca.icon` (Xcode 26 o posterior) |
+| `retrato/` | Retrato de Lorca hecho con caracteres: el README y «Acerca de» (no es el icono de la app) |
+
+El icono de la aplicación es una luna creciente (la del *Romancero gitano*) sobre verde
+(«Verde que te quiero verde») con líneas de texto y un cursor: se distingue a cualquier
+tamaño y dice que es un editor. Para cambiarlo: edita `dibujar-capas.swift` (o el degradado
+de `icon.json`) y ejecuta, desde `macos/`:
+
+```sh
+swift dibujar-capas.swift && sh generar-icns.sh
+```
 
 ## macOS 26 y posteriores
 
 macOS dibuja dentro de un cuadro claro los iconos `.icns` que no tienen su forma
-(«squircle»). Por eso `lorca.icns` no se hace a mano: `macos/generar-icns.sh` compila
-`Lorca.icon` con `actool`, pide al sistema que lo dibuje a 1024 px (ya con la forma y la
-sombra de Apple) y monta el `.icns` con todos los tamaños. Tras cambiar el retrato, vuelve a
-ejecutarlo.
+(«squircle»). Por eso los iconos no se hacen a mano: `generar-icns.sh` compila `Lorca.icon`
+con `actool`, pide al sistema que lo dibuje a 1024 px (ya con la forma y la sombra de
+Apple) y saca de ahí el `.icns`, el `.ico` y los PNG.
 
 ## 1. Icono de la ventana (iced)
 
@@ -75,9 +84,3 @@ icons = [
   "../../assets/icons/lorca.ico",
 ]
 ```
-
-## Nota sobre tamaños pequeños
-
-A 16 y 32 px el retrato se percibe como una mancha clara sobre negro. Si quieres más
-nitidez en la barra de tareas, sustituye `png/lorca-16.png` y `png/lorca-32.png`
-por una versión simplificada (por ejemplo, solo el tupé y un ojo) y regenera el `.ico`.

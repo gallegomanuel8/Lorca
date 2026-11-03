@@ -1,5 +1,6 @@
 #!/bin/sh
-# Regenera assets/icons/lorca.icns a partir de macos/Lorca.icon (formato de Icon Composer).
+# Regenera los iconos de la aplicación (lorca.icns, lorca.ico y png/) a partir de
+# macos/Lorca.icon (formato de Icon Composer). Sus capas salen de dibujar-capas.swift.
 #
 # Desde macOS 26 los iconos .icns que no tienen la forma de Apple se muestran dentro de un
 # cuadro claro. Este script compila Lorca.icon con actool (Xcode 26 o posterior), pide a
@@ -10,7 +11,8 @@ cd "$(dirname "$0")"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-xcrun actool Lorca.icon --compile "$tmp" --app-icon Lorca --platform macosx \
+# Rutas absolutas: el proceso auxiliar de actool puede seguir vivo con otra carpeta actual.
+xcrun actool "$PWD/Lorca.icon" --compile "$tmp" --app-icon Lorca --platform macosx \
     --target-device mac --minimum-deployment-target 11.0 \
     --output-partial-info-plist "$tmp/partial.plist" >/dev/null
 
@@ -32,7 +34,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-swiftc -O render-icon.swift -o "$tmp/render"
+swiftc -O "$PWD/render-icon.swift" -o "$tmp/render"
 "$tmp/render" "$app" "$tmp/master.png"
 
 set=$tmp/Lorca.iconset
@@ -43,4 +45,11 @@ for size in 16 32 128 256 512; do
     sips -z $double $double "$tmp/master.png" --out "$set/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$set" -o ../lorca.icns
-echo "Creado assets/icons/lorca.icns"
+# PNG para Windows, Linux y el icono de la ventana, y el .ico de Windows.
+for size in 16 24 32 48 64 128 256 512 1024; do
+    sips -z $size $size "$tmp/master.png" --out "../png/lorca-$size.png" >/dev/null
+done
+python3 crear-ico.py ../lorca.ico ../png/lorca-16.png ../png/lorca-24.png \
+    ../png/lorca-32.png ../png/lorca-48.png ../png/lorca-64.png ../png/lorca-128.png \
+    ../png/lorca-256.png
+echo "Creados assets/icons/lorca.icns, lorca.ico y png/"

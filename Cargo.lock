@@ -2395,6 +2395,7 @@ version = "0.1.4"
 dependencies = [
  "anyhow",
  "iced",
+ "image",
  "lorca-core",
  "lorca-formats",
  "lorca-lsp",
