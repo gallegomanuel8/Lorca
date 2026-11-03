@@ -21,7 +21,7 @@ use lorca_syntax::Highlights;
 use super::action::CompletionKey;
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
-use super::scrollbar::{Axis, SCROLLBAR_SIZE, Track};
+use super::scrollbar::{ARROW_DELAY, ARROW_REPEAT, Axis, Hit, SCROLLBAR_SIZE, Track};
 use super::view::{longest_line, max_scroll};
 use super::{ClickKind, DocView, EditorAction, Metrics, TEXT_PADDING, Viewport};
 
@@ -136,6 +136,9 @@ struct State {
     /// Arrastre de una barra de desplazamiento: eje y distancia del puntero al inicio del
     /// tirador.
     scroll_drag: Option<(Axis, f32)>,
+    /// Flecha de una barra mantenida pulsada: eje, sentido (hacia el final) y momento
+    /// del siguiente paso.
+    arrow_hold: Option<(Axis, bool, Instant)>,
 }
 
 impl Default for State {
@@ -155,6 +158,7 @@ impl Default for State {
             preedit: None,
             longest: None,
             scroll_drag: None,
+            arrow_hold: None,
         }
     }
 }
@@ -451,6 +455,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 state.window_focused = false;
                 state.dragging = false;
                 state.scroll_drag = None;
+                state.arrow_hold = None;
                 shell.request_redraw();
             }
             Event::Window(window::Event::RedrawRequested(now)) => {
@@ -473,6 +478,17 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                     let wait = BLINK_MILLIS - elapsed % BLINK_MILLIS;
                     let wait = u64::try_from(wait).unwrap_or(1);
                     shell.request_redraw_at(*now + Duration::from_millis(wait));
+                }
+                // Flecha mantenida pulsada: repite el paso a su ritmo.
+                if let Some((axis, forward, next)) = state.arrow_hold {
+                    let next = if *now >= next {
+                        self.publish(shell, arrow_step(axis, forward, &geometry));
+                        *now + ARROW_REPEAT
+                    } else {
+                        next
+                    };
+                    state.arrow_hold = Some((axis, forward, next));
+                    shell.request_redraw_at(next);
                 }
                 shell.request_input_method(&self.input_method(state, &geometry));
             }
@@ -563,18 +579,28 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 let Some(position) = cursor.position_over(geometry.bounds) else {
                     return;
                 };
-                // Barras de desplazamiento: el tirador se arrastra; un clic en la guía lo
-                // centra en ese punto y sigue arrastrando.
+                // Barras de desplazamiento: las flechas avanzan (y repiten mientras se
+                // mantienen pulsadas), el tirador se arrastra y un clic en la guía lo centra
+                // en ese punto y sigue arrastrando.
                 if let Some((axis, track)) = geometry.bar_at(position, self.view) {
                     let along = along(axis, position);
-                    let grab = if track.is_on_thumb(along) {
-                        along - track.thumb_start
-                    } else {
-                        let grab = track.thumb_length / 2.0;
-                        self.publish(shell, scroll_to(axis, track.scroll_at(along - grab)));
-                        grab
-                    };
-                    state.scroll_drag = Some((axis, grab));
+                    match track.hit(along) {
+                        hit @ (Hit::Back | Hit::Forward) => {
+                            let forward = hit == Hit::Forward;
+                            self.publish(shell, arrow_step(axis, forward, &geometry));
+                            let next = Instant::now() + ARROW_DELAY;
+                            state.arrow_hold = Some((axis, forward, next));
+                            shell.request_redraw_at(next);
+                        }
+                        Hit::Thumb => {
+                            state.scroll_drag = Some((axis, along - track.thumb_start));
+                        }
+                        Hit::Guide => {
+                            let grab = track.thumb_length / 2.0;
+                            self.publish(shell, scroll_to(axis, track.scroll_at(along - grab)));
+                            state.scroll_drag = Some((axis, grab));
+                        }
+                    }
                     shell.capture_event();
                     return;
                 }
@@ -640,6 +666,7 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.dragging = false;
                 state.scroll_drag = None;
+                state.arrow_hold = None;
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(geometry.bounds) =>
@@ -1285,6 +1312,71 @@ fn draw_bar(
         },
         Background::Color(colors.scrollbar),
     );
+
+    if track.arrow > 0.0 {
+        let half = track.arrow / 2.0;
+        let (back, forward) = match axis {
+            Axis::Vertical => (
+                Point::new(rect.x + rect.width / 2.0, track.start - half),
+                Point::new(rect.x + rect.width / 2.0, track.start + track.length + half),
+            ),
+            Axis::Horizontal => (
+                Point::new(track.start - half, rect.y + rect.height / 2.0),
+                Point::new(
+                    track.start + track.length + half,
+                    rect.y + rect.height / 2.0,
+                ),
+            ),
+        };
+        draw_arrow(renderer, axis, false, back, colors.line_number);
+        draw_arrow(renderer, axis, true, forward, colors.line_number);
+    }
+}
+
+/// Triángulo de una flecha centrado en `center`, hecho con tiras de 1 px (los quads de
+/// iced son rectángulos y así no depende de que la fuente tenga ▲▼◀▶).
+fn draw_arrow(renderer: &mut Renderer, axis: Axis, forward: bool, center: Point, color: Color) {
+    const ROWS: usize = 4;
+    let center = Point::new(center.x.round(), center.y.round());
+    for row in 0..ROWS {
+        // La punta es la tira más corta: arriba/izquierda si apunta hacia atrás.
+        let width = 2.0 * (row as f32 + 1.0);
+        let offset = if forward {
+            (ROWS - 1 - row) as f32
+        } else {
+            row as f32
+        } - ROWS as f32 / 2.0;
+        let bounds = match axis {
+            Axis::Vertical => Rectangle {
+                x: center.x - width / 2.0,
+                y: center.y + offset,
+                width,
+                height: 1.0,
+            },
+            Axis::Horizontal => Rectangle {
+                x: center.x + offset,
+                y: center.y - width / 2.0,
+                width: 1.0,
+                height: width,
+            },
+        };
+        fill(renderer, bounds, color);
+    }
+}
+
+/// Paso de una flecha: una línea en vertical, tres caracteres en horizontal.
+fn arrow_step(axis: Axis, forward: bool, geometry: &Geometry) -> EditorAction {
+    let sign = if forward { 1.0 } else { -1.0 };
+    match axis {
+        Axis::Vertical => EditorAction::Scroll {
+            dx: 0.0,
+            dy: sign * geometry.metrics.line_height,
+        },
+        Axis::Horizontal => EditorAction::Scroll {
+            dx: sign * geometry.cell * 3.0,
+            dy: 0.0,
+        },
+    }
 }
 
 fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {

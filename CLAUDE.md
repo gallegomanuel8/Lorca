@@ -128,6 +128,9 @@ mensaje en español.
     encima de los rectángulos. Arrastrar publica `EditorAction::ScrollTo` (absoluto, para
     que varios movimientos antes de redibujar no se acumulen). La línea más larga se cachea
     en el estado del widget por `EditorState::version()` (se recalcula en `layout`).
+    Flechas en los extremos (`Track::hit` → `Hit::{Back, Forward, Thumb, Guide}`): un paso
+    por clic y repetición mientras se mantienen (`arrow_hold` en el estado; el paso lo da
+    `RedrawRequested` con `request_redraw_at`). Se dibujan con tiras de 1 px.
   - `editor/keymap.rs`: teclas de edición que captura el widget. `shortcuts.rs`: atajos
     globales vía `keyboard::listen()` (solo reciben eventos **no capturados**, así que el
     widget no debe capturar Cmd+S, Cmd+Z, Ctrl+Tab…).
@@ -229,8 +232,8 @@ mensaje en español.
 ## Limitaciones conocidas
 
 - Columnas por carácter, no por grafema (emoji compuestos se recorren carácter a carácter).
-- Las barras de desplazamiento no tienen flechas ni desplazan por páginas al mantener
-  pulsado: un clic en la guía centra el tirador ahí. La horizontal mide caracteres, no
+- Las barras de desplazamiento no avanzan por páginas al mantener pulsada la guía: un clic
+  en la guía centra el tirador ahí. La horizontal mide caracteres, no
   columnas visuales (una línea con muchos tabuladores puede quedarse corta).
 - Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
   en Linux): se dibuja una con iced (`menu::bar`), sin teclas Alt ni paso de un menú a
