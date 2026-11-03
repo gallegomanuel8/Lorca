@@ -173,6 +173,11 @@ mensaje en español.
     coincidencias se cachean por (documento, revisión, patrón, opciones, ámbito) en
     `MatchCache`; `refresh_search` se llama al final de cada `update`. «Marcar» guarda la
     consulta por documento y se reevalúa en vivo. El widget recibe `Decorations`.
+  - Barra de búsqueda (`find::bar`): cuatro filas con columna de etiquetas (buscar,
+    reemplazar, modo y opciones, marcas); los campos miden lo mismo porque la zona de
+    botones tiene anchura fija (`ACTIONS_WIDTH`). El modo se elige con botones
+    (`mode_selector`). Las opciones se guardan en `[search]` de `config.toml`
+    (`SearchConfig`, `FindState::{apply_config, to_config}`, `remember_find_options`).
   - Foco: `Focus` (Editor/FindBar/GoTo). El editor ignora teclas ya capturadas
     (`shell.is_event_captured()`). Los atajos usan `event::listen_with` (también ven
     eventos capturados: Escape, F2, F3…).
@@ -191,6 +196,9 @@ mensaje en español.
     el clic derecho con su posición. Los elementos y acciones están en `panes.rs`
     (`menu_items`, `handle_context`). Textos de atajos por plataforma en
     `shortcut_labels.rs`.
+  - Pestañas: la barra usa el fondo del editor oscurecido (`tab_bar_color`), la activa
+    toma el del editor con una raya de color arriba y el nombre en seminegrita; botón
+    «+» tras la última.
   - Cerrar varias pestañas usa `close_queue` con `Then::CloseAndContinue`.
   - Fase 4: `ViewOptions` (espacios, finales de línea, guías) llega al widget desde
     `Config`; las marcas se dibujan con quads (exactas en la rejilla) y las etiquetas

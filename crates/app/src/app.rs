@@ -1464,18 +1464,29 @@ impl Lorca {
             )
             .into(),
         );
-        let bar = scrollable(row(tabs).spacing(1).align_y(Alignment::Center)).direction(
+        let bar = scrollable(row(tabs).spacing(2).align_y(Alignment::End)).direction(
             scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::new().width(3).scroller_width(3),
             ),
         );
-        container(bar)
-            .width(Length::Fill)
-            .style(|theme: &Theme| {
-                container::Style::default()
-                    .background(theme.extended_palette().background.weakest.color)
+        // La barra es más oscura (o más clara, en temas claros) que el editor; la pestaña
+        // activa toma el color del editor para que parezca unida a él.
+        let bar = container(bar)
+            .padding(iced::Padding {
+                top: 4.0,
+                left: 4.0,
+                ..iced::Padding::ZERO
             })
-            .into()
+            .width(Length::Fill)
+            .style(|theme: &Theme| container::Style::default().background(tab_bar_color(theme)));
+        column![
+            bar,
+            container(space().height(Length::Fixed(1.0)))
+                .width(Length::Fill)
+                .style(|theme: &Theme| container::Style::default()
+                    .background(theme.extended_palette().background.strong.color)),
+        ]
+        .into()
     }
 
     fn tab<'a>(&self, document: &'a Document) -> Element<'a, Message> {
@@ -1483,8 +1494,16 @@ impl Lorca {
         let is_active = self.workspace.active_id() == Some(id);
         let is_selected = self.workspace.is_selected(id);
 
-        let mut content: Vec<Element<'a, Message>> =
-            vec![text(document.display_name()).size(13).into()];
+        let name = text(document.display_name()).size(13);
+        let name = if is_active {
+            name.font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::default()
+            })
+        } else {
+            name
+        };
+        let mut content: Vec<Element<'a, Message>> = vec![name.into()];
         if document.is_modified() {
             content.push(text("●").size(10).into());
         }
@@ -1498,10 +1517,21 @@ impl Lorca {
 
         let is_hovered = self.hovered_tab == Some(id);
         let is_dragged = self.dragging_tab == Some(id);
-        // Contenedor (no botón) para recibir la pulsación al momento y poder arrastrar.
-        let tab = container(row(content).spacing(6).align_y(Alignment::Center))
-            .padding([5, 10])
+        // Raya de color arriba de la pestaña activa.
+        let accent = container(space().height(Length::Fixed(2.0)))
+            .width(Length::Fill)
             .style(move |theme: &Theme| {
+                let color = if is_active {
+                    theme.extended_palette().primary.base.color
+                } else {
+                    iced::Color::TRANSPARENT
+                };
+                container::Style::default().background(color)
+            });
+        let label = container(row(content).spacing(6).align_y(Alignment::Center)).padding([5, 10]);
+        // Contenedor (no botón) para recibir la pulsación al momento y poder arrastrar.
+        let tab =
+            container(column![accent, label].width(Length::Shrink)).style(move |theme: &Theme| {
                 tab_style(theme, is_active, is_selected, is_hovered || is_dragged)
             });
         let tab = mouse_area(tab)
@@ -1653,19 +1683,37 @@ fn tab_style(
     } else if is_active {
         (palette.background.base.color, palette.background.base.text)
     } else if is_hovered {
-        (
-            palette.background.weak.color,
-            palette.background.strong.text,
-        )
+        (palette.background.weak.color, palette.background.base.text)
     } else {
         (
-            palette.background.weakest.color,
+            palette.background.weaker.color,
             palette.background.strong.text,
         )
     };
     container::Style::default()
         .background(background)
         .color(text_color)
+        .border(iced::Border {
+            radius: iced::border::Radius::default().top(5.0),
+            ..iced::Border::default()
+        })
+}
+
+/// Fondo de la barra de pestañas: el del editor oscurecido (o aclarado en temas claros)
+/// para que las pestañas destaquen sobre ella.
+fn tab_bar_color(theme: &Theme) -> iced::Color {
+    let base = theme.extended_palette().background.base.color;
+    let factor = if theme.extended_palette().is_dark {
+        0.72
+    } else {
+        0.9
+    };
+    iced::Color {
+        r: base.r * factor,
+        g: base.g * factor,
+        b: base.b * factor,
+        a: 1.0,
+    }
 }
 
 /// Flechas arriba/abajo mientras la paleta está abierta (el campo de texto no las usa).
