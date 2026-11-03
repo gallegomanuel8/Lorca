@@ -1,0 +1,40 @@
+# La bola negra (1936, inacabada): en un casino burgués, una votación con bolas blancas
+# y negras excluye al protagonista. Ébano de la bola, marfil, tapete verde, latón y vino.
+name = "La bola negra (oscuro)"
+appearance = "dark"
+description = "Bola de ébano sobre tapete verde, latón y vino"
+
+[palette]
+background = "#121212"
+text = "#e8e2d4"
+primary = "#3f8f6b"
+success = "#6fae7f"
+warning = "#d4a84a"
+danger = "#c0474a"
+
+[editor]
+gutter = "#0e0e0e"
+current_line = "#1b1d1b"
+selection = "#2f6b4f88"
+cursor = "#f2ead8"
+line_number = "#55534d"
+
+[syntax]
+keyword = { color = "#d4a84a", bold = true }
+function = "#f2ead8"
+type = "#6fae7f"
+string = "#a9c7a0"
+escape = "#e07a6a"
+number = "#e07a6a"
+constant = "#e07a6a"
+comment = { color = "#6b675e", italic = true }
+property = "#c9b48a"
+variable = "#ddd5c4"
+operator = "#b8a98a"
+tag = "#d4a84a"
+attribute = "#6fae7f"
+heading = { color = "#d4a84a", bold = true }
+emphasis = { color = "#c9b48a", italic = true }
+strong = { color = "#f2ead8", bold = true }
+link = "#6fae7f"
+code = "#a9c7a0"

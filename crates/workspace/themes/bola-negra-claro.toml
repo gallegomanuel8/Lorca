@@ -1,0 +1,40 @@
+# La bola negra (1936, inacabada), versión clara: la bola de marfil del voto, tinta de
+# acta, tapete verde, latón y vino.
+name = "La bola negra (claro)"
+appearance = "light"
+description = "Bola de marfil, tinta negra, tapete verde y vino"
+
+[palette]
+background = "#f8f5ec"
+text = "#1a1a1a"
+primary = "#2f6b4f"
+success = "#3d7a55"
+warning = "#a87a1c"
+danger = "#9e2f33"
+
+[editor]
+gutter = "#f0ebde"
+current_line = "#efeadc"
+selection = "#2f6b4f33"
+cursor = "#111111"
+line_number = "#a39d8e"
+
+[syntax]
+keyword = { color = "#111111", bold = true }
+function = "#2f6b4f"
+type = "#8a6416"
+string = "#3d7a55"
+escape = "#9e2f33"
+number = "#9e2f33"
+constant = "#9e2f33"
+comment = { color = "#9a9486", italic = true }
+property = "#6e5a2e"
+variable = "#2b2b2b"
+operator = "#5a564c"
+tag = { color = "#111111", bold = true }
+attribute = "#8a6416"
+heading = { color = "#111111", bold = true }
+emphasis = { color = "#6e5a2e", italic = true }
+strong = { color = "#9e2f33", bold = true }
+link = "#2f6b4f"
+code = "#3d7a55"
