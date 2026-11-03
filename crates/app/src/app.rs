@@ -1440,11 +1440,30 @@ impl Lorca {
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {
-        let tabs: Vec<Element<'_, Message>> =
+        let mut tabs: Vec<Element<'_, Message>> =
             self.workspace.documents().map(|d| self.tab(d)).collect();
-        let bar = scrollable(row(tabs).spacing(1)).direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::new().width(3).scroller_width(3),
-        ));
+        // Botón de nueva pestaña justo a la derecha de la última.
+        let new_tab = button(text("+").size(16))
+            .padding([2, 10])
+            .style(button::text)
+            .on_press(Message::NewDocument);
+        tabs.push(
+            tooltip(
+                new_tab,
+                container(
+                    text(format!("Nueva pestaña ({})", crate::shortcut_labels::NEW)).size(12),
+                )
+                .padding(6)
+                .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            )
+            .into(),
+        );
+        let bar = scrollable(row(tabs).spacing(1).align_y(Alignment::Center)).direction(
+            scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new().width(3).scroller_width(3),
+            ),
+        );
         container(bar)
             .width(Length::Fill)
             .style(|theme: &Theme| {
