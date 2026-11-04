@@ -215,7 +215,6 @@ impl Document {
             .text_title()
             .map(|title| {
                 title
-                    .trim_end_matches('…')
                     .chars()
                     .map(|c| match c {
                         '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
@@ -242,7 +241,8 @@ impl Document {
     }
 
     /// Primera línea con texto (sin las almohadillas de un título de Markdown y con los
-    /// espacios seguidos reducidos a uno), cortada a [`TITLE_CHARS`] caracteres.
+    /// espacios seguidos reducidos a uno), cortada a [`TITLE_CHARS`] caracteres sin
+    /// puntos suspensivos.
     fn text_title(&self) -> Option<String> {
         /// Líneas que se miran como mucho buscando una con texto.
         const LOOKAHEAD: usize = 50;
@@ -259,13 +259,8 @@ impl Document {
         if words.is_empty() {
             return None;
         }
-        if words.chars().count() <= TITLE_CHARS {
-            return Some(words);
-        }
-        let mut title: String = words.chars().take(TITLE_CHARS).collect();
-        title.truncate(title.trim_end().len());
-        title.push('…');
-        Some(title)
+        let title: String = words.chars().take(TITLE_CHARS).collect();
+        Some(title.trim_end().to_owned())
     }
 
     /// `true` si el contenido difiere de lo que hay en disco (o nunca se ha guardado algo).
@@ -331,12 +326,12 @@ mod tests {
         doc.editor
             .insert_text("\n   \n## Lista   de la\tcompra\n- pan")
             .unwrap();
-        assert_eq!(doc.display_name(), "Lista de la com…");
+        assert_eq!(doc.display_name(), "Lista de la com");
         doc.editor.select_all();
         doc.editor
             .insert_text("Verde que te quiero verde. Verde viento. Verdes ramas.")
             .unwrap();
-        assert_eq!(doc.display_name(), "Verde que te qu…");
+        assert_eq!(doc.display_name(), "Verde que te qu");
         doc.editor.select_all();
         doc.editor.insert_text("¿Notas: a/b?").unwrap();
         assert_eq!(doc.suggested_file_name(), "¿Notas a b.txt");
