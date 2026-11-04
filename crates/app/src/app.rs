@@ -1407,6 +1407,7 @@ impl Lorca {
             };
             layout = layout.push(menu::bar(open));
         }
+        layout = layout.push(self.format_bar());
         layout = layout.push(self.tab_bar());
         if let Some(input) = &self.goto {
             let lines = self
@@ -1473,6 +1474,93 @@ impl Lorca {
             );
         }
         base
+    }
+
+    /// Barra de formato (negrita, cursiva, listas) encima de las pestañas. Siempre está,
+    /// para que la ventana no cambie al pasar de una pestaña a otra, pero sus botones solo
+    /// funcionan en documentos de texto y Markdown.
+    fn format_bar(&self) -> Element<'_, Message> {
+        use lorca_formats::{Inline, ListKind};
+        let enabled = self
+            .workspace
+            .active()
+            .is_some_and(|document| is_prose(document.language()));
+        let tool = |label: Element<'static, Message>, tip: String, action: ContextAction| {
+            let button = button(label)
+                .padding([2, 9])
+                .style(button::text)
+                .on_press_maybe(enabled.then_some(Message::Context(action)));
+            tooltip(
+                button,
+                container(text(tip).size(12))
+                    .padding(6)
+                    .style(container::rounded_box),
+                tooltip::Position::Bottom,
+            )
+        };
+        let font = |weight, style| iced::Font {
+            weight,
+            style,
+            ..iced::Font::default()
+        };
+        use iced::font::{Style, Weight};
+        let separator = || {
+            container(
+                space()
+                    .width(Length::Fixed(1.0))
+                    .height(Length::Fixed(16.0)),
+            )
+            .style(|theme: &Theme| {
+                container::Style::default()
+                    .background(theme.extended_palette().background.strong.color)
+            })
+        };
+        let tools = row![
+            tool(
+                text("B")
+                    .size(14)
+                    .font(font(Weight::Bold, Style::Normal))
+                    .into(),
+                format!("Negrita ({})", crate::shortcut_labels::BOLD),
+                ContextAction::Inline(Inline::Bold),
+            ),
+            tool(
+                text("I")
+                    .size(14)
+                    .font(font(Weight::Normal, Style::Italic))
+                    .into(),
+                format!("Cursiva ({})", crate::shortcut_labels::ITALIC),
+                ContextAction::Inline(Inline::Italic),
+            ),
+            separator(),
+            tool(
+                text("• Lista").size(13).into(),
+                format!("Lista con viñetas ({})", crate::shortcut_labels::BULLETS),
+                ContextAction::List(ListKind::Bullet),
+            ),
+            tool(
+                text("1. Lista").size(13).into(),
+                format!("Lista numerada ({})", crate::shortcut_labels::NUMBERED),
+                ContextAction::List(ListKind::Numbered),
+            ),
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center);
+        let mut content = row![tools].align_y(Alignment::Center);
+        if !enabled {
+            content = content.push(space().width(Length::Fixed(10.0))).push(
+                text("El formato es para texto y Markdown")
+                    .size(12)
+                    .style(|theme: &Theme| text::Style {
+                        color: Some(theme.extended_palette().background.strong.color),
+                    }),
+            );
+        }
+        container(content)
+            .padding([2, 6])
+            .width(Length::Fill)
+            .style(|theme: &Theme| container::Style::default().background(tab_bar_color(theme)))
+            .into()
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {

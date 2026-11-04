@@ -83,7 +83,9 @@ mensaje en español.
   la sangría) devuelven `MarkupEdit` (sustituciones + selección). En la app,
   `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); un documento de
   texto plano pasa a Markdown con `Document::adopt_markdown`. ⌘I es cursiva en texto e
-  información del LSP en código (`Message::ItalicOrHover`). El ajuste de línea se aplica
+  información del LSP en código (`Message::ItalicOrHover`). Barra de formato encima de las
+  pestañas (`format_bar`), siempre visible y con los botones desactivados fuera de texto y
+  Markdown. El ajuste de línea se aplica
   también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
   (sqlformat), `change_case`, `markdown_to_html` (pulldown-cmark; para exportar). La vista
