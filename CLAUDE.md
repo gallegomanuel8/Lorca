@@ -101,7 +101,7 @@ mensaje en español.
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, número «Sin título N», formato, lenguaje, `DiskStamp`). Sin
   ruta, `display_name` es el comienzo del texto (primera línea con contenido, sin `#`,
-  hasta 30 caracteres, como el Bloc de notas) y `suggested_file_name` lo propone al
+  hasta 15 caracteres, como el Bloc de notas) y `suggested_file_name` lo propone al
   guardar (sin `/\:*?"<>|`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
     `DiskStamp` (mtime + tamaño) para detectar cambios en disco.

@@ -8,7 +8,7 @@ use lorca_syntax::Language;
 use crate::DiskStamp;
 
 /// Caracteres como máximo del título de un documento sin título tomado de su texto.
-const TITLE_CHARS: usize = 30;
+const TITLE_CHARS: usize = 15;
 
 /// Identificador estable de un documento mientras está abierto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -331,12 +331,12 @@ mod tests {
         doc.editor
             .insert_text("\n   \n## Lista   de la\tcompra\n- pan")
             .unwrap();
-        assert_eq!(doc.display_name(), "Lista de la compra");
+        assert_eq!(doc.display_name(), "Lista de la com…");
         doc.editor.select_all();
         doc.editor
             .insert_text("Verde que te quiero verde. Verde viento. Verdes ramas.")
             .unwrap();
-        assert_eq!(doc.display_name(), "Verde que te quiero verde. Ver…");
+        assert_eq!(doc.display_name(), "Verde que te qu…");
         doc.editor.select_all();
         doc.editor.insert_text("¿Notas: a/b?").unwrap();
         assert_eq!(doc.suggested_file_name(), "¿Notas a b.txt");
