@@ -8,7 +8,7 @@ use iced::widget::{
 };
 use iced::{Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme, Vector};
 use lorca_core::{LineEnding, TextEncoding};
-use lorca_formats::Case;
+use lorca_formats::{Case, Inline, ListKind};
 use lorca_workspace::DocumentId;
 
 use crate::app::Message;
@@ -77,6 +77,10 @@ pub enum ContextAction {
     FormatDocument,
     MinifyJson,
     ChangeCase(Case),
+    /// Negrita o cursiva con marcas de Markdown.
+    Inline(Inline),
+    /// Lista con viñetas o numerada.
+    List(ListKind),
     TogglePreview,
     ExportPdf(DocumentId),
     SetThemeMode(lorca_workspace::ThemeMode),

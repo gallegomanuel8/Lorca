@@ -78,6 +78,13 @@ mensaje en español.
     vecinos (el crate `regex` no tiene lookaround).
   - `replacement()` / `replace_all()` expanden `$1`, `${n}` y `\1` (`regex_template`).
   - `next_match` / `previous_match` / `match_index` trabajan sobre rangos ordenados.
+- `formats` (formato de texto): `toggle_inline` (negrita `**`, cursiva `*`; los cuenta
+  por rachas de `*` para no confundirlos) y `toggle_list` (`- ` / `1. `, renumera, respeta
+  la sangría) devuelven `MarkupEdit` (sustituciones + selección). En la app,
+  `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); un documento de
+  texto plano pasa a Markdown con `Document::adopt_markdown`. ⌘I es cursiva en texto e
+  información del LSP en código (`Message::ItalicOrHover`). El ajuste de línea se aplica
+  también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
   (sqlformat), `change_case`, `markdown_to_html` (pulldown-cmark; para exportar). La vista
   previa en pantalla usa el widget `markdown` de iced (que también usa pulldown-cmark).

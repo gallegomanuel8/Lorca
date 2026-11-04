@@ -66,6 +66,11 @@ pub const BAR: &[BarMenu] = &[
             Item("format", "Formatear documento", keys::FORMAT),
             Item("upper", "MAYÚSCULAS", keys::UPPER),
             Item("lower", "minúsculas", keys::LOWER),
+            Separator,
+            Item("bold", "Negrita", keys::BOLD),
+            Item("italic", "Cursiva", keys::ITALIC),
+            Item("bullets", "Lista con viñetas", keys::BULLETS),
+            Item("numbered", "Lista numerada", keys::NUMBERED),
         ],
     },
     BarMenu {
@@ -110,7 +115,7 @@ pub const BAR: &[BarMenu] = &[
             Item("whitespace", "Espacios y tabuladores", ""),
             Item("line_endings", "Finales de línea", ""),
             Item("guides", "Guías de indentación", ""),
-            Item("wrap", "Ajuste de línea en texto plano", ""),
+            Item("wrap", "Ajuste de línea en texto y Markdown", ""),
             Separator,
             Item("zoom_in", "Aumentar letra", keys::ZOOM_IN),
             Item("zoom_out", "Reducir letra", keys::ZOOM_OUT),
@@ -152,7 +157,7 @@ pub fn bar<'a>(open: Option<usize>) -> Element<'a, Message> {
 
 /// Mensaje de la aplicación para el identificador de una opción de menú.
 pub fn message_for(id: &str) -> Option<Message> {
-    use lorca_formats::Case;
+    use lorca_formats::{Case, Inline, ListKind};
     let message = match id {
         "quit" => Message::CloseRequested,
         "new" => Message::NewDocument,
@@ -170,6 +175,10 @@ pub fn message_for(id: &str) -> Option<Message> {
         "format" => Message::Context(ContextAction::FormatDocument),
         "upper" => Message::Context(ContextAction::ChangeCase(Case::Upper)),
         "lower" => Message::Context(ContextAction::ChangeCase(Case::Lower)),
+        "bold" => Message::Context(ContextAction::Inline(Inline::Bold)),
+        "italic" => Message::Context(ContextAction::Inline(Inline::Italic)),
+        "bullets" => Message::Context(ContextAction::List(ListKind::Bullet)),
+        "numbered" => Message::Context(ContextAction::List(ListKind::Numbered)),
         "find" => Message::OpenFind,
         "replace" => Message::OpenReplace,
         "find_folder" => Message::FindInFolder,
@@ -305,6 +314,12 @@ mod native {
                 &item("format", "Formatear documento", Some("Alt+CmdOrCtrl+L")),
                 &item("upper", "MAYÚSCULAS", Some("CmdOrCtrl+Shift+U")),
                 &item("lower", "minúsculas", Some("CmdOrCtrl+U")),
+                &separator(),
+                // Sin atajo en el menú: ⌘I es cursiva solo en texto (en código, información).
+                &item("bold", "Negrita", None),
+                &item("italic", "Cursiva", None),
+                &item("bullets", "Lista con viñetas", None),
+                &item("numbered", "Lista numerada", None),
             ],
         )?;
         let search = submenu(
@@ -357,7 +372,7 @@ mod native {
                 &item("whitespace", "Mostrar espacios y tabuladores", None),
                 &item("line_endings", "Mostrar finales de línea", None),
                 &item("guides", "Guías de indentación", None),
-                &item("wrap", "Ajuste de línea en texto plano", None),
+                &item("wrap", "Ajuste de línea en texto y Markdown", None),
                 &separator(),
                 &item("zoom_in", "Aumentar letra", None),
                 &item("zoom_out", "Reducir letra", None),
@@ -446,6 +461,10 @@ mod tests {
             "format",
             "upper",
             "lower",
+            "bold",
+            "italic",
+            "bullets",
+            "numbered",
             "find",
             "replace",
             "find_folder",

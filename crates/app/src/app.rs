@@ -166,6 +166,8 @@ pub enum Message {
     CompletionPick(usize),
     TriggerCompletion,
     ShowHover,
+    /// ⌘I: cursiva o información según el documento.
+    ItalicOrHover,
     GoToDefinition,
     /// Siguiente (`true`) o anterior problema del documento.
     NextProblem(bool),
@@ -927,6 +929,18 @@ impl Lorca {
                 self.request_completion(None, true);
                 Task::none()
             }
+            // ⌘I: cursiva en texto y Markdown; información del servidor de lenguaje en código.
+            Message::ItalicOrHover => {
+                let is_text = self
+                    .workspace
+                    .active()
+                    .is_some_and(|d| is_prose(d.language()));
+                if is_text {
+                    self.handle_context(ContextAction::Inline(lorca_formats::Inline::Italic))
+                } else {
+                    self.update(Message::ShowHover)
+                }
+            }
             Message::ShowHover => {
                 self.context_menu = None;
                 self.request_hover();
@@ -1103,7 +1117,7 @@ impl Lorca {
             let Some(document) = self.workspace.document(*id) else {
                 continue;
             };
-            let enabled = self.config.wrap_plain_text && document.language() == Language::PlainText;
+            let enabled = self.config.wrap_plain_text && is_prose(document.language());
             let changed = view.wrap.enabled != enabled;
             view.wrap.enabled = enabled;
             if changed {
@@ -1754,6 +1768,12 @@ fn palette_keys(
 }
 
 /// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
+/// Documentos de texto (no de código): admiten formato con marcas de Markdown y ajuste
+/// de línea.
+pub(crate) fn is_prose(language: Language) -> bool {
+    matches!(language, Language::PlainText | Language::Markdown)
+}
+
 fn affects_session(message: &Message) -> bool {
     !matches!(
         message,

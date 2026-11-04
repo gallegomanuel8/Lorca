@@ -8,7 +8,7 @@ use iced::event::{self, Event};
 use iced::keyboard::{self, Key, Modifiers, key::Code, key::Named, key::Physical};
 use iced::window;
 
-use lorca_formats::Case;
+use lorca_formats::{Case, Inline, ListKind};
 
 use crate::app::{BookmarkAction, Message};
 use crate::context_menu::ContextAction;
@@ -74,6 +74,19 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
     if modifiers.command() && !modifiers.alt() && physical_key == Physical::Code(Code::Backslash) {
         return Some(Message::ToggleSplit);
     }
+    // Listas: ⇧⌘8 viñetas y ⇧⌘7 numerada (como en Pages o Google Docs). Por la tecla
+    // física: con Mayús el carácter cambia según el teclado.
+    if modifiers.command() && shift && !modifiers.alt() {
+        match physical_key {
+            Physical::Code(Code::Digit8) => {
+                return Some(Message::Context(ContextAction::List(ListKind::Bullet)));
+            }
+            Physical::Code(Code::Digit7) => {
+                return Some(Message::Context(ContextAction::List(ListKind::Numbered)));
+            }
+            _ => {}
+        }
+    }
     // Tamaño de letra. «+» se acepta con o sin Mayús (en inglés está en la tecla «=»).
     if modifiers.command()
         && !modifiers.alt()
@@ -119,7 +132,8 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         'u' if shift => Some(Message::Context(ContextAction::ChangeCase(Case::Upper))),
         'u' => Some(Message::Context(ContextAction::ChangeCase(Case::Lower))),
         'v' if shift => Some(Message::Context(ContextAction::TogglePreview)),
-        'i' if !shift => Some(Message::ShowHover),
+        'i' if !shift => Some(Message::ItalicOrHover),
+        'b' if !shift => Some(Message::Context(ContextAction::Inline(Inline::Bold))),
         'g' if is_mac && shift => Some(Message::FindPrevious),
         'g' if is_mac => Some(Message::FindNext),
         _ => None,
@@ -136,6 +150,24 @@ mod tests {
 
     fn named(n: Named, modifiers: Modifiers) -> Option<Message> {
         key_shortcut(&Key::Named(n), Physical::Code(Code::F1), modifiers)
+    }
+
+    #[test]
+    fn formatting_shortcuts() {
+        let cmd = Modifiers::COMMAND;
+        assert!(matches!(
+            char_key("b", Code::KeyB, cmd),
+            Some(Message::Context(ContextAction::Inline(Inline::Bold)))
+        ));
+        // Con Mayús la tecla 8 da otro carácter («(» en español): cuenta la tecla física.
+        assert!(matches!(
+            char_key("(", Code::Digit8, cmd | Modifiers::SHIFT),
+            Some(Message::Context(ContextAction::List(ListKind::Bullet)))
+        ));
+        assert!(matches!(
+            char_key("/", Code::Digit7, cmd | Modifiers::SHIFT),
+            Some(Message::Context(ContextAction::List(ListKind::Numbered)))
+        ));
     }
 
     #[test]
@@ -216,7 +248,7 @@ mod tests {
         assert!(named(Named::Space, Modifiers::empty()).is_none());
         assert!(matches!(
             char_key("i", Code::KeyI, Modifiers::COMMAND),
-            Some(Message::ShowHover)
+            Some(Message::ItalicOrHover)
         ));
     }
 

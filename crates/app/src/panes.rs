@@ -10,7 +10,10 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Point, Task, Theme};
 use lorca_core::{Buffer, LineEnding, Position, Selection, TextEncoding, TextFormat};
-use lorca_formats::{Case, change_case, format_json, format_sql, minify_json};
+use lorca_formats::{
+    Case, Inline, ListKind, MarkupEdit, change_case, format_json, format_sql, minify_json,
+    toggle_inline, toggle_list,
+};
 use lorca_search::match_index;
 use lorca_syntax::Language;
 use lorca_workspace::DocumentId;
@@ -280,6 +283,26 @@ impl Lorca {
                 context(ContextAction::ChangeCase(Case::Title)),
             ),
             Command::new(
+                "Formato: Negrita",
+                keys::BOLD,
+                context(ContextAction::Inline(Inline::Bold)),
+            ),
+            Command::new(
+                "Formato: Cursiva",
+                keys::ITALIC,
+                context(ContextAction::Inline(Inline::Italic)),
+            ),
+            Command::new(
+                "Formato: Lista con viñetas",
+                keys::BULLETS,
+                context(ContextAction::List(ListKind::Bullet)),
+            ),
+            Command::new(
+                "Formato: Lista numerada",
+                keys::NUMBERED,
+                context(ContextAction::List(ListKind::Numbered)),
+            ),
+            Command::new(
                 "Editar: Formatear documento (JSON/SQL)",
                 keys::FORMAT,
                 context(ContextAction::FormatDocument),
@@ -338,7 +361,7 @@ impl Lorca {
                 context(ContextAction::ToggleIndentGuides),
             ),
             Command::new(
-                "Ver: Ajuste de línea en texto plano",
+                "Ver: Ajuste de línea en texto y Markdown",
                 "",
                 context(ContextAction::ToggleWordWrap),
             ),
@@ -550,6 +573,31 @@ impl Lorca {
                     ),
                     MenuItem::Separator,
                 ]);
+                if crate::app::is_prose(language) {
+                    items.extend([
+                        MenuItem::new(
+                            "Negrita",
+                            keys::BOLD,
+                            Some(ContextAction::Inline(Inline::Bold)),
+                        ),
+                        MenuItem::new(
+                            "Cursiva",
+                            keys::ITALIC,
+                            Some(ContextAction::Inline(Inline::Italic)),
+                        ),
+                        MenuItem::new(
+                            "Lista con viñetas",
+                            keys::BULLETS,
+                            Some(ContextAction::List(ListKind::Bullet)),
+                        ),
+                        MenuItem::new(
+                            "Lista numerada",
+                            keys::NUMBERED,
+                            Some(ContextAction::List(ListKind::Numbered)),
+                        ),
+                        MenuItem::Separator,
+                    ]);
+                }
                 let format_label = match language {
                     Language::Json => "Formatear JSON",
                     Language::Sql => "Formatear SQL",
@@ -684,7 +732,7 @@ impl Lorca {
                     Some(ContextAction::ToggleIndentGuides),
                 ),
                 MenuItem::check(
-                    "Ajuste de línea en texto plano",
+                    "Ajuste de línea en texto y Markdown",
                     self.config.wrap_plain_text,
                     Some(ContextAction::ToggleWordWrap),
                 ),
@@ -995,6 +1043,14 @@ impl Lorca {
                 self.change_selection_case(case);
                 Task::none()
             }
+            ContextAction::Inline(style) => {
+                self.apply_markup(|text, selection| toggle_inline(text, selection, style));
+                Task::none()
+            }
+            ContextAction::List(kind) => {
+                self.apply_markup(|text, selection| toggle_list(text, selection, kind));
+                Task::none()
+            }
             ContextAction::TogglePreview => {
                 self.toggle_preview();
                 Task::none()
@@ -1052,6 +1108,34 @@ impl Lorca {
     }
 
     /// Cambia mayúsculas/minúsculas de la selección y la mantiene seleccionada.
+    /// Negrita, cursiva o listas con marcas de Markdown en el documento activo. Solo en
+    /// texto y Markdown; un documento de texto plano pasa a tratarse como Markdown para que
+    /// se vea el formato.
+    fn apply_markup(&mut self, markup: impl FnOnce(&str, std::ops::Range<usize>) -> MarkupEdit) {
+        let Some(document) = self.workspace.active_mut() else {
+            return;
+        };
+        if !crate::app::is_prose(document.language()) {
+            self.show_info(
+                "El formato (negrita, cursiva, listas) es para texto y Markdown".to_owned(),
+            );
+            return;
+        }
+        let id = document.id();
+        let edit = markup(&document.editor.text(), document.editor.selection().range());
+        if let Err(error) = document.editor.replace_ranges(&edit.replacements) {
+            self.show_error(error.to_string());
+            return;
+        }
+        document
+            .editor
+            .set_selection(Selection::new(edit.selection.start, edit.selection.end));
+        document.adopt_markdown();
+        let view = self.views.entry(id).or_default();
+        let viewport = view.viewport;
+        view.reveal_cursor(&document.editor, viewport);
+    }
+
     fn change_selection_case(&mut self, case: Case) {
         let Some(document) = self.workspace.active_mut() else {
             return;

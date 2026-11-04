@@ -34,7 +34,9 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 ### Edición
 
 - **Pestañas** con indicador ● de cambios, reordenables arrastrando; selección de varias
-  con ⌘/Ctrl+clic para cerrarlas, guardarlas o verlas juntas.
+  con ⌘/Ctrl+clic para cerrarlas, guardarlas o verlas juntas. Las que no se han guardado
+  llevan el comienzo de su texto, como en el Bloc de notas.
+- **Ajuste de línea** en texto y Markdown: las líneas largas se adaptan a la ventana.
 - **Pantalla dividida** de 2 a 4 documentos lado a lado (`⌘\`), cada uno con su cursor.
 - **Multicursor**: ⌥+clic, ⌘D para la siguiente aparición, ⌥⌘↑/↓ en columna.
 - **Deshacer por transacciones** (una palabra se deshace de una vez), números de línea,
@@ -47,8 +49,11 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 
 - **Resaltado** con tree-sitter para Rust, Python, JavaScript, TypeScript/TSX, JSON,
   YAML, TOML, HTML, CSS, Bash, SQL y Markdown (incluidos los bloques de código).
-- **Detección** por extensión, nombre de archivo y shebang; selector manual en la barra
-  de estado.
+- **Detección** por extensión, nombre de archivo y shebang (y por el contenido al pegar
+  en un documento sin lenguaje); selector manual en la barra de estado.
+- **Negrita, cursiva y listas** (⌘B, ⌘I, ⇧⌘8, ⇧⌘7) con marcas de Markdown en los
+  documentos de texto: el archivo sigue siendo texto y el editor, la vista previa y el PDF
+  muestran el formato.
 - **Formatear** JSON y SQL (⌥⌘L), minificar JSON, MAYÚSCULAS / minúsculas / Tipo Título.
 - **Vista previa de Markdown** en vivo junto al editor (⇧⌘V) y **exportación a PDF**.
 
