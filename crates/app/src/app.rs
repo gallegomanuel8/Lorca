@@ -1493,18 +1493,22 @@ impl Lorca {
         base
     }
 
-    /// Barra de formato (negrita, cursiva, listas) encima de las pestañas. Siempre está,
-    /// para que la ventana no cambie al pasar de una pestaña a otra, pero sus botones solo
-    /// funcionan en documentos de texto y Markdown.
+    /// Barra de formato encima de las pestañas, con las opciones del Bloc de notas de
+    /// Windows 11: encabezado, listas, negrita, cursiva, tachado, vínculo y borrar formato.
+    /// Está siempre, para que la ventana no cambie al pasar de una pestaña a otra, pero
+    /// solo actúa en documentos de texto y Markdown.
     fn format_bar(&self) -> Element<'_, Message> {
+        use iced::font::{Style, Weight};
+        use iced::widget::{rich_text, span};
         use lorca_formats::{Inline, ListKind};
-        let enabled = self
+        let active = self
             .workspace
             .active()
-            .is_some_and(|document| is_prose(document.language()));
+            .filter(|document| is_prose(document.language()));
+        let enabled = active.is_some();
         let tool = |label: Element<'static, Message>, tip: String, action: ContextAction| {
             let button = button(label)
-                .padding([2, 9])
+                .padding([2, 8])
                 .style(button::text)
                 .on_press_maybe(enabled.then_some(Message::Context(action)));
             tooltip(
@@ -1520,7 +1524,6 @@ impl Lorca {
             style,
             ..iced::Font::default()
         };
-        use iced::font::{Style, Weight};
         let separator = || {
             container(
                 space()
@@ -1532,13 +1535,49 @@ impl Lorca {
                     .background(theme.extended_palette().background.strong.color)
             })
         };
+        let keys = |name: &str, shortcut: &str| {
+            if shortcut.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{name} ({shortcut})")
+            }
+        };
+        use crate::shortcut_labels as labels;
+
+        // Encabezado de la línea del cursor.
+        let current = active.map_or(HeadingChoice(None), |document| {
+            let editor = &document.editor;
+            let line = editor.buffer().line_text(editor.cursor().line);
+            HeadingChoice(lorca_formats::heading_level(&line))
+        });
+        // Fuera de texto y Markdown, elegir avisa de que no se puede (`apply_markup`).
+        let heading = pick_list(HeadingChoice::ALL, Some(current), |choice| {
+            Message::Context(ContextAction::Heading(choice.0))
+        })
+        .text_size(12)
+        .padding([2, 8])
+        .width(Length::Fixed(110.0));
+
         let tools = row![
+            heading,
+            separator(),
+            tool(
+                text("• Lista").size(13).into(),
+                keys("Lista con viñetas", labels::BULLETS),
+                ContextAction::List(ListKind::Bullet),
+            ),
+            tool(
+                text("1. Lista").size(13).into(),
+                keys("Lista numerada", labels::NUMBERED),
+                ContextAction::List(ListKind::Numbered),
+            ),
+            separator(),
             tool(
                 text("B")
                     .size(14)
                     .font(font(Weight::Bold, Style::Normal))
                     .into(),
-                format!("Negrita ({})", crate::shortcut_labels::BOLD),
+                keys("Negrita", labels::BOLD),
                 ContextAction::Inline(Inline::Bold),
             ),
             tool(
@@ -1546,19 +1585,27 @@ impl Lorca {
                     .size(14)
                     .font(font(Weight::Normal, Style::Italic))
                     .into(),
-                format!("Cursiva ({})", crate::shortcut_labels::ITALIC),
+                keys("Cursiva", labels::ITALIC),
                 ContextAction::Inline(Inline::Italic),
+            ),
+            tool(
+                rich_text![span::<(), _>("S").strikethrough(true)]
+                    .size(14)
+                    .into(),
+                keys("Tachado", ""),
+                ContextAction::Inline(Inline::Strikethrough),
             ),
             separator(),
             tool(
-                text("• Lista").size(13).into(),
-                format!("Lista con viñetas ({})", crate::shortcut_labels::BULLETS),
-                ContextAction::List(ListKind::Bullet),
+                text("Vínculo").size(13).into(),
+                keys("Insertar vínculo", labels::LINK),
+                ContextAction::Link,
             ),
+            separator(),
             tool(
-                text("1. Lista").size(13).into(),
-                format!("Lista numerada ({})", crate::shortcut_labels::NUMBERED),
-                ContextAction::List(ListKind::Numbered),
+                text("Borrar formato").size(13).into(),
+                keys("Borrar formato", ""),
+                ContextAction::ClearFormatting,
             ),
         ]
         .spacing(2)
@@ -1574,7 +1621,7 @@ impl Lorca {
             );
         }
         container(content)
-            .padding([2, 6])
+            .padding([3, 6])
             .width(Length::Fill)
             .style(|theme: &Theme| container::Style::default().background(tab_bar_color(theme)))
             .into()
@@ -1873,6 +1920,31 @@ fn palette_keys(
 }
 
 /// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
+/// Opción del desplegable de encabezados: `None` es texto normal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HeadingChoice(Option<u8>);
+
+impl HeadingChoice {
+    const ALL: [Self; 7] = [
+        Self(None),
+        Self(Some(1)),
+        Self(Some(2)),
+        Self(Some(3)),
+        Self(Some(4)),
+        Self(Some(5)),
+        Self(Some(6)),
+    ];
+}
+
+impl std::fmt::Display for HeadingChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            None => f.write_str("Texto"),
+            Some(level) => write!(f, "Título {level}"),
+        }
+    }
+}
+
 /// Documentos de texto (no de código): admiten formato con marcas de Markdown y ajuste
 /// de línea.
 pub(crate) fn is_prose(language: Language) -> bool {

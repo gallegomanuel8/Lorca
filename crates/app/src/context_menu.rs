@@ -81,6 +81,11 @@ pub enum ContextAction {
     Inline(Inline),
     /// Lista con viñetas o numerada.
     List(ListKind),
+    /// Encabezado de nivel 1 a 6 o, con `None`, texto normal.
+    Heading(Option<u8>),
+    /// `[texto](url)`.
+    Link,
+    ClearFormatting,
     TogglePreview,
     ExportPdf(DocumentId),
     SetThemeMode(lorca_workspace::ThemeMode),

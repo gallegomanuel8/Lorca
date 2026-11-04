@@ -13,6 +13,9 @@ mod sql;
 pub use case::{Case, change_case};
 pub use json::{FormatError, format_json, minify_json};
 pub use markdown::markdown_to_html;
-pub use markup::{Inline, ListKind, MarkupEdit, toggle_inline, toggle_list};
+pub use markup::{
+    Inline, ListKind, MarkupEdit, clear_formatting, heading_level, insert_link, set_heading,
+    toggle_inline, toggle_list,
+};
 pub use pdf::{FontFiles, PdfError, PdfFonts, markdown_to_pdf};
 pub use sql::format_sql;

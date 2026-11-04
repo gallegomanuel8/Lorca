@@ -42,6 +42,7 @@ label!(BOLD, "⌘B", "Ctrl+B");
 label!(ITALIC, "⌘I", "Ctrl+I");
 label!(BULLETS, "⇧⌘8", "Ctrl+Mayús+8");
 label!(NUMBERED, "⇧⌘7", "Ctrl+Mayús+7");
+label!(LINK, "⌘K", "Ctrl+K");
 label!(PALETTE, "⇧⌘P", "Ctrl+Mayús+P");
 label!(FIND_NEXT, "⌘G", "F3");
 label!(FIND_PREVIOUS, "⇧⌘G", "Mayús+F3");

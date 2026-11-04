@@ -78,13 +78,15 @@ mensaje en español.
     vecinos (el crate `regex` no tiene lookaround).
   - `replacement()` / `replace_all()` expanden `$1`, `${n}` y `\1` (`regex_template`).
   - `next_match` / `previous_match` / `match_index` trabajan sobre rangos ordenados.
-- `formats` (formato de texto): `toggle_inline` (negrita `**`, cursiva `*`; los cuenta
-  por rachas de `*` para no confundirlos) y `toggle_list` (`- ` / `1. `, renumera, respeta
+- `formats` (formato de texto, las opciones del Bloc de notas de Windows 11): `toggle_inline`
+  (negrita `**`, cursiva `*`, tachado `~~`; cuenta rachas del carácter para no confundirlos),
+  `set_heading`/`heading_level` (`#`…`######`), `insert_link`, `clear_formatting` y `toggle_list` (`- ` / `1. `, renumera, respeta
   la sangría) devuelven `MarkupEdit` (sustituciones + selección). En la app,
   `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); un documento de
   texto plano pasa a Markdown con `Document::adopt_markdown`. ⌘I es cursiva en texto e
   información del LSP en código (`Message::ItalicOrHover`). Barra de formato encima de las
-  pestañas (`format_bar`), siempre visible y con los botones desactivados fuera de texto y
+  pestañas (`format_bar`: desplegable de encabezado `HeadingChoice`, listas, B, I, tachado,
+  vínculo ⌘K y borrar formato), siempre visible y con los botones desactivados fuera de texto y
   Markdown. El ajuste de línea se aplica
   también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
@@ -103,7 +105,7 @@ mensaje en español.
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, número «Sin título N», formato, lenguaje, `DiskStamp`). Sin
   ruta, `display_name` es el comienzo del texto (primera línea con contenido, sin `#`,
-  hasta 15 caracteres, como el Bloc de notas) y `suggested_file_name` lo propone al
+  15 caracteres como máximo, sin puntos suspensivos, como el Bloc de notas) y `suggested_file_name` lo propone al
   guardar (sin `/\:*?"<>|`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
     `DiskStamp` (mtime + tamaño) para detectar cambios en disco. `write_atomic` reintenta el `rename`

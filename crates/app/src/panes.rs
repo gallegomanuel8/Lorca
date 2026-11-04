@@ -11,8 +11,8 @@ use iced::widget::{
 use iced::{Alignment, Element, Length, Point, Task, Theme};
 use lorca_core::{Buffer, LineEnding, Position, Selection, TextEncoding, TextFormat};
 use lorca_formats::{
-    Case, Inline, ListKind, MarkupEdit, change_case, format_json, format_sql, minify_json,
-    toggle_inline, toggle_list,
+    Case, Inline, ListKind, MarkupEdit, change_case, clear_formatting, format_json, format_sql,
+    insert_link, minify_json, set_heading, toggle_inline, toggle_list,
 };
 use lorca_search::match_index;
 use lorca_syntax::Language;
@@ -291,6 +291,41 @@ impl Lorca {
                 "Formato: Cursiva",
                 keys::ITALIC,
                 context(ContextAction::Inline(Inline::Italic)),
+            ),
+            Command::new(
+                "Formato: Tachado",
+                "",
+                context(ContextAction::Inline(Inline::Strikethrough)),
+            ),
+            Command::new(
+                "Formato: Título 1",
+                "",
+                context(ContextAction::Heading(Some(1))),
+            ),
+            Command::new(
+                "Formato: Título 2",
+                "",
+                context(ContextAction::Heading(Some(2))),
+            ),
+            Command::new(
+                "Formato: Título 3",
+                "",
+                context(ContextAction::Heading(Some(3))),
+            ),
+            Command::new(
+                "Formato: Texto normal",
+                "",
+                context(ContextAction::Heading(None)),
+            ),
+            Command::new(
+                "Formato: Insertar vínculo",
+                keys::LINK,
+                context(ContextAction::Link),
+            ),
+            Command::new(
+                "Formato: Borrar formato",
+                "",
+                context(ContextAction::ClearFormatting),
             ),
             Command::new(
                 "Formato: Lista con viñetas",
@@ -586,6 +621,11 @@ impl Lorca {
                             Some(ContextAction::Inline(Inline::Italic)),
                         ),
                         MenuItem::new(
+                            "Tachado",
+                            "",
+                            Some(ContextAction::Inline(Inline::Strikethrough)),
+                        ),
+                        MenuItem::new(
                             "Lista con viñetas",
                             keys::BULLETS,
                             Some(ContextAction::List(ListKind::Bullet)),
@@ -595,6 +635,8 @@ impl Lorca {
                             keys::NUMBERED,
                             Some(ContextAction::List(ListKind::Numbered)),
                         ),
+                        MenuItem::new("Insertar vínculo", keys::LINK, Some(ContextAction::Link)),
+                        MenuItem::new("Borrar formato", "", Some(ContextAction::ClearFormatting)),
                         MenuItem::Separator,
                     ]);
                 }
@@ -1049,6 +1091,18 @@ impl Lorca {
             }
             ContextAction::List(kind) => {
                 self.apply_markup(|text, selection| toggle_list(text, selection, kind));
+                Task::none()
+            }
+            ContextAction::Heading(level) => {
+                self.apply_markup(|text, selection| set_heading(text, selection, level));
+                Task::none()
+            }
+            ContextAction::Link => {
+                self.apply_markup(insert_link);
+                Task::none()
+            }
+            ContextAction::ClearFormatting => {
+                self.apply_markup(clear_formatting);
                 Task::none()
             }
             ContextAction::TogglePreview => {

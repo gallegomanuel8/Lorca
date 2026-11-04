@@ -134,6 +134,7 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
         'v' if shift => Some(Message::Context(ContextAction::TogglePreview)),
         'i' if !shift => Some(Message::ItalicOrHover),
         'b' if !shift => Some(Message::Context(ContextAction::Inline(Inline::Bold))),
+        'k' if !shift => Some(Message::Context(ContextAction::Link)),
         'g' if is_mac && shift => Some(Message::FindPrevious),
         'g' if is_mac => Some(Message::FindNext),
         _ => None,
@@ -158,6 +159,10 @@ mod tests {
         assert!(matches!(
             char_key("b", Code::KeyB, cmd),
             Some(Message::Context(ContextAction::Inline(Inline::Bold)))
+        ));
+        assert!(matches!(
+            char_key("k", Code::KeyK, cmd),
+            Some(Message::Context(ContextAction::Link))
         ));
         // Con Mayús la tecla 8 da otro carácter («(» en español): cuenta la tecla física.
         assert!(matches!(
