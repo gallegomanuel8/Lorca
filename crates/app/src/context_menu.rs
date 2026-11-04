@@ -160,13 +160,18 @@ pub fn layer<'a>(
     let position = clamp_position(menu.position, menu_height(&items), window);
     let entries = items.into_iter().map(|item| match item {
         MenuItem::Separator => container(rule::horizontal(1)).padding([4, 6]).into(),
-        MenuItem::Header(label) => container(text(label).size(11))
-            .height(HEADER_HEIGHT)
-            .padding([4, 10])
-            .style(|theme: &Theme| {
-                container::Style::default().color(theme.extended_palette().background.strong.color)
-            })
-            .into(),
+        // Encabezados («Modo», «Temas oscuros»…) con el color del texto y en seminegrita: en
+        // gris apenas se distinguían del fondo del menú.
+        MenuItem::Header(label) => container(text(label).size(11).font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::default()
+        }))
+        .height(HEADER_HEIGHT)
+        .padding([4, 10])
+        .style(|theme: &Theme| {
+            container::Style::default().color(theme.extended_palette().background.base.text)
+        })
+        .into(),
         MenuItem::Action {
             label,
             shortcut,
