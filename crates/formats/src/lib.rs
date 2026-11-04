@@ -8,6 +8,7 @@ mod json;
 mod markdown;
 mod markup;
 mod pdf;
+mod rich;
 mod sql;
 
 pub use case::{Case, change_case};
@@ -18,4 +19,5 @@ pub use markup::{
     indent_list, insert_link, insert_table, is_list_item, set_heading, toggle_inline, toggle_list,
 };
 pub use pdf::{FontFiles, PdfError, PdfFonts, markdown_to_pdf};
+pub use rich::{Block, CharStyle, LineMarkup, parse_line};
 pub use sql::format_sql;
