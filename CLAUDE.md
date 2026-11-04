@@ -106,7 +106,8 @@ mensaje en español.
   hasta 15 caracteres, como el Bloc de notas) y `suggested_file_name` lo propone al
   guardar (sin `/\:*?"<>|`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),
-    `DiskStamp` (mtime + tamaño) para detectar cambios en disco.
+    `DiskStamp` (mtime + tamaño) para detectar cambios en disco. `write_atomic` reintenta el `rename`
+    y, si el destino sigue ocupado (en Windows, antivirus o indexador), escribe directamente.
   - `session`: `SessionStore` guarda `session.toml` y `backups/doc-N.txt` (solo documentos
     modificados; solo reescribe si cambió la revisión; borra respaldos huérfanos).
     `Workspace::restore` reabre de disco los no modificados y de respaldo los modificados
@@ -214,6 +215,8 @@ mensaje en español.
   - Pestañas: la barra usa el fondo del editor oscurecido (`tab_bar_color`), la activa
     toma el del editor con una raya de color arriba y el nombre en seminegrita; botón
     «+» tras la última.
+  - Cerrar la última pestaña cierra la aplicación (`exit_if_empty`: guarda la sesión, que
+    queda vacía, y sale; si no puede guardarla, se queda con un documento nuevo).
   - Cerrar varias pestañas usa `close_queue` con `Then::CloseAndContinue`.
   - Fase 4: `ViewOptions` (espacios, finales de línea, guías) llega al widget desde
     `Config`; las marcas se dibujan con quads (exactas en la rejilla) y las etiquetas

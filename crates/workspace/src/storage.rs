@@ -71,8 +71,36 @@ pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), Workspace
     temporary.push(".tmp");
     let temporary = PathBuf::from(temporary);
     std::fs::write(&temporary, contents).map_err(write_error)?;
-    std::fs::rename(&temporary, path).map_err(write_error)
+    // En Windows, `rename` falla si otro proceso (antivirus, indexador, copia de
+    // seguridad) tiene abierto el destino en ese momento: se reintenta un poco y, si sigue
+    // ocupado, se escribe directamente (sin la garantía atómica, pero sin perder el dato).
+    let mut last_error = None;
+    for attempt in 0..RENAME_ATTEMPTS {
+        match std::fs::rename(&temporary, path) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < RENAME_ATTEMPTS {
+            std::thread::sleep(RENAME_RETRY);
+        }
+    }
+    match std::fs::write(path, contents) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&temporary);
+            Ok(())
+        }
+        Err(_) => {
+            Err(write_error(last_error.unwrap_or_else(|| {
+                std::io::Error::other("no se pudo renombrar")
+            })))
+        }
+    }
 }
+
+/// Intentos de sustituir el archivo por el temporal antes de escribirlo directamente.
+const RENAME_ATTEMPTS: u32 = 5;
+/// Espera entre intentos.
+const RENAME_RETRY: std::time::Duration = std::time::Duration::from_millis(40);
 
 #[cfg(test)]
 mod tests {
