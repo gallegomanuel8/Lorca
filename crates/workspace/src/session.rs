@@ -383,7 +383,8 @@ mod tests {
         let (restored, report) = save_and_restore(&ws, dir.path());
         let doc = restored.active().unwrap();
         assert_eq!(doc.editor.text(), "borrador\nde poema");
-        assert_eq!(doc.display_name(), "Sin título 1");
+        assert_eq!(doc.untitled_number(), Some(1));
+        assert_eq!(doc.display_name(), "borrador");
         assert!(doc.is_modified());
         assert_eq!(doc.editor.selection(), Selection::new(17, 16));
         assert_eq!(report.scrolls, vec![(doc.id(), 0.0, 40.0)]);

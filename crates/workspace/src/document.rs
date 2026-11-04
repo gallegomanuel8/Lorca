@@ -7,6 +7,9 @@ use lorca_syntax::Language;
 
 use crate::DiskStamp;
 
+/// Caracteres como máximo del título de un documento sin título tomado de su texto.
+const TITLE_CHARS: usize = 30;
+
 /// Identificador estable de un documento mientras está abierto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DocumentId(pub(crate) u64);
@@ -181,16 +184,79 @@ impl Document {
         self.language_guessed = true;
     }
 
-    /// Nombre que se muestra en la pestaña: el nombre del archivo o "Sin título N".
+    /// Nombre que se muestra en la pestaña: el nombre del archivo o, si no lo tiene, el
+    /// comienzo del texto (como el Bloc de notas); vacío, "Sin título N".
     pub fn display_name(&self) -> String {
-        match (&self.path, self.untitled_number) {
-            (Some(path), _) => path.file_name().map_or_else(
+        match &self.path {
+            Some(path) => path.file_name().map_or_else(
                 || path.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
             ),
-            (None, Some(n)) => format!("Sin título {n}"),
-            (None, None) => "Sin título".to_owned(),
+            None => self.text_title().unwrap_or_else(|| self.untitled_label()),
         }
+    }
+
+    /// Nombre de archivo que se propone al guardar por primera vez: el comienzo del texto
+    /// sin los caracteres que no admiten los sistemas de archivos, con `.txt`.
+    pub fn suggested_file_name(&self) -> String {
+        if self.path.is_some() {
+            return self.display_name();
+        }
+        let base = self
+            .text_title()
+            .map(|title| {
+                title
+                    .trim_end_matches('…')
+                    .chars()
+                    .map(|c| match c {
+                        '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
+                        c if c.is_control() => ' ',
+                        c => c,
+                    })
+                    .collect::<String>()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .trim_end_matches('.')
+                    .to_owned()
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| self.untitled_label());
+        format!("{base}.txt")
+    }
+
+    fn untitled_label(&self) -> String {
+        match self.untitled_number {
+            Some(n) => format!("Sin título {n}"),
+            None => "Sin título".to_owned(),
+        }
+    }
+
+    /// Primera línea con texto (sin las almohadillas de un título de Markdown y con los
+    /// espacios seguidos reducidos a uno), cortada a [`TITLE_CHARS`] caracteres.
+    fn text_title(&self) -> Option<String> {
+        /// Líneas que se miran como mucho buscando una con texto.
+        const LOOKAHEAD: usize = 50;
+        let buffer = self.editor.buffer();
+        let line = (0..buffer.len_lines().min(LOOKAHEAD))
+            .map(|line| buffer.line_text(line))
+            .find(|text| !text.trim().is_empty())?;
+        let words = line
+            .trim_start()
+            .trim_start_matches('#')
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if words.is_empty() {
+            return None;
+        }
+        if words.chars().count() <= TITLE_CHARS {
+            return Some(words);
+        }
+        let mut title: String = words.chars().take(TITLE_CHARS).collect();
+        title.truncate(title.trim_end().len());
+        title.push('…');
+        Some(title)
     }
 
     /// `true` si el contenido difiere de lo que hay en disco (o nunca se ha guardado algo).
@@ -246,6 +312,29 @@ mod tests {
         assert_eq!(doc.language(), Language::PlainText);
         doc.refresh_language();
         assert_eq!(doc.language(), Language::Python);
+    }
+
+    #[test]
+    fn untitled_documents_are_named_after_their_text() {
+        let mut doc = Document::untitled(DocumentId(1), 3);
+        assert_eq!(doc.display_name(), "Sin título 3");
+        assert_eq!(doc.suggested_file_name(), "Sin título 3.txt");
+        doc.editor
+            .insert_text("\n   \n## Lista   de la\tcompra\n- pan")
+            .unwrap();
+        assert_eq!(doc.display_name(), "Lista de la compra");
+        doc.editor.select_all();
+        doc.editor
+            .insert_text("Verde que te quiero verde. Verde viento. Verdes ramas.")
+            .unwrap();
+        assert_eq!(doc.display_name(), "Verde que te quiero verde. Ver…");
+        doc.editor.select_all();
+        doc.editor.insert_text("¿Notas: a/b?").unwrap();
+        assert_eq!(doc.suggested_file_name(), "¿Notas a b.txt");
+        // Solo almohadillas o espacios: no hay título.
+        doc.editor.select_all();
+        doc.editor.insert_text("###").unwrap();
+        assert_eq!(doc.display_name(), "Sin título 3");
     }
 
     #[test]

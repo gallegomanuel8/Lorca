@@ -1203,10 +1203,7 @@ impl Lorca {
         let Some(document) = self.workspace.document(id) else {
             return Task::none();
         };
-        let file_name = match document.path() {
-            Some(_) => document.display_name(),
-            None => format!("{}.txt", document.display_name()),
-        };
+        let file_name = document.suggested_file_name();
         let directory = document.path().and_then(|p| p.parent()).map(PathBuf::from);
         self.workspace.activate(id);
         self.dialog_open = true;
