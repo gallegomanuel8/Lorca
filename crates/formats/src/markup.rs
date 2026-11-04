@@ -393,6 +393,267 @@ fn clean_line(line: &str) -> String {
     out
 }
 
+/// ¿Es `line` un elemento de lista (con o sin sangría)?
+pub fn is_list_item(line: &str) -> bool {
+    let rest: Vec<char> = line.trim_start().chars().collect();
+    list_marker(&rest).is_some()
+}
+
+/// Aumenta (o reduce) la sangría de los elementos de lista que toca `selection` en
+/// `unit` (lo que inserta la tecla Tab). Las demás líneas no cambian.
+pub fn indent_list(text: &str, selection: Range<usize>, unit: &str, increase: bool) -> MarkupEdit {
+    let chars: Vec<char> = text.chars().collect();
+    let block = line_block(&chars, selection.clone());
+    let unit_len = unit.chars().count().max(1);
+    let mut replacements = Vec::new();
+    let mut delta: isize = 0;
+    let mut line_start = block.start;
+    loop {
+        let line_end = chars
+            .get(line_start..block.end)
+            .unwrap_or_default()
+            .iter()
+            .position(|&c| c == '\n')
+            .map_or(block.end, |i| line_start + i);
+        let line: String = chars
+            .get(line_start..line_end)
+            .unwrap_or_default()
+            .iter()
+            .collect();
+        if is_list_item(&line) {
+            if increase {
+                replacements.push((line_start..line_start, unit.to_owned()));
+                delta += unit_len as isize;
+            } else {
+                // Se quita un tabulador o hasta `unit_len` espacios.
+                let removable = match line.chars().next() {
+                    Some('\t') => 1,
+                    _ => line.chars().take_while(|&c| c == ' ').count().min(unit_len),
+                };
+                if removable > 0 {
+                    replacements.push((line_start..line_start + removable, String::new()));
+                    delta -= removable as isize;
+                }
+            }
+        }
+        if line_end >= block.end {
+            break;
+        }
+        line_start = line_end + 1;
+    }
+    let first_shift = replacements
+        .first()
+        .filter(|(range, _)| range.start == block.start)
+        .map_or(0, |(range, text)| {
+            text.chars().count() as isize - range.len() as isize
+        });
+    MarkupEdit {
+        replacements,
+        selection: selection
+            .start
+            .saturating_add_signed(first_shift)
+            .max(block.start)..selection.end.saturating_add_signed(delta),
+    }
+}
+
+/// Inserta una tabla de `columns` columnas y `rows` filas (la primera es la cabecera) en
+/// una línea propia, con el cursor en la primera celda.
+pub fn insert_table(
+    text: &str,
+    selection: Range<usize>,
+    rows: usize,
+    columns: usize,
+) -> MarkupEdit {
+    let chars: Vec<char> = text.chars().collect();
+    let at = selection.end.min(chars.len());
+    let rows = rows.max(1);
+    let columns = columns.max(1);
+    let row = format!("|{}", "   |".repeat(columns));
+    let separator = format!("|{}", " --- |".repeat(columns));
+    let mut table = vec![row.clone(), separator];
+    table.extend(std::iter::repeat_n(row, rows - 1));
+    // En una línea propia, con una línea en blanco antes si hay texto.
+    let line_start = chars
+        .get(..at)
+        .unwrap_or_default()
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |i| i + 1);
+    let prefix = if at == line_start && (at == 0 || chars.get(at.saturating_sub(2)) == Some(&'\n'))
+    {
+        ""
+    } else if at == line_start {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    let suffix = if chars.get(at).is_some() { "\n" } else { "" };
+    let inserted = format!("{prefix}{}\n{suffix}", table.join("\n"));
+    let cursor = at + prefix.chars().count() + 2;
+    MarkupEdit {
+        replacements: vec![(at..at, inserted)],
+        selection: cursor..cursor,
+    }
+}
+
+/// Cambios en la tabla donde está el cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableEdit {
+    InsertRow,
+    InsertColumn,
+    DeleteRow,
+    DeleteColumn,
+}
+
+/// Tabla que contiene `index`: rango de líneas (caracteres), filas con sus celdas, fila y
+/// columna del cursor.
+struct TableAt {
+    block: Range<usize>,
+    rows: Vec<Vec<String>>,
+    row: usize,
+    column: usize,
+}
+
+fn is_table_line(line: &str) -> bool {
+    line.trim_start().starts_with('|')
+}
+
+fn is_separator_row(cells: &[String]) -> bool {
+    !cells.is_empty()
+        && cells.iter().all(|cell| {
+            let cell = cell.trim();
+            !cell.is_empty() && cell.chars().all(|c| matches!(c, '-' | ':'))
+        })
+}
+
+fn table_at(text: &str, index: usize) -> Option<TableAt> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut offset = 0;
+    let mut cursor_line = None;
+    let mut starts = Vec::with_capacity(lines.len());
+    for (number, line) in lines.iter().enumerate() {
+        starts.push(offset);
+        let len = line.chars().count();
+        if cursor_line.is_none() && index <= offset + len {
+            cursor_line = Some((number, index - offset));
+        }
+        offset += len + 1;
+    }
+    let (line, column_chars) = cursor_line?;
+    if !is_table_line(lines.get(line)?) {
+        return None;
+    }
+    let mut first = line;
+    while first > 0 && lines.get(first - 1).is_some_and(|l| is_table_line(l)) {
+        first -= 1;
+    }
+    let mut last = line;
+    while lines.get(last + 1).is_some_and(|l| is_table_line(l)) {
+        last += 1;
+    }
+    let cells = |line: &str| -> Vec<String> {
+        let inner = line.trim();
+        let inner = inner.strip_prefix('|').unwrap_or(inner);
+        let inner = inner.strip_suffix('|').unwrap_or(inner);
+        inner
+            .split('|')
+            .map(|cell| cell.trim().to_owned())
+            .collect()
+    };
+    let rows: Vec<Vec<String>> = (first..=last)
+        .filter_map(|n| lines.get(n))
+        .map(|l| cells(l))
+        .collect();
+    let current = lines.get(line)?;
+    let before: String = current.chars().take(column_chars).collect();
+    let column = before.trim_start().matches('|').count().saturating_sub(1);
+    let block_start = *starts.get(first)?;
+    let block_end = starts.get(last)? + lines.get(last)?.chars().count();
+    Some(TableAt {
+        block: block_start..block_end,
+        rows,
+        row: line - first,
+        column,
+    })
+}
+
+/// `true` si `index` está dentro de una tabla de Markdown.
+pub fn in_table(text: &str, index: usize) -> bool {
+    table_at(text, index).is_some()
+}
+
+/// Inserta o borra una fila o columna de la tabla donde está el cursor. `None` si no está
+/// en una tabla o el cambio no tiene sentido (borrar la cabecera o la única columna). La
+/// tabla se reescribe con las celdas separadas por ` | ` y el cursor queda en la celda
+/// nueva (o en la de al lado de la borrada).
+pub fn edit_table(text: &str, index: usize, edit: TableEdit) -> Option<MarkupEdit> {
+    let table = table_at(text, index)?;
+    let mut rows = table.rows;
+    let columns = rows.iter().map(Vec::len).max()?.max(1);
+    for row in &mut rows {
+        row.resize(columns, String::new());
+    }
+    let separator = rows.iter().position(|row| is_separator_row(row));
+    let mut row = table.row;
+    let mut column = table.column.min(columns - 1);
+    match edit {
+        TableEdit::InsertRow => {
+            // Debajo de la fila actual (de la cabecera, debajo del separador).
+            let below = match separator {
+                Some(sep) if row <= sep => sep + 1,
+                _ => row + 1,
+            };
+            rows.insert(below, vec![String::new(); columns]);
+            row = below;
+        }
+        TableEdit::InsertColumn => {
+            for (index, cells) in rows.iter_mut().enumerate() {
+                let cell = if Some(index) == separator {
+                    "---".to_owned()
+                } else {
+                    String::new()
+                };
+                cells.insert(column + 1, cell);
+            }
+            column += 1;
+        }
+        TableEdit::DeleteRow => {
+            if Some(row) == separator || row == 0 || rows.len() <= 2 {
+                return None;
+            }
+            rows.remove(row);
+            row = row.min(rows.len() - 1);
+        }
+        TableEdit::DeleteColumn => {
+            if columns < 2 {
+                return None;
+            }
+            for cells in &mut rows {
+                cells.remove(column);
+            }
+            column = column.min(columns - 2);
+        }
+    }
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|cells| format!("| {} |", cells.join(" | ")))
+        .collect();
+    // Cursor al principio del contenido de la celda (fila `row`, columna `column`).
+    let before: usize = lines.iter().take(row).map(|l| l.chars().count() + 1).sum();
+    let in_line: usize = rows.get(row).map_or(0, |cells| {
+        cells
+            .iter()
+            .take(column)
+            .map(|c| c.chars().count() + 3)
+            .sum::<usize>()
+    }) + 2;
+    let cursor = table.block.start + before + in_line;
+    Some(MarkupEdit {
+        replacements: vec![(table.block, lines.join("\n"))],
+        selection: cursor..cursor,
+    })
+}
+
 /// Marca de lista al principio de `rest` (ya sin sangría): tipo y longitud con el espacio.
 fn list_marker(rest: &[char]) -> Option<(ListKind, usize)> {
     match rest {
@@ -505,6 +766,64 @@ mod tests {
         assert_eq!(selected, cleaned);
         // Sin formato no cambia nada.
         assert!(clear_formatting("hola", 0..4).replacements.is_empty());
+    }
+
+    #[test]
+    fn list_indent_only_touches_list_items() {
+        let text = "- uno\ntexto\n- dos";
+        let (indented, _) = apply(text, &indent_list(text, 0..text.len(), "    ", true));
+        assert_eq!(indented, "    - uno\ntexto\n    - dos");
+        let (back, _) = apply(
+            &indented,
+            &indent_list(&indented, 0..indented.len(), "    ", false),
+        );
+        assert_eq!(back, text);
+        assert!(is_list_item("  1. a"));
+        assert!(!is_list_item("texto"));
+    }
+
+    #[test]
+    fn tables_are_inserted_on_their_own_line() {
+        let edit = insert_table("hola", 4..4, 2, 3);
+        let (text, _) = apply("hola", &edit);
+        assert_eq!(
+            text,
+            "hola\n\n|   |   |   |\n| --- | --- | --- |\n|   |   |   |\n"
+        );
+        assert_eq!(edit.selection, 8..8);
+        let (text, _) = apply("", &insert_table("", 0..0, 1, 1));
+        assert_eq!(text, "|   |\n| --- |\n");
+    }
+
+    #[test]
+    fn table_rows_and_columns() {
+        let text = "| a | b |\n| --- | --- |\n| 1 | 2 |";
+        let in_one = text.find('1').unwrap();
+        assert!(in_table(text, in_one));
+        assert!(!in_table("texto", 2));
+        let (rows, _) = apply(
+            text,
+            &edit_table(text, in_one, TableEdit::InsertRow).unwrap(),
+        );
+        assert_eq!(rows, "| a | b |\n| --- | --- |\n| 1 | 2 |\n|  |  |");
+        let (columns, _) = apply(
+            text,
+            &edit_table(text, in_one, TableEdit::InsertColumn).unwrap(),
+        );
+        assert_eq!(columns, "| a |  | b |\n| --- | --- | --- |\n| 1 |  | 2 |");
+        let (deleted, _) = apply(
+            text,
+            &edit_table(text, in_one, TableEdit::DeleteColumn).unwrap(),
+        );
+        assert_eq!(deleted, "| b |\n| --- |\n| 2 |");
+        // La cabecera no se borra.
+        assert!(edit_table(text, 2, TableEdit::DeleteRow).is_none());
+        let three = format!("{text}\n| 3 | 4 |");
+        let (fewer, _) = apply(
+            &three,
+            &edit_table(&three, in_one, TableEdit::DeleteRow).unwrap(),
+        );
+        assert_eq!(fewer, "| a | b |\n| --- | --- |\n| 3 | 4 |");
     }
 
     fn list(text: &str, selection: Range<usize>, kind: ListKind) -> (String, String) {

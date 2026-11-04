@@ -11,6 +11,7 @@ mod context_menu;
 mod dialogs;
 mod editor;
 mod find;
+mod format_bar;
 mod instance;
 mod key_filter;
 mod lsp_view;

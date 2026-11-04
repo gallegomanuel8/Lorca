@@ -8,7 +8,7 @@ use iced::widget::{
 };
 use iced::{Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size, Theme, Vector};
 use lorca_core::{LineEnding, TextEncoding};
-use lorca_formats::{Case, Inline, ListKind};
+use lorca_formats::{Case, Inline, ListKind, TableEdit};
 use lorca_workspace::DocumentId;
 
 use crate::app::Message;
@@ -86,6 +86,13 @@ pub enum ContextAction {
     /// `[texto](url)`.
     Link,
     ClearFormatting,
+    /// Aumentar (`true`) o reducir la sangría de los elementos de lista.
+    IndentList(bool),
+    InsertTable {
+        rows: usize,
+        columns: usize,
+    },
+    Table(TableEdit),
     TogglePreview,
     ExportPdf(DocumentId),
     SetThemeMode(lorca_workspace::ThemeMode),

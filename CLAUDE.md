@@ -80,14 +80,19 @@ mensaje en español.
   - `next_match` / `previous_match` / `match_index` trabajan sobre rangos ordenados.
 - `formats` (formato de texto, las opciones del Bloc de notas de Windows 11): `toggle_inline`
   (negrita `**`, cursiva `*`, tachado `~~`; cuenta rachas del carácter para no confundirlos),
-  `set_heading`/`heading_level` (`#`…`######`), `insert_link`, `clear_formatting` y `toggle_list` (`- ` / `1. `, renumera, respeta
+  `set_heading`/`heading_level` (`#`…`######`), `insert_link`, `clear_formatting`,
+  `indent_list`, `insert_table` y `edit_table` (`TableEdit`: filas y columnas; reescribe la
+  tabla como `| a | b |`) y `toggle_list` (`- ` / `1. `, renumera, respeta
   la sangría) devuelven `MarkupEdit` (sustituciones + selección). En la app,
   `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); un documento de
   texto plano pasa a Markdown con `Document::adopt_markdown`. ⌘I es cursiva en texto e
   información del LSP en código (`Message::ItalicOrHover`). Barra de formato encima de las
-  pestañas (`format_bar`: desplegable de encabezado `HeadingChoice`, listas, B, I, tachado,
-  vínculo ⌘K y borrar formato), siempre visible y con los botones desactivados fuera de texto y
-  Markdown. El ajuste de línea se aplica
+  pestañas: `format_bar.rs` (iconos SVG de `crates/app/icons/`, feature `svg` de iced,
+  teñidos con el tema). Desplegables propios (`FormatPopup` en `Lorca::format_popup`,
+  abiertos con `anchor_area` y dibujados con `stack` + `pin`): encabezado (Título…Cuerpo,
+  cada uno a su tamaño), listas (+ sangría, `indent_list`) y tabla (cuadrícula 5×5,
+  `insert_table`; «Modificar tabla» con `edit_table`). Siempre visible; desactivada fuera
+  de texto y Markdown. El ajuste de línea se aplica
   también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`
   (sqlformat), `change_case`, `markdown_to_html` (pulldown-cmark; para exportar). La vista

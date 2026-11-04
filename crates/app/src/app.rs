@@ -26,6 +26,7 @@ use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_ar
 use crate::dialogs;
 use crate::editor::{DocView, EditorAction, Metrics, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
+use crate::format_bar::{self, FormatMenu, FormatPopup};
 use crate::menu;
 use crate::palette::{self, Palette};
 use crate::prompt::{Prompt, SaveChoice};
@@ -195,6 +196,11 @@ pub enum Message {
     Escape,
     /// Intro: botón principal de la ventana de confirmación abierta, si la hay.
     PromptAccept,
+    /// Abre un desplegable de la barra de formato bajo `Point`.
+    OpenFormatMenu(FormatMenu, Point),
+    CloseFormatMenu,
+    /// Celda de «Insertar tabla» bajo el ratón.
+    TableHover(Option<(usize, usize)>),
     Bookmark(BookmarkAction),
     ModifiersChanged(keyboard::Modifiers),
 }
@@ -224,6 +230,8 @@ pub struct Lorca {
     dialog_open: bool,
     /// Ventana de confirmación propia abierta («¿Guardar los cambios?»…).
     prompt: Option<Prompt>,
+    /// Desplegable abierto de la barra de formato.
+    format_popup: Option<FormatPopup>,
     /// Documentos con cambios que quedan por confirmar antes de salir. Solo se usa si
     /// no se puede guardar la sesión.
     quit_queue: Option<VecDeque<DocumentId>>,
@@ -331,6 +339,7 @@ impl Lorca {
             notice: None,
             dialog_open: false,
             prompt: None,
+            format_popup: None,
             quit_queue: None,
             welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
             themes,
@@ -644,7 +653,10 @@ impl Lorca {
                 self.open_context_menu(position, MenuTarget::Tab(id));
                 Task::none()
             }
-            Message::Context(action) => self.handle_context(action),
+            Message::Context(action) => {
+                self.format_popup = None;
+                self.handle_context(action)
+            }
             Message::CloseContextMenu => {
                 self.context_menu = None;
                 Task::none()
@@ -900,10 +912,33 @@ impl Lorca {
                     None => Task::none(),
                 }
             }
+            Message::OpenFormatMenu(menu, position) => {
+                self.context_menu = None;
+                self.format_popup = Some(FormatPopup {
+                    menu,
+                    position,
+                    table_hover: None,
+                });
+                Task::none()
+            }
+            Message::CloseFormatMenu => {
+                self.format_popup = None;
+                Task::none()
+            }
+            Message::TableHover(cell) => {
+                if let Some(popup) = &mut self.format_popup {
+                    popup.table_hover = cell;
+                }
+                Task::none()
+            }
             Message::PromptAccept => match self.prompt.as_ref().and_then(Prompt::accept_message) {
                 Some(message) => self.update(message),
                 None => Task::none(),
             },
+            Message::Escape if self.format_popup.is_some() => {
+                self.format_popup = None;
+                Task::none()
+            }
             Message::Escape => {
                 let had_popup =
                     self.lsp.completion.take().is_some() | self.lsp.hover.take().is_some();
@@ -1424,7 +1459,7 @@ impl Lorca {
             };
             layout = layout.push(menu::bar(open));
         }
-        layout = layout.push(self.format_bar());
+        layout = layout.push(format_bar::bar(self.bar_state(), tab_bar_color));
         layout = layout.push(self.tab_bar());
         if let Some(input) = &self.goto {
             let lines = self
@@ -1453,6 +1488,10 @@ impl Lorca {
         };
         let base = match &self.palette {
             Some(state) => palette::layer(base, state, &self.palette_matches()),
+            None => base,
+        };
+        let base = match self.format_popup {
+            Some(popup) => format_bar::layer(base, popup, self.bar_state(), self.window_size),
             None => base,
         };
         match &self.prompt {
@@ -1493,138 +1532,23 @@ impl Lorca {
         base
     }
 
-    /// Barra de formato encima de las pestañas, con las opciones del Bloc de notas de
-    /// Windows 11: encabezado, listas, negrita, cursiva, tachado, vínculo y borrar formato.
-    /// Está siempre, para que la ventana no cambie al pasar de una pestaña a otra, pero
-    /// solo actúa en documentos de texto y Markdown.
-    fn format_bar(&self) -> Element<'_, Message> {
-        use iced::font::{Style, Weight};
-        use iced::widget::{rich_text, span};
-        use lorca_formats::{Inline, ListKind};
-        let active = self
+    /// Estado del documento activo para la barra de formato.
+    fn bar_state(&self) -> format_bar::BarState {
+        let Some(document) = self
             .workspace
             .active()
-            .filter(|document| is_prose(document.language()));
-        let enabled = active.is_some();
-        let tool = |label: Element<'static, Message>, tip: String, action: ContextAction| {
-            let button = button(label)
-                .padding([2, 8])
-                .style(button::text)
-                .on_press_maybe(enabled.then_some(Message::Context(action)));
-            tooltip(
-                button,
-                container(text(tip).size(12))
-                    .padding(6)
-                    .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            )
+            .filter(|document| is_prose(document.language()))
+        else {
+            return format_bar::BarState::default();
         };
-        let font = |weight, style| iced::Font {
-            weight,
-            style,
-            ..iced::Font::default()
-        };
-        let separator = || {
-            container(
-                space()
-                    .width(Length::Fixed(1.0))
-                    .height(Length::Fixed(16.0)),
-            )
-            .style(|theme: &Theme| {
-                container::Style::default()
-                    .background(theme.extended_palette().background.strong.color)
-            })
-        };
-        let keys = |name: &str, shortcut: &str| {
-            if shortcut.is_empty() {
-                name.to_owned()
-            } else {
-                format!("{name} ({shortcut})")
-            }
-        };
-        use crate::shortcut_labels as labels;
-
-        // Encabezado de la línea del cursor.
-        let current = active.map_or(HeadingChoice(None), |document| {
-            let editor = &document.editor;
-            let line = editor.buffer().line_text(editor.cursor().line);
-            HeadingChoice(lorca_formats::heading_level(&line))
-        });
-        // Fuera de texto y Markdown, elegir avisa de que no se puede (`apply_markup`).
-        let heading = pick_list(HeadingChoice::ALL, Some(current), |choice| {
-            Message::Context(ContextAction::Heading(choice.0))
-        })
-        .text_size(12)
-        .padding([2, 8])
-        .width(Length::Fixed(110.0));
-
-        let tools = row![
-            heading,
-            separator(),
-            tool(
-                text("• Lista").size(13).into(),
-                keys("Lista con viñetas", labels::BULLETS),
-                ContextAction::List(ListKind::Bullet),
-            ),
-            tool(
-                text("1. Lista").size(13).into(),
-                keys("Lista numerada", labels::NUMBERED),
-                ContextAction::List(ListKind::Numbered),
-            ),
-            separator(),
-            tool(
-                text("B")
-                    .size(14)
-                    .font(font(Weight::Bold, Style::Normal))
-                    .into(),
-                keys("Negrita", labels::BOLD),
-                ContextAction::Inline(Inline::Bold),
-            ),
-            tool(
-                text("I")
-                    .size(14)
-                    .font(font(Weight::Normal, Style::Italic))
-                    .into(),
-                keys("Cursiva", labels::ITALIC),
-                ContextAction::Inline(Inline::Italic),
-            ),
-            tool(
-                rich_text![span::<(), _>("S").strikethrough(true)]
-                    .size(14)
-                    .into(),
-                keys("Tachado", ""),
-                ContextAction::Inline(Inline::Strikethrough),
-            ),
-            separator(),
-            tool(
-                text("Vínculo").size(13).into(),
-                keys("Insertar vínculo", labels::LINK),
-                ContextAction::Link,
-            ),
-            separator(),
-            tool(
-                text("Borrar formato").size(13).into(),
-                keys("Borrar formato", ""),
-                ContextAction::ClearFormatting,
-            ),
-        ]
-        .spacing(2)
-        .align_y(Alignment::Center);
-        let mut content = row![tools].align_y(Alignment::Center);
-        if !enabled {
-            content = content.push(space().width(Length::Fixed(10.0))).push(
-                text("El formato es para texto y Markdown")
-                    .size(12)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.extended_palette().background.strong.color),
-                    }),
-            );
+        let editor = &document.editor;
+        let line = editor.buffer().line_text(editor.cursor().line);
+        format_bar::BarState {
+            enabled: true,
+            heading: lorca_formats::heading_level(&line),
+            in_list: lorca_formats::is_list_item(&line),
+            in_table: line.trim_start().starts_with('|'),
         }
-        container(content)
-            .padding([3, 6])
-            .width(Length::Fill)
-            .style(|theme: &Theme| container::Style::default().background(tab_bar_color(theme)))
-            .into()
     }
 
     fn tab_bar(&self) -> Element<'_, Message> {
@@ -1920,31 +1844,6 @@ fn palette_keys(
 }
 
 /// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
-/// Opción del desplegable de encabezados: `None` es texto normal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct HeadingChoice(Option<u8>);
-
-impl HeadingChoice {
-    const ALL: [Self; 7] = [
-        Self(None),
-        Self(Some(1)),
-        Self(Some(2)),
-        Self(Some(3)),
-        Self(Some(4)),
-        Self(Some(5)),
-        Self(Some(6)),
-    ];
-}
-
-impl std::fmt::Display for HeadingChoice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            None => f.write_str("Texto"),
-            Some(level) => write!(f, "Título {level}"),
-        }
-    }
-}
-
 /// Documentos de texto (no de código): admiten formato con marcas de Markdown y ajuste
 /// de línea.
 pub(crate) fn is_prose(language: Language) -> bool {
@@ -1977,6 +1876,9 @@ fn affects_session(message: &Message) -> bool {
             | Message::Lsp(_)
             | Message::ShowHover
             | Message::PromptAccept
+            | Message::OpenFormatMenu(..)
+            | Message::CloseFormatMenu
+            | Message::TableHover(_)
             | Message::Editor(_, EditorAction::CursorPoint(_))
     )
 }

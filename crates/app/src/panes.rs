@@ -11,8 +11,9 @@ use iced::widget::{
 use iced::{Alignment, Element, Length, Point, Task, Theme};
 use lorca_core::{Buffer, LineEnding, Position, Selection, TextEncoding, TextFormat};
 use lorca_formats::{
-    Case, Inline, ListKind, MarkupEdit, change_case, clear_formatting, format_json, format_sql,
-    insert_link, minify_json, set_heading, toggle_inline, toggle_list,
+    Case, Inline, ListKind, MarkupEdit, change_case, clear_formatting, edit_table, format_json,
+    format_sql, indent_list, insert_link, insert_table, minify_json, set_heading, toggle_inline,
+    toggle_list,
 };
 use lorca_search::match_index;
 use lorca_syntax::Language;
@@ -1103,6 +1104,24 @@ impl Lorca {
             }
             ContextAction::ClearFormatting => {
                 self.apply_markup(clear_formatting);
+                Task::none()
+            }
+            ContextAction::IndentList(increase) => {
+                let unit = self.config.indent_unit();
+                self.apply_markup(|text, selection| indent_list(text, selection, &unit, increase));
+                Task::none()
+            }
+            ContextAction::InsertTable { rows, columns } => {
+                self.apply_markup(|text, selection| insert_table(text, selection, rows, columns));
+                Task::none()
+            }
+            ContextAction::Table(edit) => {
+                self.apply_markup(|text, selection| {
+                    edit_table(text, selection.end, edit).unwrap_or(MarkupEdit {
+                        replacements: Vec::new(),
+                        selection,
+                    })
+                });
                 Task::none()
             }
             ContextAction::TogglePreview => {
