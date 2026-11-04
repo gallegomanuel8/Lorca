@@ -8,7 +8,7 @@
 use iced::widget::{
     button, center, column, container, mouse_area, opaque, row, space, stack, text,
 };
-use iced::{Alignment, Background, Border, Color, Element, Font, Length, Shadow, Theme, Vector};
+use iced::{Alignment, Border, Color, Element, Font, Length, Shadow, Theme, Vector};
 use lorca_workspace::DocumentId;
 
 use crate::app::{Message, Then};
@@ -26,8 +26,6 @@ pub enum SaveChoice {
 pub enum ButtonKind {
     Primary,
     Secondary,
-    /// Acción que pierde cambios.
-    Danger,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +63,7 @@ impl Prompt {
             buttons: vec![
                 PromptButton {
                     label: "No guardar",
-                    kind: ButtonKind::Danger,
+                    kind: ButtonKind::Secondary,
                     message: answer(SaveChoice::Discard),
                 },
                 PromptButton {
@@ -96,7 +94,7 @@ impl Prompt {
             buttons: vec![
                 PromptButton {
                     label: "Recargar",
-                    kind: ButtonKind::Danger,
+                    kind: ButtonKind::Secondary,
                     message: answer(true),
                 },
                 PromptButton {
@@ -129,7 +127,7 @@ pub fn layer<'a>(base: Element<'a, Message>, prompt: &'a Prompt) -> Element<'a, 
         .iter()
         .enumerate()
         .fold(row![].spacing(8), |buttons, (index, item)| {
-            // El primer botón (el que pierde cambios) queda separado a la izquierda.
+            // El primer botón (el que pierde los cambios) queda apartado a la izquierda.
             let buttons = if index == 1 {
                 buttons.push(space::horizontal())
             } else {
@@ -187,16 +185,6 @@ fn prompt_button(item: &PromptButton) -> Element<'_, Message> {
         .style(move |theme: &Theme, status| match kind {
             ButtonKind::Primary => button::primary(theme, status),
             ButtonKind::Secondary => button::secondary(theme, status),
-            ButtonKind::Danger => {
-                let mut style = button::secondary(theme, status);
-                let danger = theme.extended_palette().danger;
-                style.text_color = danger.base.color;
-                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    style.background = Some(Background::Color(danger.weak.color));
-                    style.text_color = danger.weak.text;
-                }
-                style
-            }
         })
         .on_press(item.message.clone())
         .into()
