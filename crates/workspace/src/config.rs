@@ -63,6 +63,9 @@ pub struct Config {
     /// Ajustar las líneas largas a la anchura de la ventana en los documentos de texto
     /// plano (como el Bloc de notas).
     pub wrap_plain_text: bool,
+    /// Editar el texto plano viendo el formato (títulos, negrita, listas…) en vez de las
+    /// marcas de Markdown, como el Bloc de notas de Windows 11.
+    pub rich_plain_text: bool,
     /// Tema que se usa con aspecto claro (modo claro, o automático con el sistema claro).
     pub light_theme: String,
     /// Tema que se usa con aspecto oscuro.
@@ -155,6 +158,7 @@ impl Default for Config {
             show_line_endings: false,
             indent_guides: true,
             wrap_plain_text: true,
+            rich_plain_text: true,
             light_theme: DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: DEFAULT_DARK_THEME.to_owned(),
             font_size: Self::DEFAULT_FONT_SIZE,
@@ -261,6 +265,7 @@ mod tests {
         assert_eq!(config.theme, Some(ThemeMode::Light));
         assert!(config.indent_guides);
         assert!(config.wrap_plain_text);
+        assert!(config.rich_plain_text);
         assert_eq!(config.search, SearchConfig::default());
         assert!(!config.show_whitespace);
     }

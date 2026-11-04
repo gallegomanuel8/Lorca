@@ -51,9 +51,10 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
   YAML, TOML, HTML, CSS, Bash, SQL y Markdown (incluidos los bloques de código).
 - **Detección** por extensión, nombre de archivo y shebang (y por el contenido al pegar
   en un documento sin lenguaje); selector manual en la barra de estado.
-- **Negrita, cursiva y listas** (⌘B, ⌘I, ⇧⌘8, ⇧⌘7) con marcas de Markdown en los
-  documentos de texto: el archivo sigue siendo texto y el editor, la vista previa y el PDF
-  muestran el formato.
+- **Formato como en el Bloc de notas de Windows 11**: barra con títulos, listas, negrita,
+  cursiva, tachado, vínculos, tablas y borrar formato (⌘B, ⌘I, ⌘K, ⇧⌘8, ⇧⌘7). El texto
+  plano se edita **viendo el formato** (títulos grandes, viñetas, negrita…); el archivo
+  sigue siendo texto con marcas de Markdown.
 - **Formatear** JSON y SQL (⌥⌘L), minificar JSON, MAYÚSCULAS / minúsculas / Tipo Título.
 - **Vista previa de Markdown** en vivo junto al editor (⇧⌘V) y **exportación a PDF**.
 

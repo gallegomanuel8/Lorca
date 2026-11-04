@@ -61,6 +61,9 @@ pub struct DocView {
     pub wrap: WrapCache,
     /// Celda que mantienen ↑/↓ al pasar por filas más cortas (con ajuste de línea).
     pub goal_cells: Option<usize>,
+    /// Alto del contenido en el modo con formato (`None` en el editor de código). Ese
+    /// editor coloca el cursor a la vista él mismo.
+    pub rich_height: Option<f32>,
 }
 
 /// Longitud (en caracteres) de la línea más larga del documento.
@@ -118,6 +121,13 @@ impl DocView {
     /// Limita el desplazamiento: verticalmente hasta que la última fila quede arriba;
     /// horizontalmente hasta el final de la línea más larga (nada con ajuste de línea).
     pub fn clamp(&mut self, viewport: Viewport, editor: &EditorState) {
+        if let Some(height) = self.rich_height {
+            self.scroll_x = 0.0;
+            self.scroll_y = self
+                .scroll_y
+                .clamp(0.0, (height - viewport.height).max(0.0));
+            return;
+        }
         self.wrap.refresh(editor, viewport);
         let rows = self.rows(editor);
         let longest = if rows.is_wrapped() {
@@ -144,7 +154,7 @@ impl DocView {
     /// Para saltos (buscar, ir a línea…): si el cursor no está a la vista, lo coloca a un
     /// tercio de la altura para que se vea el contexto; si ya lo está, no mueve nada.
     pub fn jump_to_cursor(&mut self, editor: &EditorState, viewport: Viewport) {
-        if viewport.height <= 0.0 {
+        if self.rich_height.is_some() || viewport.height <= 0.0 {
             return;
         }
         self.wrap.refresh(editor, viewport);
@@ -158,7 +168,7 @@ impl DocView {
 
     /// Ajusta el desplazamiento mínimo necesario para que el cursor sea visible.
     pub fn reveal_cursor(&mut self, editor: &EditorState, viewport: Viewport) {
-        if viewport.height <= 0.0 || viewport.width <= 0.0 {
+        if self.rich_height.is_some() || viewport.height <= 0.0 || viewport.width <= 0.0 {
             return;
         }
         self.wrap.refresh(editor, viewport);

@@ -84,8 +84,8 @@ mensaje en español.
   `indent_list`, `insert_table` y `edit_table` (`TableEdit`: filas y columnas; reescribe la
   tabla como `| a | b |`) y `toggle_list` (`- ` / `1. `, renumera, respeta
   la sangría) devuelven `MarkupEdit` (sustituciones + selección). En la app,
-  `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); un documento de
-  texto plano pasa a Markdown con `Document::adopt_markdown`. ⌘I es cursiva en texto e
+  `apply_markup` (`panes.rs`) solo en texto y Markdown (`app::is_prose`); el texto plano
+  sigue siéndolo (se ve con formato en el modo WYSIWYG). ⌘I es cursiva en texto e
   información del LSP en código (`Message::ItalicOrHover`). Barra de formato encima de las
   pestañas: `format_bar.rs` (iconos SVG de `crates/app/icons/`, feature `svg` de iced,
   teñidos con el tema). Desplegables propios (`FormatPopup` en `Lorca::format_popup`,
@@ -153,6 +153,20 @@ mensaje en español.
   - `editor/`: widget propio (`iced::advanced::Widget`) que **solo lee** `EditorState` y
     publica `EditorAction`; `apply_action` las aplica al núcleo. El desplazamiento vive en
     `DocView` (por documento, en la app), no en el núcleo.
+  - Texto plano con formato (WYSIWYG, `Config::rich_plain_text`, «Ver → Texto plano con
+    formato»): `editor/rich.rs` sustituye al editor de código en los documentos de texto
+    plano. Cada línea es un `Paragraph` de iced (spans con letra proporcional
+    `PROSE_FAMILY`, títulos a escala `HEADING_SCALE`) cacheado por texto; las columnas se
+    traducen a bytes del párrafo (`col_byte`, las marcas ocultas no ocupan) y se usa el
+    `cosmic_text::Buffer` del párrafo para el cursor (`caret_in`), los clics (`hit`) y la
+    selección (`highlight`). Tachado y subrayado se dibujan a mano (`span_bounds`). ↑/↓ y
+    páginas por líneas visuales (el widget publica `Click`); el propio widget mantiene el
+    cursor a la vista (`ScrollTo`) y publica su alto (`EditorAction::RichHeight` →
+    `DocView::rich_height`, que desactiva el cálculo por filas). `editor/rich_edit.rs`:
+    ←/→ saltan las marcas, Retroceso al principio de viñeta o título quita la marca, Intro
+    continúa listas y el cursor nunca queda dentro de una marca (`snap_cursor`). Análisis
+    de cada línea en `lorca_formats::parse_line`. Sin números de línea ni resaltado de
+    búsqueda en este modo; la barra de desplazamiento es solo indicador.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
   - Ajuste de línea (`Config::wrap_plain_text`, «Ver → Ajuste de línea en texto
     plano»): solo en documentos de texto plano. `DocView` (ya no es `Copy`; el widget lo

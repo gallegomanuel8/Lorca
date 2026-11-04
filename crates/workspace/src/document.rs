@@ -178,15 +178,6 @@ impl Document {
         Some(guessed)
     }
 
-    /// Al dar formato con marcas de Markdown (negrita, listas…) a un documento de texto
-    /// plano, pasa a tratarse como Markdown (como un lenguaje deducido: se mantiene aunque
-    /// la ruta sea `.txt`). No cambia un lenguaje elegido a mano.
-    pub fn adopt_markdown(&mut self) {
-        if !self.language_manual && self.language == Language::PlainText {
-            self.set_guessed_language(Language::Markdown);
-        }
-    }
-
     /// Fija un lenguaje deducido (al pegar o al restaurar la sesión).
     pub(crate) fn set_guessed_language(&mut self, language: Language) {
         self.language = language;
@@ -363,20 +354,6 @@ mod tests {
         doc.refresh_language();
         assert_eq!(doc.language(), Language::PlainText);
         assert!(!doc.is_language_guessed());
-    }
-
-    #[test]
-    fn formatting_turns_plain_text_into_markdown() {
-        let mut doc = Document::untitled(DocumentId(1), 1);
-        doc.adopt_markdown();
-        assert_eq!(doc.language(), Language::Markdown);
-        doc.editor.insert_text("**hola**").unwrap();
-        doc.refresh_language();
-        assert_eq!(doc.language(), Language::Markdown);
-        let mut manual = Document::untitled(DocumentId(2), 2);
-        manual.set_language(Language::PlainText);
-        manual.adopt_markdown();
-        assert_eq!(manual.language(), Language::PlainText);
     }
 
     #[test]

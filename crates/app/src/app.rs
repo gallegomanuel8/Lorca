@@ -24,7 +24,7 @@ use lorca_workspace::{
 
 use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
 use crate::dialogs;
-use crate::editor::{DocView, EditorAction, Metrics, apply_action};
+use crate::editor::{self, DocView, EditorAction, Metrics, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::format_bar::{self, FormatMenu, FormatPopup};
 use crate::menu;
@@ -1121,14 +1121,28 @@ impl Lorca {
             keep_cursor_visible = view.is_cursor_visible(&document.editor, view.viewport);
             view.viewport = viewport;
         }
-        // Pegar en un documento sin lenguaje lo deduce del texto pegado.
+        // Pegar en un documento sin lenguaje lo deduce del texto pegado (salvo Markdown
+        // con el modo con formato: el texto plano ya muestra el formato).
+        let rich = self.config.rich_plain_text && document.language() == Language::PlainText;
         let pasted = match &action {
-            EditorAction::Paste(text) if document.language() == Language::PlainText => {
+            EditorAction::Paste(text)
+                if document.language() == Language::PlainText
+                    && !(rich && Language::guess(text) == Language::Markdown) =>
+            {
                 Some(text.clone())
             }
             _ => None,
         };
-        let result = apply_action(action, &mut document.editor, view, view.viewport);
+        let result = match rich
+            .then(|| editor::rich_edit::apply(&action, &mut document.editor))
+            .flatten()
+        {
+            Some(result) => result,
+            None => apply_action(action, &mut document.editor, view, view.viewport),
+        };
+        if rich {
+            editor::rich_edit::snap_cursor(&mut document.editor);
+        }
         if keep_cursor_visible {
             view.reveal_cursor(&document.editor, view.viewport);
         }
@@ -1144,15 +1158,26 @@ impl Lorca {
         }
     }
 
+    /// `true` si un documento de este lenguaje se edita con formato (WYSIWYG).
+    pub(super) fn is_rich(&self, language: Language) -> bool {
+        self.config.rich_plain_text && language == Language::PlainText
+    }
+
     /// Activa el ajuste de línea en los documentos de texto plano (si la configuración lo
     /// pide) y recalcula las filas de los visibles.
     fn refresh_wraps(&mut self) {
         let visible = self.visible_documents();
+        let rich_enabled = self.config.rich_plain_text;
         for (id, view) in &mut self.views {
             let Some(document) = self.workspace.document(*id) else {
                 continue;
             };
-            let enabled = self.config.wrap_plain_text && is_prose(document.language());
+            let rich = rich_enabled && document.language() == Language::PlainText;
+            if !rich {
+                view.rich_height = None;
+            }
+            // El modo con formato ya ajusta las líneas a su manera.
+            let enabled = self.config.wrap_plain_text && is_prose(document.language()) && !rich;
             let changed = view.wrap.enabled != enabled;
             view.wrap.enabled = enabled;
             if changed {

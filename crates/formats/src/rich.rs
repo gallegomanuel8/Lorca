@@ -67,6 +67,76 @@ impl LineMarkup {
     }
 }
 
+impl LineMarkup {
+    /// Caracteres visibles antes de la columna `col` (posición en pantalla).
+    pub fn visible_offset(&self, col: usize) -> usize {
+        self.chars
+            .iter()
+            .take(col)
+            .filter(|style| !style.hidden)
+            .count()
+    }
+
+    /// Columna válida para el cursor: nunca antes de la marca de bloque ni dentro de una
+    /// marca oculta (va al final de la marca si `forward`, al principio si no).
+    pub fn snap(&self, col: usize, forward: bool) -> usize {
+        let col = col.min(self.chars.len());
+        if col < self.prefix {
+            return self.prefix;
+        }
+        for run in self.hidden_runs() {
+            if run.start < col && col < run.end {
+                return if forward || run.start < self.prefix {
+                    run.end
+                } else {
+                    run.start
+                };
+            }
+        }
+        col
+    }
+}
+
+/// Qué hacer al pulsar Intro al final de un elemento de lista.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListContinuation {
+    /// Insertar este texto tras el salto (sangría y marca del siguiente elemento).
+    Continue(String),
+    /// El elemento está vacío: quitar su marca (los primeros `n` caracteres) y terminar
+    /// la lista.
+    End(usize),
+}
+
+/// Continuación de la lista de `line`, si es un elemento de lista.
+pub fn continue_list(line: &str) -> Option<ListContinuation> {
+    let markup = parse_line(line);
+    let indent: String = line
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let marker = match markup.block {
+        Block::Bullet => {
+            let symbol = line.chars().nth(indent.chars().count()).unwrap_or('-');
+            format!("{symbol} ")
+        }
+        Block::Numbered => {
+            let rest: String = line.chars().skip(indent.chars().count()).collect();
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            let close = rest.chars().nth(digits.chars().count()).unwrap_or('.');
+            let next = digits.parse::<u64>().map_or(1, |n| n.saturating_add(1));
+            format!("{next}{close} ")
+        }
+        _ => return None,
+    };
+    if line.chars().count() <= markup.prefix
+        || line.chars().skip(markup.prefix).all(char::is_whitespace)
+    {
+        Some(ListContinuation::End(markup.prefix))
+    } else {
+        Some(ListContinuation::Continue(format!("{indent}{marker}")))
+    }
+}
+
 /// Analiza una línea (sin el salto).
 pub fn parse_line(line: &str) -> LineMarkup {
     let chars: Vec<char> = line.chars().collect();
@@ -308,6 +378,33 @@ mod tests {
         assert_eq!(parse_line("| a | b |").block, Block::Raw);
         assert_eq!(visible("| **a** |"), "| **a** |");
         assert_eq!(parse_line("```rust").block, Block::Raw);
+    }
+
+    #[test]
+    fn cursor_snaps_out_of_markers_and_prefixes() {
+        let markup = parse_line("- a **b** c");
+        // Antes de la viñeta, después de ella.
+        assert_eq!(markup.snap(0, false), 2);
+        // Entre los dos asteriscos: al final hacia delante, al principio hacia atrás.
+        assert_eq!(markup.snap(5, true), 6);
+        assert_eq!(markup.snap(5, false), 4);
+        assert_eq!(markup.visible_offset(6), 4);
+        let heading = parse_line("## Título");
+        assert_eq!(heading.snap(1, false), 3);
+    }
+
+    #[test]
+    fn lists_continue_on_enter() {
+        assert_eq!(
+            continue_list("  - pan"),
+            Some(ListContinuation::Continue("  - ".to_owned()))
+        );
+        assert_eq!(
+            continue_list("9. nueve"),
+            Some(ListContinuation::Continue("10. ".to_owned()))
+        );
+        assert_eq!(continue_list("- "), Some(ListContinuation::End(2)));
+        assert_eq!(continue_list("texto"), None);
     }
 
     #[test]

@@ -52,6 +52,8 @@ pub enum EditorAction {
         y: Option<f32>,
     },
     Viewport(Viewport),
+    /// Alto del contenido del editor con formato (sus líneas miden distinto).
+    RichHeight(f32),
     /// ⌥+clic: añade un cursor.
     AddCursor {
         index: usize,
@@ -113,6 +115,11 @@ pub fn apply_action(
         }
         EditorAction::ScrollTo { x, y } => {
             view.scroll_to(x, y, viewport, editor);
+            return Ok(());
+        }
+        EditorAction::RichHeight(height) => {
+            view.rich_height = Some(height);
+            view.clamp(viewport, editor);
             return Ok(());
         }
         // La aplicación guarda el viewport; aquí solo se reajusta el desplazamiento.

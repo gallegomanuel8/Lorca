@@ -6,12 +6,15 @@
 mod action;
 mod keymap;
 mod palette;
+mod rich;
+pub mod rich_edit;
 mod scrollbar;
 mod view;
 mod widget;
 
 pub use action::{ClickKind, CompletionKey, EditorAction, apply_action};
 pub use palette::{EditorColors, to_color};
+pub use rich::rich_editor;
 pub use view::{DocView, Viewport};
 pub use widget::{Decorations, Underline, UnderlineKind, ViewOptions, code_editor};
 
