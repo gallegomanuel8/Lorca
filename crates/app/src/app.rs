@@ -1291,10 +1291,13 @@ impl Lorca {
             Then::Nothing => Task::none(),
             Then::CloseTab => {
                 self.close_now(id);
-                Task::none()
+                self.exit_if_empty()
             }
             Then::CloseAndContinue => {
                 self.close_now(id);
+                if self.workspace.is_empty() {
+                    return self.exit_if_empty();
+                }
                 self.process_close_queue()
             }
             Then::ContinueQuit => self.process_quit(),
@@ -1321,7 +1324,21 @@ impl Lorca {
         self.mark_cache.remove(&id);
         self.previews.remove(&id);
         self.preview_cache.remove(&id);
-        self.ensure_document();
+    }
+
+    /// Al cerrar la última pestaña se cierra la aplicación (guardando la sesión, que queda
+    /// vacía: el próximo arranque abre un documento nuevo).
+    fn exit_if_empty(&mut self) -> Task<Message> {
+        if !self.workspace.is_empty() {
+            return Task::none();
+        }
+        if self.persist_session().is_err() {
+            // Sin sesión guardada no se pierde nada (no queda ningún documento), pero
+            // mejor no salir sin que el usuario vea el error.
+            self.ensure_document();
+            return Task::none();
+        }
+        iced::exit()
     }
 
     /// Reacciona a un cambio externo de un archivo abierto.
