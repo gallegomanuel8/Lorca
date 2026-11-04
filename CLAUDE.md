@@ -156,7 +156,10 @@ mensaje en español.
   - `editor/keymap.rs`: teclas de edición que captura el widget. `shortcuts.rs`: atajos
     globales vía `keyboard::listen()` (solo reciben eventos **no capturados**, así que el
     widget no debe capturar Cmd+S, Cmd+Z, Ctrl+Tab…).
-  - `dialogs.rs`: diálogos rfd asíncronos (`Task::perform`); `dialog_open` evita abrir dos.
+  - `dialogs.rs`: selectores de archivos rfd asíncronos (`Task::perform`); `dialog_open`
+    evita abrir dos. Las confirmaciones («¿Guardar los cambios?», «Archivo cambiado en
+    disco») son propias: `prompt.rs` (`Prompt` en `Lorca::prompt`, dibujada encima de todo
+    con `stack` + `opaque`; Intro = `Message::PromptAccept`, Escape = cancelar).
   - Sesión: cualquier mensaje que la afecte marca `session_dirty`; un `time::every`
     (ejecutor smol) la guarda 300 ms tras el último cambio o cada 2 s como máximo, y al
     cerrar la ventana. Cerrar la app no pregunta; si no se puede guardar la sesión, vuelve

@@ -45,6 +45,8 @@ fn key_shortcut(key: &Key, physical_key: Physical, modifiers: Modifiers) -> Opti
     if let Key::Named(named) = key {
         return match named {
             Named::Escape => Some(Message::Escape),
+            // Solo hace algo con una ventana de confirmación abierta.
+            Named::Enter if !modifiers.command() && !modifiers.alt() => Some(Message::PromptAccept),
             Named::Tab if modifiers.control() => Some(if shift {
                 Message::PreviousTab
             } else {

@@ -16,6 +16,7 @@ mod key_filter;
 mod lsp_view;
 mod menu;
 mod palette;
+mod prompt;
 mod shortcut_labels;
 mod shortcuts;
 mod theme;

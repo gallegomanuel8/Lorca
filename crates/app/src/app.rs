@@ -23,11 +23,12 @@ use lorca_workspace::{
 };
 
 use crate::context_menu::{self, ContextAction, ContextMenu, MenuTarget, click_area, context_area};
-use crate::dialogs::{self, SaveChoice};
+use crate::dialogs;
 use crate::editor::{DocView, EditorAction, Metrics, apply_action};
 use crate::find::{self, FindMessage, FindState, SearchResults};
 use crate::menu;
 use crate::palette::{self, Palette};
+use crate::prompt::{Prompt, SaveChoice};
 use crate::shortcuts::shortcut;
 use crate::theme::{ActiveTheme, system_is_dark};
 use crate::watcher;
@@ -190,6 +191,8 @@ pub enum Message {
     FindWordUnderCursor,
     GoToLine,
     Escape,
+    /// Intro: botón principal de la ventana de confirmación abierta, si la hay.
+    PromptAccept,
     Bookmark(BookmarkAction),
     ModifiersChanged(keyboard::Modifiers),
 }
@@ -217,6 +220,8 @@ pub struct Lorca {
     notice: Option<Notice>,
     /// Hay un diálogo nativo abierto: se ignoran las órdenes que abrirían otro.
     dialog_open: bool,
+    /// Ventana de confirmación propia abierta («¿Guardar los cambios?»…).
+    prompt: Option<Prompt>,
     /// Documentos con cambios que quedan por confirmar antes de salir. Solo se usa si
     /// no se puede guardar la sesión.
     quit_queue: Option<VecDeque<DocumentId>>,
@@ -323,6 +328,7 @@ impl Lorca {
             views,
             notice: None,
             dialog_open: false,
+            prompt: None,
             quit_queue: None,
             welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
             themes,
@@ -542,6 +548,7 @@ impl Lorca {
             Message::CloseTab(id) => self.request_close(id, Then::CloseTab),
             Message::SaveChoiceMade { id, choice, then } => {
                 self.dialog_open = false;
+                self.prompt = None;
                 match choice {
                     SaveChoice::Save => self.save(id, then),
                     SaveChoice::Discard => self.finish(id, then),
@@ -702,6 +709,7 @@ impl Lorca {
             Message::FileChanged(path) => self.file_changed(&path),
             Message::ExternalChangeChoice { id, reload } => {
                 self.dialog_open = false;
+                self.prompt = None;
                 if reload {
                     self.reload_document(id);
                 } else if let Some(document) = self.workspace.document_mut(id) {
@@ -884,6 +892,16 @@ impl Lorca {
                 Task::none()
             }
             Message::GoToLine => self.open_goto(),
+            Message::Escape if self.prompt.is_some() => {
+                match self.prompt.as_ref().and_then(Prompt::cancel_message) {
+                    Some(message) => self.update(message),
+                    None => Task::none(),
+                }
+            }
+            Message::PromptAccept => match self.prompt.as_ref().and_then(Prompt::accept_message) {
+                Some(message) => self.update(message),
+                None => Task::none(),
+            },
             Message::Escape => {
                 let had_popup =
                     self.lsp.completion.take().is_some() | self.lsp.hover.take().is_some();
@@ -1250,9 +1268,8 @@ impl Lorca {
         let name = document.display_name();
         self.workspace.activate(id);
         self.dialog_open = true;
-        Task::perform(dialogs::confirm_save(name), move |choice| {
-            Message::SaveChoiceMade { id, choice, then }
-        })
+        self.prompt = Some(Prompt::save_changes(&name, id, then));
+        Task::none()
     }
 
     fn finish(&mut self, id: DocumentId, then: Then) -> Task<Message> {
@@ -1333,9 +1350,8 @@ impl Lorca {
                     return Task::none();
                 }
                 self.dialog_open = true;
-                Task::perform(dialogs::confirm_reload(name), move |reload| {
-                    Message::ExternalChangeChoice { id, reload }
-                })
+                self.prompt = Some(Prompt::external_change(&name, id));
+                Task::none()
             }
         }
     }
@@ -1403,8 +1419,12 @@ impl Lorca {
             }
             None => base,
         };
-        match &self.palette {
+        let base = match &self.palette {
             Some(state) => palette::layer(base, state, &self.palette_matches()),
+            None => base,
+        };
+        match &self.prompt {
+            Some(prompt) => crate::prompt::layer(base, prompt),
             None => base,
         }
     }
@@ -1759,6 +1779,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::LspConnected(_)
             | Message::Lsp(_)
             | Message::ShowHover
+            | Message::PromptAccept
             | Message::Editor(_, EditorAction::CursorPoint(_))
     )
 }

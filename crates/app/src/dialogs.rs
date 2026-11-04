@@ -1,20 +1,9 @@
-//! Diálogos nativos (rfd), siempre asíncronos para no bloquear la interfaz.
+//! Diálogos de archivos del sistema (rfd), siempre asíncronos para no bloquear la
+//! interfaz. Las confirmaciones son propias (`prompt.rs`).
 
 use std::path::PathBuf;
 
-use rfd::{AsyncFileDialog, AsyncMessageDialog, MessageButtons, MessageDialogResult, MessageLevel};
-
-/// Respuesta a «¿Guardar los cambios?».
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SaveChoice {
-    Save,
-    Discard,
-    Cancel,
-}
-
-const SAVE: &str = "Guardar";
-const DISCARD: &str = "No guardar";
-const CANCEL: &str = "Cancelar";
+use rfd::AsyncFileDialog;
 
 /// Pide uno o varios archivos para abrir.
 pub async fn pick_files_to_open() -> Vec<PathBuf> {
@@ -56,58 +45,4 @@ pub async fn pick_pdf_path(file_name: String, directory: Option<PathBuf>) -> Opt
         dialog = dialog.set_directory(directory);
     }
     dialog.save_file().await.map(|f| f.path().to_path_buf())
-}
-
-/// El archivo `name` cambió en disco y tiene cambios sin guardar: ¿recargar?
-/// Devuelve `true` si el usuario quiere recargar (perdiendo sus cambios).
-pub async fn confirm_reload(name: String) -> bool {
-    const RELOAD: &str = "Recargar";
-    const KEEP: &str = "Conservar mis cambios";
-    let buttons = if cfg!(windows) {
-        MessageButtons::OkCancel
-    } else {
-        MessageButtons::OkCancelCustom(RELOAD.into(), KEEP.into())
-    };
-    let result = AsyncMessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Archivo cambiado en disco")
-        .set_description(format!(
-            "Otro programa ha modificado «{name}» y tienes cambios sin guardar.\n\
-             ¿Recargar el archivo del disco y perder tus cambios?"
-        ))
-        .set_buttons(buttons)
-        .show()
-        .await;
-    match result {
-        MessageDialogResult::Ok => true,
-        MessageDialogResult::Custom(label) => label == RELOAD,
-        _ => false,
-    }
-}
-
-/// Pregunta si se guardan los cambios del documento `name`.
-pub async fn confirm_save(name: String) -> SaveChoice {
-    // En Windows los botones personalizados requieren common-controls v6 y un manifiesto;
-    // allí se usan Sí/No/Cancelar, que el sistema traduce.
-    let buttons = if cfg!(windows) {
-        MessageButtons::YesNoCancel
-    } else {
-        MessageButtons::YesNoCancelCustom(SAVE.into(), DISCARD.into(), CANCEL.into())
-    };
-    let result = AsyncMessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Cambios sin guardar")
-        .set_description(format!(
-            "¿Quieres guardar los cambios de «{name}»?\nSi no los guardas, se perderán."
-        ))
-        .set_buttons(buttons)
-        .show()
-        .await;
-    match result {
-        MessageDialogResult::Yes => SaveChoice::Save,
-        MessageDialogResult::No => SaveChoice::Discard,
-        MessageDialogResult::Custom(label) if label == SAVE => SaveChoice::Save,
-        MessageDialogResult::Custom(label) if label == DISCARD => SaveChoice::Discard,
-        _ => SaveChoice::Cancel,
-    }
 }
