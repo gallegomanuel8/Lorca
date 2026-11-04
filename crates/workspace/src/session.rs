@@ -342,6 +342,25 @@ mod tests {
     }
 
     #[test]
+    fn tab_order_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("archivo.txt");
+        std::fs::write(&file, "en disco").unwrap();
+        let mut ws = Workspace::new();
+        let a = ws.new_document();
+        ws.active_mut().unwrap().editor.insert_text("uno").unwrap();
+        ws.open_file(&file).unwrap();
+        let c = ws.new_document();
+        ws.active_mut().unwrap().editor.insert_text("tres").unwrap();
+        ws.move_tab(c, 0);
+        ws.activate(a);
+        let before: Vec<String> = ws.documents().map(|d| d.editor.text()).collect();
+        let (restored, _) = save_and_restore(&ws, dir.path());
+        let after: Vec<String> = restored.documents().map(|d| d.editor.text()).collect();
+        assert_eq!(after, before);
+    }
+
+    #[test]
     fn no_session_file_means_none() {
         let dir = tempfile::tempdir().unwrap();
         assert!(

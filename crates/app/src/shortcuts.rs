@@ -19,9 +19,13 @@ pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Op
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
         }
-        Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-            Some(Message::MouseReleased)
-        }
+        // Soltar el botón termina el arrastre de una pestaña. Si se suelta fuera de la
+        // ventana no llega el evento: salir de ella también lo termina (si no, pasar luego
+        // el ratón por las pestañas las seguiría moviendo).
+        Event::Mouse(
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)
+            | iced::mouse::Event::CursorLeft,
+        ) => Some(Message::MouseReleased),
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
             physical_key,
@@ -130,6 +134,20 @@ mod tests {
 
     fn named(n: Named, modifiers: Modifiers) -> Option<Message> {
         key_shortcut(&Key::Named(n), Physical::Code(Code::F1), modifiers)
+    }
+
+    #[test]
+    fn leaving_the_window_ends_a_tab_drag() {
+        let window = window::Id::unique();
+        for event in [
+            iced::mouse::Event::CursorLeft,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        ] {
+            assert!(matches!(
+                shortcut(Event::Mouse(event), event::Status::Ignored, window),
+                Some(Message::MouseReleased)
+            ));
+        }
     }
 
     #[test]
