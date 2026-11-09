@@ -22,6 +22,8 @@ rfd = "0.17.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 muda = { version = "0.21.2", default-features = false }
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSURL", "NSString"] }
 
 [target."cfg(windows)".build-dependencies]
 winresource = "0.1.34"
@@ -52,6 +54,8 @@ binaries = [{ path = "lorca", main = true }]
 # sustituye por el certificado Developer ID si el repositorio tiene los secretos (ver
 # release.yml); sin ellos, la primera vez hay que permitir la app en Ajustes → Privacidad.
 signing-identity = "-"
+# Tipos de archivo que abre (para «Abrir con» y el doble clic en el Finder).
+info-plist-path = "macos/Info.plist"
 minimum-system-version = "11.0"
 
 [package.metadata.packager.deb]

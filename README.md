@@ -75,6 +75,8 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 - Abre y guarda UTF-8 (con o sin BOM), UTF-16 y Windows-1252, y conserva LF o CRLF; ambos
   se cambian desde la barra de estado.
 - **Recarga** los archivos que otro programa cambia (pregunta si tienes cambios).
+- **«Abrir con Lorca»** desde el Finder de macOS y el Explorador de Windows (si Lorca ya
+  está abierto, el archivo se abre en una pestaña nueva).
 - **Actualizaciones automáticas**: avisa cuando hay una versión nueva y, con un clic, la
   descarga, comprueba su firma, la instala y vuelve a abrir Lorca.
 

@@ -15,6 +15,8 @@ mod format_bar;
 mod instance;
 mod key_filter;
 mod lsp_view;
+#[cfg(target_os = "macos")]
+mod macos_open;
 mod menu;
 mod palette;
 mod prompt;
@@ -36,6 +38,9 @@ fn main() -> anyhow::Result<()> {
     if !instance::start(&paths) {
         return Ok(());
     }
+    // macOS entrega «Abrir con» y el doble clic como un evento, no como argumentos.
+    #[cfg(target_os = "macos")]
+    macos_open::install();
     let window = iced::window::Settings {
         size: app::WINDOW_SIZE,
         position: iced::window::Position::Centered,

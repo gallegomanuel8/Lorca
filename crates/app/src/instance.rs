@@ -2,10 +2,10 @@
 //! las ejecuciones siguientes (ver `lorca_workspace::instance`).
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use iced::Subscription;
-use iced::futures::channel::mpsc::{UnboundedReceiver, unbounded};
+use iced::futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use iced::futures::{SinkExt, Stream, StreamExt};
 use lorca_workspace::instance::{Launch, claim};
 
@@ -13,10 +13,34 @@ use crate::app::Message;
 
 /// Rutas recibidas de otras ejecuciones, hasta que la suscripción recoge el receptor.
 static INCOMING: Mutex<Option<UnboundedReceiver<Vec<PathBuf>>>> = Mutex::new(None);
+/// Extremo de envío del mismo canal (también lo usa «Abrir con» de macOS).
+static SENDER: OnceLock<UnboundedSender<Vec<PathBuf>>> = OnceLock::new();
+
+/// Entrega `paths` a la ventana como si los hubiera mandado otra ejecución (se abren en
+/// pestañas y la ventana pasa al frente). Lo que llega antes de que la suscripción esté
+/// lista espera en el canal.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn deliver(paths: Vec<PathBuf>) {
+    if let Some(sender) = SENDER.get() {
+        let _ = sender.unbounded_send(paths);
+    }
+}
+
+/// Crea el canal (una vez).
+fn channel() -> &'static UnboundedSender<Vec<PathBuf>> {
+    SENDER.get_or_init(|| {
+        let (sender, receiver) = unbounded();
+        if let Ok(mut incoming) = INCOMING.lock() {
+            *incoming = Some(receiver);
+        }
+        sender
+    })
+}
 
 /// Decide si esta ejecución abre la ventana. `false` si otra instancia ya ha recibido
 /// `paths` y esta debe terminar.
 pub fn start(paths: &[PathBuf]) -> bool {
+    let sender = channel().clone();
     let Some(dir) = lorca_workspace::data_dir() else {
         return true;
     };
@@ -24,10 +48,6 @@ pub fn start(paths: &[PathBuf]) -> bool {
         Launch::Forwarded => false,
         Launch::Standalone => true,
         Launch::Primary(server) => {
-            let (sender, receiver) = unbounded();
-            if let Ok(mut incoming) = INCOMING.lock() {
-                *incoming = Some(receiver);
-            }
             server.serve(move |paths| {
                 let _ = sender.unbounded_send(paths);
             });

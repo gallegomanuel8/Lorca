@@ -24,7 +24,8 @@ mensaje en español.
 - Comentarios y documentación en **español**; identificadores en **inglés**.
 - Edición 2024. Dependencias siempre con `cargo add` (nunca inventar versiones).
 - Lints del workspace (`Cargo.toml`): prohibidos `unwrap`, `expect`, `panic!`, `dbg!` y
-  `todo!` fuera de los tests (`clippy.toml` los permite en tests). `unsafe` prohibido.
+  `todo!` fuera de los tests (`clippy.toml` los permite en tests). `unsafe` prohibido
+  (`deny`) salvo en `crates/app/src/macos_open.rs`, la única excepción autorizada.
 - Errores: un enum propio por crate con `thiserror`; `anyhow` solo en el binario.
 - Los crates `core`, `syntax`, `search`, `formats` y `workspace` **no dependen de la GUI**
   y se prueban con `cargo test`. Toda lógica nueva va ahí con tests, no en `app`.
@@ -320,6 +321,12 @@ mensaje en español.
   `release.yml` crea `latest.json`. Solo se ve cuando la release deja de ser borrador.
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
   (paquetes al publicar una etiqueta `v*`).
+- «Abrir con» y doble clic en macOS: `crates/app/macos/Info.plist` (se fusiona con el que
+  genera cargo-packager, `info-plist-path`) declara los tipos de archivo
+  (`CFBundleDocumentTypes`, rango `Alternate`). macOS los entrega como evento, no como
+  argumentos: `macos_open.rs` añade `application:openURLs:` a `NSObject` con `objc2` antes
+  de arrancar iced y pasa las rutas a `instance::deliver` (mismo canal que la instancia
+  única → `Message::OpenedElsewhere`).
 - Código solo para macOS: lo que no se use fuera necesita
   `#[cfg_attr(not(target_os = "macos"), allow(dead_code))]` o la CI de Windows/Linux falla.
 
@@ -347,5 +354,5 @@ mensaje en español.
   código ni formateo por servidor; los snippets se insertan como texto con el cursor en el
   primer hueco. Solo archivos guardados. Sincroniza el documento completo en cada cambio.
 - Guardar preferencias desde la interfaz reescribe `config.toml` y borra sus comentarios.
-- Los paquetes no están firmados ni notarizados. Abrir un archivo desde el Finder («Abrir
-  con») no lo carga: iced no recibe ese evento de macOS.
+- Los paquetes de macOS van firmados ad hoc, sin notarizar (falta un certificado
+  Developer ID).
