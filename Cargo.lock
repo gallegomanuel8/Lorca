@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "lorca"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "cargo-packager-updater",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-core"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "encoding_rs",
  "ropey",
@@ -2705,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-formats"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "genpdf",
  "pulldown-cmark 0.13.6",
@@ -2717,7 +2717,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-lsp"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "lorca-syntax",
  "lsp-types",
@@ -2730,7 +2730,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-search"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "ignore",
  "lorca-core",
@@ -2741,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-syntax"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "thiserror 2.0.21",
  "tree-sitter",
@@ -2762,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "lorca-workspace"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "dirs 7.0.0",
  "lorca-core",
