@@ -66,6 +66,8 @@ pub struct Config {
     /// Editar el texto plano viendo el formato (títulos, negrita, listas…) en vez de las
     /// marcas de Markdown, como el Bloc de notas de Windows 11.
     pub rich_plain_text: bool,
+    /// Buscar al arrancar si hay una versión nueva publicada.
+    pub check_updates: bool,
     /// Tema que se usa con aspecto claro (modo claro, o automático con el sistema claro).
     pub light_theme: String,
     /// Tema que se usa con aspecto oscuro.
@@ -159,6 +161,7 @@ impl Default for Config {
             indent_guides: true,
             wrap_plain_text: true,
             rich_plain_text: true,
+            check_updates: true,
             light_theme: DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: DEFAULT_DARK_THEME.to_owned(),
             font_size: Self::DEFAULT_FONT_SIZE,
@@ -266,6 +269,7 @@ mod tests {
         assert!(config.indent_guides);
         assert!(config.wrap_plain_text);
         assert!(config.rich_plain_text);
+        assert!(config.check_updates);
         assert_eq!(config.search, SearchConfig::default());
         assert!(!config.show_whitespace);
     }

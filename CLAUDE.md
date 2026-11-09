@@ -303,6 +303,16 @@ mensaje en español.
   (`HKCU\Software\Classes\*\shell\Lorca`; en Windows 11, en «Mostrar más opciones»).
 - `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
+- Actualizaciones automáticas (`crates/app/src/updates.rs`, `cargo-packager-updater`): al
+  arrancar (si `Config::check_updates`) y con «Buscar actualizaciones…» se pide
+  `releases/latest/download/latest.json`; si hay versión nueva sale un aviso arriba
+  (`UpdateState`, `update_banner`). «Actualizar» descarga, verifica la firma con
+  `assets/actualizaciones/clave-publica.txt`, instala (macOS: sustituye el `.app`;
+  Windows: instalador NSIS, que cierra Lorca; Linux: solo el AppImage) y reabre
+  (`updates::relaunch`, con un retraso para no chocar con la instancia única). La clave
+  privada está en los secretos `CARGO_PACKAGER_SIGN_PRIVATE_KEY(_PASSWORD)`: con ellos
+  cargo-packager deja un `.sig` junto a cada paquete y el trabajo `manifest` de
+  `release.yml` crea `latest.json`. Solo se ve cuando la release deja de ser borrador.
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
   (paquetes al publicar una etiqueta `v*`).
 - Código solo para macOS: lo que no se use fuera necesita

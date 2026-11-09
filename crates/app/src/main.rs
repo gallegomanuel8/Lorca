@@ -21,6 +21,7 @@ mod prompt;
 mod shortcut_labels;
 mod shortcuts;
 mod theme;
+mod updates;
 mod watcher;
 mod welcome;
 

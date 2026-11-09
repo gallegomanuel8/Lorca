@@ -415,6 +415,11 @@ impl Lorca {
                 context(ContextAction::ToggleWordWrap),
             ),
             Command::new(
+                "Lorca: Buscar actualizaciones",
+                "",
+                Message::CheckUpdates { manual: true },
+            ),
+            Command::new(
                 "Ver: Texto plano con formato",
                 "",
                 context(ContextAction::ToggleRichText),

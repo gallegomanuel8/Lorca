@@ -32,6 +32,7 @@ use crate::palette::{self, Palette};
 use crate::prompt::{Prompt, SaveChoice};
 use crate::shortcuts::shortcut;
 use crate::theme::{ActiveTheme, system_is_dark};
+use crate::updates;
 use crate::watcher;
 use crate::welcome;
 
@@ -196,6 +197,18 @@ pub enum Message {
     Escape,
     /// Intro: botón principal de la ventana de confirmación abierta, si la hay.
     PromptAccept,
+    /// Buscar una versión nueva (`manual`: lo pidió el usuario y se le dice el resultado).
+    CheckUpdates {
+        manual: bool,
+    },
+    UpdateChecked {
+        manual: bool,
+        result: Result<Option<updates::Available>, String>,
+    },
+    InstallUpdate,
+    UpdateProgress(updates::Progress),
+    DismissUpdate,
+    OpenUpdatePage,
     /// Abre un desplegable de la barra de formato bajo `Point`.
     OpenFormatMenu(FormatMenu, Point),
     CloseFormatMenu,
@@ -232,6 +245,8 @@ pub struct Lorca {
     prompt: Option<Prompt>,
     /// Desplegable abierto de la barra de formato.
     format_popup: Option<FormatPopup>,
+    /// Actualización disponible o en curso.
+    update: UpdateState,
     /// Documentos con cambios que quedan por confirmar antes de salir. Solo se usa si
     /// no se puede guardar la sesión.
     quit_queue: Option<VecDeque<DocumentId>>,
@@ -340,6 +355,7 @@ impl Lorca {
             dialog_open: false,
             prompt: None,
             format_popup: None,
+            update: UpdateState::None,
             quit_queue: None,
             welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
             themes,
@@ -377,6 +393,15 @@ impl Lorca {
         app.open_paths(&paths);
         app.ensure_document();
         app.sync_panes();
+        // Comprueba si hay una versión nueva sin retrasar el arranque.
+        let check_updates = if app.config.check_updates {
+            Task::perform(updates::check(), |result| Message::UpdateChecked {
+                manual: false,
+                result,
+            })
+        } else {
+            Task::none()
+        };
         app.refresh_theme();
         let highlight = app.schedule_highlight();
         (
@@ -385,6 +410,7 @@ impl Lorca {
                 system::theme().map(Message::SystemTheme),
                 highlight,
                 Task::done(Message::InstallMenu),
+                check_updates,
             ]),
         )
     }
@@ -911,6 +937,85 @@ impl Lorca {
                     Some(message) => self.update(message),
                     None => Task::none(),
                 }
+            }
+            Message::CheckUpdates { manual } => {
+                if manual {
+                    self.show_info("Buscando actualizaciones…".to_owned());
+                }
+                Task::perform(updates::check(), move |result| Message::UpdateChecked {
+                    manual,
+                    result,
+                })
+            }
+            Message::UpdateChecked { manual, result } => {
+                match result {
+                    Ok(Some(available)) => {
+                        if manual {
+                            self.notice = None;
+                        }
+                        self.update = UpdateState::Available(available);
+                    }
+                    Ok(None) if manual => self.show_info(format!(
+                        "Lorca está al día (versión {})",
+                        env!("CARGO_PKG_VERSION")
+                    )),
+                    Err(error) if manual => {
+                        self.show_error(format!("No se pudo buscar actualizaciones: {error}"));
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::InstallUpdate => {
+                let UpdateState::Available(available) = &self.update else {
+                    return Task::none();
+                };
+                let available = available.clone();
+                if !available.installable {
+                    return self.update(Message::OpenUpdatePage);
+                }
+                // En Windows el instalador cierra Lorca: la sesión se guarda antes.
+                let _ = self.persist_session();
+                self.update = UpdateState::Working {
+                    version: available.version.clone(),
+                    progress: updates::Progress::Downloading(None),
+                };
+                Task::run(updates::install(available), Message::UpdateProgress)
+            }
+            Message::UpdateProgress(progress) => match progress {
+                updates::Progress::Installed => {
+                    let _ = self.persist_session();
+                    updates::relaunch();
+                    iced::exit()
+                }
+                updates::Progress::Failed(error) => {
+                    self.update = UpdateState::None;
+                    self.show_error(format!("No se pudo actualizar: {error}"));
+                    Task::none()
+                }
+                progress => {
+                    if let UpdateState::Working {
+                        progress: current, ..
+                    } = &mut self.update
+                    {
+                        *current = progress;
+                    }
+                    Task::none()
+                }
+            },
+            Message::DismissUpdate => {
+                self.update = UpdateState::None;
+                Task::none()
+            }
+            Message::OpenUpdatePage => {
+                let page = match &self.update {
+                    UpdateState::Available(available) => available.page(),
+                    _ => return Task::none(),
+                };
+                if let Err(error) = panes::open_url(&page) {
+                    self.show_error(format!("No se pudo abrir «{page}»: {error}"));
+                }
+                Task::none()
             }
             Message::OpenFormatMenu(menu, position) => {
                 self.context_menu = None;
@@ -1484,6 +1589,9 @@ impl Lorca {
             };
             layout = layout.push(menu::bar(open));
         }
+        if let Some(banner) = self.update_banner() {
+            layout = layout.push(banner);
+        }
         layout = layout.push(format_bar::bar(self.bar_state(), tab_bar_color));
         layout = layout.push(self.tab_bar());
         if let Some(input) = &self.goto {
@@ -1555,6 +1663,78 @@ impl Lorca {
             );
         }
         base
+    }
+
+    /// Aviso de versión nueva (o progreso de la actualización) en lo alto de la ventana.
+    fn update_banner(&self) -> Option<Element<'_, Message>> {
+        let content: Element<'_, Message> = match &self.update {
+            UpdateState::None => return None,
+            UpdateState::Available(available) => {
+                let action = if available.installable {
+                    "Actualizar"
+                } else {
+                    "Descargar"
+                };
+                row![
+                    text(format!(
+                        "Hay una versión nueva de Lorca: {}",
+                        available.version.trim_start_matches('v')
+                    ))
+                    .size(13),
+                    space::horizontal(),
+                    button(text("Novedades").size(12))
+                        .padding([3, 10])
+                        .style(button::text)
+                        .on_press(Message::OpenUpdatePage),
+                    button(text("Más tarde").size(12))
+                        .padding([3, 10])
+                        .style(button::secondary)
+                        .on_press(Message::DismissUpdate),
+                    button(text(action).size(12))
+                        .padding([3, 12])
+                        .style(button::primary)
+                        .on_press(Message::InstallUpdate),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .into()
+            }
+            UpdateState::Working { version, progress } => {
+                let version = version.trim_start_matches('v');
+                let (label, fraction) = match progress {
+                    updates::Progress::Downloading(Some(fraction)) => (
+                        format!("Descargando Lorca {version}… {:.0} %", fraction * 100.0),
+                        *fraction,
+                    ),
+                    updates::Progress::Downloading(None) => {
+                        (format!("Descargando Lorca {version}…"), 0.0)
+                    }
+                    _ => (format!("Instalando Lorca {version}…"), 1.0),
+                };
+                row![
+                    text(label).size(13),
+                    space::horizontal(),
+                    iced::widget::progress_bar(0.0..=1.0, fraction)
+                        .length(Length::Fixed(220.0))
+                        .girth(Length::Fixed(6.0)),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .into()
+            }
+        };
+        Some(
+            container(content)
+                .padding([6, 12])
+                .width(Length::Fill)
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style::default()
+                        .background(palette.primary.weak.color)
+                        .color(palette.primary.weak.text)
+                })
+                .into(),
+        )
     }
 
     /// Estado del documento activo para la barra de formato.
@@ -1869,6 +2049,19 @@ fn palette_keys(
 }
 
 /// `true` si el mensaje puede cambiar algo que se guarda en la sesión.
+/// Actualización de Lorca.
+#[derive(Debug, Clone)]
+enum UpdateState {
+    None,
+    /// Hay una versión nueva (se muestra el aviso).
+    Available(updates::Available),
+    /// Descargando o instalando.
+    Working {
+        version: String,
+        progress: updates::Progress,
+    },
+}
+
 /// Documentos de texto (no de código): admiten formato con marcas de Markdown y ajuste
 /// de línea.
 pub(crate) fn is_prose(language: Language) -> bool {
@@ -1902,6 +2095,12 @@ fn affects_session(message: &Message) -> bool {
             | Message::ShowHover
             | Message::PromptAccept
             | Message::OpenFormatMenu(..)
+            | Message::CheckUpdates { .. }
+            | Message::UpdateChecked { .. }
+            | Message::InstallUpdate
+            | Message::UpdateProgress(_)
+            | Message::DismissUpdate
+            | Message::OpenUpdatePage
             | Message::CloseFormatMenu
             | Message::TableHover(_)
             | Message::Editor(_, EditorAction::CursorPoint(_))

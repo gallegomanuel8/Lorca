@@ -15,6 +15,10 @@ env:
   # Firma y notarización de macOS con un certificado Developer ID, si el repositorio tiene
   # los secretos (ver README). Sin ellos la app va firmada ad hoc.
   DEVELOPER_ID: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+  # Firma de las actualizaciones automáticas: cargo-packager genera junto a cada paquete
+  # su `.sig` (y en macOS el `.app.tar.gz` que descarga el actualizador).
+  CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+  CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
 
 jobs:
   package:
@@ -28,16 +32,20 @@ jobs:
             files: |
               target/packages/*.dmg
               target/packages/*-portable.zip
+              target/packages/*.app.tar.gz
+              target/packages/*.sig
           - os: windows-latest
             formats: nsis,wix
             files: |
               target/packages/*.exe
               target/packages/*.msi
+              target/packages/*.sig
           - os: ubuntu-latest
             formats: deb,appimage
             files: |
               target/packages/*.deb
               target/packages/*.AppImage
+              target/packages/*.sig
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -88,3 +96,47 @@ jobs:
         with:
           draft: true
           files: ${{ matrix.files }}
+
+  # Manifiesto de actualizaciones (latest.json) con la dirección y la firma del paquete de
+  # cada sistema. Lorca lo pide en releases/latest/download/latest.json, así que solo lo ve
+  # cuando la release deja de ser borrador.
+  manifest:
+    name: Manifiesto de actualizaciones
+    needs: package
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Firmas de los paquetes
+        run: gh release download "$TAG" --repo "$REPO" --pattern '*.sig' --dir sigs
+      - name: Crear latest.json
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+          tag, repo = os.environ["TAG"], os.environ["REPO"]
+          version = tag.lstrip("v")
+          base = f"https://github.com/{repo}/releases/download/{tag}/"
+          platforms = {}
+          def add(key, asset, format):
+              sig = os.path.join("sigs", asset + ".sig")
+              if os.path.exists(sig):
+                  with open(sig) as f:
+                      platforms[key] = {"url": base + asset, "signature": f.read().strip(), "format": format}
+          add("macos-aarch64", "Lorca.app.tar.gz", "app")
+          add("windows-x86_64", f"lorca_{version}_x64-setup.exe", "nsis")
+          add("linux-x86_64", f"lorca_{version}_x86_64.AppImage", "appimage")
+          manifest = {
+              "version": version,
+              "notes": f"https://github.com/{repo}/releases/tag/{tag}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          with open("latest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+      - name: Adjuntar a la release
+        run: gh release upload "$TAG" latest.json --repo "$REPO" --clobber
