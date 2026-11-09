@@ -153,9 +153,13 @@ mensaje en español.
   - `editor/`: widget propio (`iced::advanced::Widget`) que **solo lee** `EditorState` y
     publica `EditorAction`; `apply_action` las aplica al núcleo. El desplazamiento vive en
     `DocView` (por documento, en la app), no en el núcleo.
-  - Texto plano con formato (WYSIWYG, `Config::rich_plain_text`, «Ver → Texto plano con
-    formato»): `editor/rich.rs` sustituye al editor de código en los documentos de texto
-    plano. Cada línea es un `Paragraph` de iced (spans con letra proporcional
+  - Tres tipos de documento: **texto plano** (tal cual, sin ajuste de línea), **texto con
+    formato** (Markdown; `Language::name` es «Texto con formato») y código. Dar formato a
+    un texto plano lo convierte en texto con formato (`Document::adopt_markdown`) y al
+    guardar se propone `.md`.
+  - Texto con formato (WYSIWYG, salvo `Config::show_markdown_markers`, «Ver → Mostrar marcas
+    de Markdown»): `editor/rich.rs` sustituye al editor de código en los documentos
+    Markdown (`Lorca::is_rich`). Cada línea es un `Paragraph` de iced (spans con letra proporcional
     `PROSE_FAMILY`, títulos a escala `HEADING_SCALE`) cacheado por texto; las columnas se
     traducen a bytes del párrafo (`col_byte`, las marcas ocultas no ocupan) y se usa el
     `cosmic_text::Buffer` del párrafo para el cursor (`caret_in`), los clics (`hit`) y la
@@ -168,8 +172,9 @@ mensaje en español.
     de cada línea en `lorca_formats::parse_line`. Sin números de línea ni resaltado de
     búsqueda en este modo; la barra de desplazamiento es solo indicador.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
-  - Ajuste de línea (`Config::wrap_plain_text`, «Ver → Ajuste de línea en texto
-    plano»): solo en documentos de texto plano. `DocView` (ya no es `Copy`; el widget lo
+  - Ajuste de línea (`Config::wrap_markdown`, «Ver → Ajuste de línea al ver las marcas»):
+    solo en los textos con formato vistos con sus marcas (con formato ya se ajustan; el
+    texto plano y el código no). `DocView` (ya no es `Copy`; el widget lo
     recibe por referencia) guarda un `WrapCache` (filas por versión y anchura) que
     `refresh_wraps` activa o desactiva al final de cada `update`. Desplazamiento, cursor,
     clics y dibujo trabajan con filas (`Rows`); el número de línea solo en la primera

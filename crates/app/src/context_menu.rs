@@ -74,7 +74,7 @@ pub enum ContextAction {
     ToggleLineEndings,
     ToggleIndentGuides,
     ToggleWordWrap,
-    ToggleRichText,
+    ToggleMarkdownMarkers,
     FormatDocument,
     MinifyJson,
     ChangeCase(Case),

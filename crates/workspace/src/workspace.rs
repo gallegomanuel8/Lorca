@@ -464,7 +464,7 @@ mod tests {
         let id = ws.open_loaded(Path::new("/no/existe/poema.md"), loaded("verso\r\n"));
         let doc = ws.document(id).unwrap();
         assert_eq!(doc.display_name(), "poema.md");
-        assert_eq!(doc.language().name(), "Markdown");
+        assert_eq!(doc.language().name(), "Texto con formato");
         assert_eq!(doc.format().line_ending, LineEnding::CrLf);
         assert_eq!(doc.format().encoding, TextEncoding::Utf8);
         assert_eq!(doc.editor.text(), "verso\n");

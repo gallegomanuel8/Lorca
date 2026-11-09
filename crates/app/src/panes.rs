@@ -129,7 +129,7 @@ impl Lorca {
                 .as_ref()
                 .is_some_and(|c| c.document == id),
         };
-        // Texto plano: edición con formato (WYSIWYG).
+        // Texto con formato (Markdown): se edita viendo el formato (WYSIWYG).
         if self.is_rich(document.language()) {
             let editor: Element<'_, Message> = crate::editor::rich_editor(
                 &document.editor,
@@ -410,7 +410,7 @@ impl Lorca {
                 context(ContextAction::ToggleIndentGuides),
             ),
             Command::new(
-                "Ver: Ajuste de línea en texto y Markdown",
+                "Ver: Ajuste de línea al ver las marcas",
                 "",
                 context(ContextAction::ToggleWordWrap),
             ),
@@ -420,9 +420,9 @@ impl Lorca {
                 Message::CheckUpdates { manual: true },
             ),
             Command::new(
-                "Ver: Texto plano con formato",
+                "Ver: Mostrar marcas de Markdown",
                 "",
-                context(ContextAction::ToggleRichText),
+                context(ContextAction::ToggleMarkdownMarkers),
             ),
             Command::new(
                 "Finales de línea: LF",
@@ -798,14 +798,14 @@ impl Lorca {
                     Some(ContextAction::ToggleIndentGuides),
                 ),
                 MenuItem::check(
-                    "Ajuste de línea en texto y Markdown",
-                    self.config.wrap_plain_text,
+                    "Ajuste de línea al ver las marcas",
+                    self.config.wrap_markdown,
                     Some(ContextAction::ToggleWordWrap),
                 ),
                 MenuItem::check(
-                    "Texto plano con formato",
-                    self.config.rich_plain_text,
-                    Some(ContextAction::ToggleRichText),
+                    "Mostrar marcas de Markdown",
+                    self.config.show_markdown_markers,
+                    Some(ContextAction::ToggleMarkdownMarkers),
                 ),
             ],
             MenuTarget::Theme => {
@@ -852,8 +852,8 @@ impl Lorca {
                                 "whitespace" => Some(self.config.show_whitespace),
                                 "line_endings" => Some(self.config.show_line_endings),
                                 "guides" => Some(self.config.indent_guides),
-                                "wrap" => Some(self.config.wrap_plain_text),
-                                "rich" => Some(self.config.rich_plain_text),
+                                "wrap" => Some(self.config.wrap_markdown),
+                                "markers" => Some(self.config.show_markdown_markers),
                                 _ => None,
                             };
                             match checked {
@@ -1099,12 +1099,12 @@ impl Lorca {
                 Task::none()
             }
             ContextAction::ToggleWordWrap => {
-                self.config.wrap_plain_text = !self.config.wrap_plain_text;
+                self.config.wrap_markdown = !self.config.wrap_markdown;
                 self.save_config();
                 Task::none()
             }
-            ContextAction::ToggleRichText => {
-                self.config.rich_plain_text = !self.config.rich_plain_text;
+            ContextAction::ToggleMarkdownMarkers => {
+                self.config.show_markdown_markers = !self.config.show_markdown_markers;
                 self.save_config();
                 Task::none()
             }
@@ -1237,6 +1237,8 @@ impl Lorca {
         document
             .editor
             .set_selection(Selection::new(edit.selection.start, edit.selection.end));
+        // Dar formato a un texto plano lo convierte en texto con formato.
+        document.adopt_markdown();
         let view = self.views.entry(id).or_default();
         let viewport = view.viewport;
         view.reveal_cursor(&document.editor, viewport);

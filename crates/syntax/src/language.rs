@@ -44,7 +44,7 @@ impl Language {
     pub const fn name(self) -> &'static str {
         match self {
             Self::PlainText => "Texto plano",
-            Self::Markdown => "Markdown",
+            Self::Markdown => "Texto con formato",
             Self::Sql => "SQL",
             Self::Rust => "Rust",
             Self::Python => "Python",

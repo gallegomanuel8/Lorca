@@ -178,6 +178,15 @@ impl Document {
         Some(guessed)
     }
 
+    /// Al dar formato (negrita, listas…) a un texto plano, pasa a ser texto con formato
+    /// (Markdown) como un lenguaje deducido: se mantiene aunque la ruta sea `.txt`. No
+    /// cambia un lenguaje elegido a mano.
+    pub fn adopt_markdown(&mut self) {
+        if !self.language_manual && self.language == Language::PlainText {
+            self.set_guessed_language(Language::Markdown);
+        }
+    }
+
     /// Fija un lenguaje deducido (al pegar o al restaurar la sesión).
     pub(crate) fn set_guessed_language(&mut self, language: Language) {
         self.language = language;
@@ -197,7 +206,8 @@ impl Document {
     }
 
     /// Nombre de archivo que se propone al guardar por primera vez: el comienzo del texto
-    /// sin los caracteres que no admiten los sistemas de archivos, con `.txt`.
+    /// sin los caracteres que no admiten los sistemas de archivos, con `.md` si es texto con
+    /// formato y `.txt` si no.
     pub fn suggested_file_name(&self) -> String {
         if self.path.is_some() {
             return self.display_name();
@@ -221,7 +231,12 @@ impl Document {
             })
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| self.untitled_label());
-        format!("{base}.txt")
+        let extension = if self.language == Language::Markdown {
+            "md"
+        } else {
+            "txt"
+        };
+        format!("{base}.{extension}")
     }
 
     fn untitled_label(&self) -> String {
@@ -354,6 +369,19 @@ mod tests {
         doc.refresh_language();
         assert_eq!(doc.language(), Language::PlainText);
         assert!(!doc.is_language_guessed());
+    }
+
+    #[test]
+    fn formatting_turns_plain_text_into_markdown() {
+        let mut doc = Document::untitled(DocumentId(1), 1);
+        doc.editor.insert_text("**hola**").unwrap();
+        doc.adopt_markdown();
+        assert_eq!(doc.language(), Language::Markdown);
+        assert_eq!(doc.suggested_file_name(), "hola.md");
+        let mut manual = Document::untitled(DocumentId(2), 2);
+        manual.set_language(Language::PlainText);
+        manual.adopt_markdown();
+        assert_eq!(manual.language(), Language::PlainText);
     }
 
     #[test]

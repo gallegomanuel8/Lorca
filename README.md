@@ -36,7 +36,6 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 - **Pestañas** con indicador ● de cambios, reordenables arrastrando; selección de varias
   con ⌘/Ctrl+clic para cerrarlas, guardarlas o verlas juntas. Las que no se han guardado
   llevan el comienzo de su texto, como en el Bloc de notas.
-- **Ajuste de línea** en texto y Markdown: las líneas largas se adaptan a la ventana.
 - **Pantalla dividida** de 2 a 4 documentos lado a lado (`⌘\`), cada uno con su cursor.
 - **Multicursor**: ⌥+clic, ⌘D para la siguiente aparición, ⌥⌘↑/↓ en columna.
 - **Deshacer por transacciones** (una palabra se deshace de una vez), números de línea,
@@ -52,9 +51,10 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 - **Detección** por extensión, nombre de archivo y shebang (y por el contenido al pegar
   en un documento sin lenguaje); selector manual en la barra de estado.
 - **Formato como en el Bloc de notas de Windows 11**: barra con títulos, listas, negrita,
-  cursiva, tachado, vínculos, tablas y borrar formato (⌘B, ⌘I, ⌘K, ⇧⌘8, ⇧⌘7). El texto
-  plano se edita **viendo el formato** (títulos grandes, viñetas, negrita…); el archivo
-  sigue siendo texto con marcas de Markdown.
+  cursiva, tachado, vínculos, tablas y borrar formato (⌘B, ⌘I, ⌘K, ⇧⌘8, ⇧⌘7). Los
+  documentos de **texto con formato** (Markdown, `.md`) se editan **viendo el formato**
+  (títulos grandes, viñetas, negrita…) y se ajustan a la ventana; el **texto plano** se ve
+  tal cual. Dar formato a un texto plano lo convierte en texto con formato.
 - **Formatear** JSON y SQL (⌥⌘L), minificar JSON, MAYÚSCULAS / minúsculas / Tipo Título.
 - **Vista previa de Markdown** en vivo junto al editor (⇧⌘V) y **exportación a PDF**.
 

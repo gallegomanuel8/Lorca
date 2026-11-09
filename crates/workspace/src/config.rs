@@ -60,12 +60,12 @@ pub struct Config {
     pub show_line_endings: bool,
     /// Mostrar guías verticales de indentación.
     pub indent_guides: bool,
-    /// Ajustar las líneas largas a la anchura de la ventana en los documentos de texto
-    /// plano (como el Bloc de notas).
-    pub wrap_plain_text: bool,
-    /// Editar el texto plano viendo el formato (títulos, negrita, listas…) en vez de las
-    /// marcas de Markdown, como el Bloc de notas de Windows 11.
-    pub rich_plain_text: bool,
+    /// Ajustar las líneas largas a la ventana al ver las marcas de un texto con formato
+    /// (con formato siempre se ajustan; el texto plano y el código, nunca).
+    pub wrap_markdown: bool,
+    /// Ver las marcas de Markdown (`**`, `#`…) de los textos con formato en lugar del
+    /// formato aplicado.
+    pub show_markdown_markers: bool,
     /// Buscar al arrancar si hay una versión nueva publicada.
     pub check_updates: bool,
     /// Tema que se usa con aspecto claro (modo claro, o automático con el sistema claro).
@@ -159,8 +159,8 @@ impl Default for Config {
             show_whitespace: false,
             show_line_endings: false,
             indent_guides: true,
-            wrap_plain_text: true,
-            rich_plain_text: true,
+            wrap_markdown: true,
+            show_markdown_markers: false,
             check_updates: true,
             light_theme: DEFAULT_LIGHT_THEME.to_owned(),
             dark_theme: DEFAULT_DARK_THEME.to_owned(),
@@ -267,8 +267,8 @@ mod tests {
         let config = Config::load(&path).unwrap();
         assert_eq!(config.theme, Some(ThemeMode::Light));
         assert!(config.indent_guides);
-        assert!(config.wrap_plain_text);
-        assert!(config.rich_plain_text);
+        assert!(config.wrap_markdown);
+        assert!(!config.show_markdown_markers);
         assert!(config.check_updates);
         assert_eq!(config.search, SearchConfig::default());
         assert!(!config.show_whitespace);
