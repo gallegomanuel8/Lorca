@@ -87,12 +87,18 @@ jobs:
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "lorca") | .version')
           ditto -c -k --keepParent target/packages/Lorca.app "target/packages/Lorca_${version}_$(uname -m)-portable.zip"
       # .rpm (Fedora, openSUSE…): cargo-packager no lo genera; lo hace cargo-generate-rpm
-      # con el binario ya compilado (configuración en crates/app/Cargo.toml).
+      # con el binario ya compilado (configuración en crates/app/Cargo.toml). Después se
+      # firma con cargo-packager, que ya está instalado.
       - name: Paquete .rpm
         if: runner.os == 'Linux'
         run: |
           cargo install cargo-generate-rpm --locked
           cargo generate-rpm -p crates/app -o target/packages/
+          # Firma como la de los demás paquetes (.rpm.sig), con la clave de las
+          # actualizaciones (CARGO_PACKAGER_SIGN_PRIVATE_KEY del entorno).
+          for rpm in target/packages/*.rpm; do
+            cargo packager signer sign "$rpm"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: lorca-${{ runner.os }}

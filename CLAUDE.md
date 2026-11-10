@@ -322,6 +322,8 @@ mensaje en español.
   (`[package.metadata.generate-rpm]`, tras `cargo build --release`). El `.desktop` del rpm es
   `assets/linux/lorca.desktop`; su nombre debe coincidir con el `application_id` de la ventana
   (`"lorca"`, en `main.rs`), o Wayland muestra el icono genérico.
+  En la release, el `.rpm` se firma después con `cargo packager signer sign` (misma clave
+  que las actualizaciones), así que también lleva su `.rpm.sig`.
 - `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - Actualizaciones automáticas (`crates/app/src/updates.rs`, `cargo-packager-updater`): al
