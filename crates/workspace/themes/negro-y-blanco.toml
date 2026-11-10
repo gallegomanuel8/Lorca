@@ -1,0 +1,51 @@
+# Negro y blanco: letra blanca sobre negro, sin ningún color. El resaltado se distingue
+# con negrita, cursiva y un gris para lo secundario (comentarios, números de línea).
+name = "Negro y blanco"
+appearance = "dark"
+description = "Solo negro y blanco, sin colores"
+
+[palette]
+background = "#000000"
+text = "#ffffff"
+primary = "#ffffff"
+success = "#ffffff"
+warning = "#ffffff"
+danger = "#ffffff"
+
+[editor]
+background = "#000000"
+gutter = "#000000"
+current_line = "#141414"
+selection = "#ffffff38"
+cursor = "#ffffff"
+line_number = "#7a7a7a"
+line_number_active = "#ffffff"
+find = "#ffffff30"
+find_current = "#ffffff70"
+mark = "#ffffff24"
+bookmark = "#ffffff"
+whitespace = "#3c3c3c"
+guide = "#262626"
+error = "#ffffff"
+warning = "#ffffff"
+info = "#ffffff"
+
+[syntax]
+keyword = { color = "#ffffff", bold = true }
+function = "#ffffff"
+type = { color = "#ffffff", bold = true }
+string = "#ffffff"
+escape = { color = "#ffffff", bold = true }
+number = "#ffffff"
+constant = { color = "#ffffff", bold = true }
+comment = { color = "#8c8c8c", italic = true }
+property = "#ffffff"
+variable = "#ffffff"
+operator = "#ffffff"
+tag = { color = "#ffffff", bold = true }
+attribute = { color = "#ffffff", italic = true }
+heading = { color = "#ffffff", bold = true }
+emphasis = { italic = true }
+strong = { bold = true }
+link = { color = "#ffffff", italic = true }
+code = "#ffffff"

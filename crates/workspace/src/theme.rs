@@ -28,10 +28,12 @@ const BUILTIN: &[&str] = &[
     include_str!("../themes/bodas-de-sangre.toml"),
     include_str!("../themes/poeta-en-nueva-york.toml"),
     include_str!("../themes/bola-negra-oscuro.toml"),
+    include_str!("../themes/negro-y-blanco.toml"),
     include_str!("../themes/mariana-pineda.toml"),
     include_str!("../themes/bernarda-alba.toml"),
     include_str!("../themes/dona-rosita.toml"),
     include_str!("../themes/bola-negra-claro.toml"),
+    include_str!("../themes/blanco-y-negro.toml"),
 ];
 
 /// Color sRGB con opacidad. En TOML se escribe `"#rrggbb"` o `"#rrggbbaa"`.

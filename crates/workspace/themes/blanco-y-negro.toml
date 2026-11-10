@@ -1,0 +1,51 @@
+# Blanco y negro: tinta negra sobre papel blanco, sin ningún color. El resaltado se
+# distingue con negrita, cursiva y un gris para lo secundario (comentarios, números de línea).
+name = "Blanco y negro"
+appearance = "light"
+description = "Solo blanco y negro, sin colores"
+
+[palette]
+background = "#ffffff"
+text = "#000000"
+primary = "#000000"
+success = "#000000"
+warning = "#000000"
+danger = "#000000"
+
+[editor]
+background = "#ffffff"
+gutter = "#ffffff"
+current_line = "#f2f2f2"
+selection = "#00000030"
+cursor = "#000000"
+line_number = "#8c8c8c"
+line_number_active = "#000000"
+find = "#0000002e"
+find_current = "#00000066"
+mark = "#0000001f"
+bookmark = "#000000"
+whitespace = "#c8c8c8"
+guide = "#e0e0e0"
+error = "#000000"
+warning = "#000000"
+info = "#000000"
+
+[syntax]
+keyword = { color = "#000000", bold = true }
+function = "#000000"
+type = { color = "#000000", bold = true }
+string = "#000000"
+escape = { color = "#000000", bold = true }
+number = "#000000"
+constant = { color = "#000000", bold = true }
+comment = { color = "#7a7a7a", italic = true }
+property = "#000000"
+variable = "#000000"
+operator = "#000000"
+tag = { color = "#000000", bold = true }
+attribute = { color = "#000000", italic = true }
+heading = { color = "#000000", bold = true }
+emphasis = { italic = true }
+strong = { bold = true }
+link = { color = "#000000", italic = true }
+code = "#000000"

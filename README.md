@@ -84,7 +84,8 @@ pyright, typescript-language-server…) ofrece **autocompletado** mientras escri
 
 Cinco oscuros —*Romancero gitano*, *Yerma*, *Bodas de sangre*, *Poeta en Nueva York* y
 *La bola negra*— y cuatro claros —*Mariana Pineda*, *La casa de Bernarda Alba*, *Doña
-Rosita la soltera* y *La bola negra*—. Se elige uno claro y otro oscuro, y el modo automático sigue al sistema. Se
+Rosita la soltera* y *La bola negra*—. Además, dos sin ningún color: *Blanco y negro* (claro) y
+*Negro y blanco* (oscuro). Se elige uno claro y otro oscuro, y el modo automático sigue al sistema. Se
 cambian desde la barra de estado o la paleta, y puedes crear los tuyos.
 
 ![Pantalla de bienvenida: modo automático, claro (Mariana Pineda) u oscuro (Romancero gitano)](docs/capturas/bienvenida.png)
