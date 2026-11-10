@@ -264,6 +264,9 @@ mensaje en español.
       `refresh_theme` al final de cada `update` solo si cambió el aspecto o el nombre.
       `editor/palette.rs`: `EditorColors::new(spec, theme)` resuelve los colores del editor
       y del resaltado; el widget los recibe con `.colors(...)`.
+    - Zoom: ⌘+/−/0 (Ctrl fuera de macOS) y ⌘/Ctrl + rueda en los dos editores
+      (`EditorAction::Zoom` → `Message::Zoom`; `editor::zoom_steps` acumula los píxeles del
+      touchpad, 40 px por paso). En Windows el pellizco del touchpad llega como Ctrl + rueda.
     - `Metrics` (tamaño de letra, alto de línea, tabulador) viaja en `ViewOptions` y en
       `Viewport`; el widget vuelve a medir la celda si cambia el tamaño.
     - `watcher::Watched` vigila archivos y carpetas: `config.toml` y `themes/` se recargan

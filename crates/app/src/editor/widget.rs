@@ -139,6 +139,8 @@ struct State {
     /// Flecha de una barra mantenida pulsada: eje, sentido (hacia el final) y momento
     /// del siguiente paso.
     arrow_hold: Option<(Axis, bool, Instant)>,
+    /// Rueda acumulada para el zoom (ver `zoom_steps`).
+    zoom_pending: f32,
 }
 
 impl Default for State {
@@ -159,6 +161,7 @@ impl Default for State {
             longest: None,
             scroll_drag: None,
             arrow_hold: None,
+            zoom_pending: 0.0,
         }
     }
 }
@@ -668,6 +671,16 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
                 state.dragging = false;
                 state.scroll_drag = None;
                 state.arrow_hold = None;
+            }
+            // ⌘ + rueda (Ctrl fuera de macOS) amplía o reduce la letra.
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(geometry.bounds) && state.modifiers.command() =>
+            {
+                let steps = super::zoom_steps(&mut state.zoom_pending, *delta);
+                if steps != 0 {
+                    self.publish(shell, EditorAction::Zoom(steps));
+                }
+                shell.capture_event();
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(geometry.bounds) =>

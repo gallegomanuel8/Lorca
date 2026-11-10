@@ -54,6 +54,9 @@ pub enum EditorAction {
     Viewport(Viewport),
     /// Alto del contenido del editor con formato (sus líneas miden distinto).
     RichHeight(f32),
+    /// Zoom con la rueda o el touchpad (⌘ en macOS, Ctrl en el resto): pasos de tamaño
+    /// de letra (positivo = más grande). Lo aplica la aplicación.
+    Zoom(i8),
     /// ⌥+clic: añade un cursor.
     AddCursor {
         index: usize,
@@ -117,6 +120,7 @@ pub fn apply_action(
             view.scroll_to(x, y, viewport, editor);
             return Ok(());
         }
+        EditorAction::Zoom(_) => return Ok(()),
         EditorAction::RichHeight(height) => {
             view.rich_height = Some(height);
             view.clamp(viewport, editor);

@@ -509,6 +509,7 @@ impl Lorca {
         }
 
         match message {
+            Message::Editor(_, EditorAction::Zoom(steps)) => self.update(Message::Zoom(steps)),
             Message::Editor(id, action) => {
                 match action {
                     EditorAction::ContextMenu { position, .. } => {

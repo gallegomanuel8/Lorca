@@ -109,6 +109,8 @@ struct State {
     revealed: Option<(u64, usize)>,
     /// Posición horizontal que mantienen ↑/↓.
     goal_x: Option<f32>,
+    /// Rueda acumulada para el zoom (ver `zoom_steps`).
+    zoom_pending: f32,
 }
 
 impl Default for State {
@@ -128,6 +130,7 @@ impl Default for State {
             reported_height: None,
             revealed: None,
             goal_x: None,
+            zoom_pending: 0.0,
         }
     }
 }
@@ -668,6 +671,16 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                 };
                 let index = state.index_at(self.editor, to_content(position));
                 self.publish(shell, EditorAction::ContextMenu { index, position });
+                shell.capture_event();
+            }
+            // ⌘ + rueda (Ctrl fuera de macOS) amplía o reduce la letra.
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(bounds) && state.modifiers.command() =>
+            {
+                let steps = super::zoom_steps(&mut state.zoom_pending, *delta);
+                if steps != 0 {
+                    self.publish(shell, EditorAction::Zoom(steps));
+                }
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
