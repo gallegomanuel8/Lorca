@@ -185,6 +185,13 @@ impl Config {
             .clamp(*Self::FONT_SIZES.start(), *Self::FONT_SIZES.end())
     }
 
+    /// Zoom en porcentaje de un tamaño de letra respecto al de la configuración (el 100 %).
+    pub fn zoom_percent(&self, size: u16) -> u16 {
+        let base = u32::from(self.font_size().max(1));
+        let percent = (u32::from(size) * 100 + base / 2) / base;
+        u16::try_from(percent).unwrap_or(u16::MAX)
+    }
+
     /// Tamaño de fuente dentro de los límites admitidos.
     pub fn font_size(&self) -> u16 {
         self.font_size
@@ -278,6 +285,9 @@ mod tests {
         assert!(!config.show_markdown_markers);
         assert!(config.check_updates);
         assert_eq!(Config::zoomed(14, 3), 17);
+        assert_eq!(config.zoom_percent(14), 100);
+        assert_eq!(config.zoom_percent(21), 150);
+        assert_eq!(config.zoom_percent(15), 107);
         assert_eq!(Config::zoomed(9, -5), 8);
         assert_eq!(Config::zoomed(39, 8), 40);
         assert_eq!(config.search, SearchConfig::default());

@@ -1960,6 +1960,29 @@ impl Lorca {
             }
             let format = document.format();
             items.push(text(position).size(12).into());
+            // Zoom de la pestaña; un clic lo devuelve al 100 % (como ⌘0).
+            let size = document
+                .font_size()
+                .unwrap_or_else(|| self.config.font_size());
+            let zoom = button(text(format!("{} %", self.config.zoom_percent(size))).size(12))
+                .padding(0)
+                .style(button::text)
+                .on_press(Message::Zoom(0));
+            items.push(
+                tooltip(
+                    zoom,
+                    container(
+                        text(format!(
+                            "Zoom de esta pestaña (letra de {size} pt). Clic: volver al 100 %"
+                        ))
+                        .size(12),
+                    )
+                    .padding(6)
+                    .style(container::rounded_box),
+                    tooltip::Position::Top,
+                )
+                .into(),
+            );
             items.push(
                 pick_list(
                     Language::ALL,
