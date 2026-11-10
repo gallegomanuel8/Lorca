@@ -2676,6 +2676,7 @@ name = "lorca"
 version = "0.1.9"
 dependencies = [
  "anyhow",
+ "block2 0.6.2",
  "cargo-packager-updater",
  "iced",
  "image",
@@ -2688,6 +2689,7 @@ dependencies = [
  "muda",
  "notify",
  "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "rfd",
  "winresource",

@@ -25,7 +25,8 @@ mensaje en español.
 - Edición 2024. Dependencias siempre con `cargo add` (nunca inventar versiones).
 - Lints del workspace (`Cargo.toml`): prohibidos `unwrap`, `expect`, `panic!`, `dbg!` y
   `todo!` fuera de los tests (`clippy.toml` los permite en tests). `unsafe` prohibido
-  (`deny`) salvo en `crates/app/src/macos_open.rs`, la única excepción autorizada.
+  (`deny`) salvo en `crates/app/src/macos.rs`, la única excepción autorizada (integración
+  con macOS que iced no da: abrir documentos y pellizco).
 - Errores: un enum propio por crate con `thiserror`; `anyhow` solo en el binario.
 - Los crates `core`, `syntax`, `search`, `formats` y `workspace` **no dependen de la GUI**
   y se prueban con `cargo test`. Toda lógica nueva va ahí con tests, no en `app`.
@@ -267,6 +268,10 @@ mensaje en español.
     - Zoom: ⌘+/−/0 (Ctrl fuera de macOS) y ⌘/Ctrl + rueda en los dos editores
       (`EditorAction::Zoom` → `Message::Zoom`; `editor::zoom_steps` acumula los píxeles del
       touchpad, 40 px por paso). En Windows el pellizco del touchpad llega como Ctrl + rueda.
+      En macOS el pellizco lo capta `macos::install_pinch_zoom` (monitor local de AppKit
+      para `NSEventMask::Magnify`, instalado con el menú) y llega por
+      `macos::pinch_events()` como `Message::Zoom` (`pinch_steps`: 0,06 de ampliación por
+      punto). Linux no tiene pellizco (winit no lo da).
     - `Metrics` (tamaño de letra, alto de línea, tabulador) viaja en `ViewOptions` y en
       `Viewport`; el widget vuelve a medir la celda si cambia el tamaño.
     - `watcher::Watched` vigila archivos y carpetas: `config.toml` y `themes/` se recargan
@@ -327,7 +332,7 @@ mensaje en español.
 - «Abrir con» y doble clic en macOS: `crates/app/macos/Info.plist` (se fusiona con el que
   genera cargo-packager, `info-plist-path`) declara los tipos de archivo
   (`CFBundleDocumentTypes`, rango `Alternate`). macOS los entrega como evento, no como
-  argumentos: `macos_open.rs` añade `application:openURLs:` a `NSObject` con `objc2` antes
+  argumentos: `macos.rs` añade `application:openURLs:` a `NSObject` con `objc2` antes
   de arrancar iced y pasa las rutas a `instance::deliver` (mismo canal que la instancia
   única → `Message::OpenedElsewhere`).
 - Código solo para macOS: lo que no se use fuera necesita

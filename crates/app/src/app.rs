@@ -462,6 +462,8 @@ impl Lorca {
             crate::lsp_view::events(),
             crate::instance::events(),
         ];
+        #[cfg(target_os = "macos")]
+        subscriptions.push(crate::macos::pinch_events());
         if self.palette.is_some() {
             subscriptions.push(event::listen_with(palette_keys));
         }
@@ -693,6 +695,9 @@ impl Lorca {
                 Task::none()
             }
             Message::InstallMenu => {
+                // Ya en el hilo principal y con la aplicación arrancada.
+                #[cfg(target_os = "macos")]
+                crate::macos::install_pinch_zoom();
                 match menu::install() {
                     Ok(installed) => self.native_menu = Some(installed),
                     Err(error) => self.show_error(format!("No se pudo crear el menú: {error}")),
