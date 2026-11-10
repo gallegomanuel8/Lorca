@@ -429,9 +429,22 @@ impl Lorca {
         self.active_theme.iced.clone()
     }
 
-    /// Medidas del texto del editor según la configuración.
+    /// Medidas del texto del documento activo.
     pub(crate) fn metrics(&self) -> Metrics {
-        Metrics::new(f32::from(self.config.font_size()), self.config.tab_width())
+        match self.workspace.active_id() {
+            Some(id) => self.metrics_for(id),
+            None => Metrics::new(f32::from(self.config.font_size()), self.config.tab_width()),
+        }
+    }
+
+    /// Medidas del texto de un documento: su zoom propio o el tamaño de la configuración.
+    pub(crate) fn metrics_for(&self, id: DocumentId) -> Metrics {
+        let size = self
+            .workspace
+            .document(id)
+            .and_then(Document::font_size)
+            .unwrap_or_else(|| self.config.font_size());
+        Metrics::new(f32::from(size), self.config.tab_width())
     }
 
     /// Aspecto (claro u oscuro) que toca mostrar ahora.
@@ -844,17 +857,19 @@ impl Lorca {
                 self.save_config();
                 Task::none()
             }
+            // El zoom es de la pestaña activa (se guarda en la sesión); ⌘0 la devuelve al
+            // tamaño de la configuración.
             Message::Zoom(delta) => {
-                self.config.font_size = match delta {
-                    0 => Config::DEFAULT_FONT_SIZE,
-                    _ => self
-                        .config
-                        .font_size()
-                        .saturating_add_signed(i16::from(delta))
-                        .clamp(*Config::FONT_SIZES.start(), *Config::FONT_SIZES.end()),
+                let default = self.config.font_size();
+                let Some(document) = self.workspace.active_mut() else {
+                    return Task::none();
                 };
-                self.save_config();
-                self.show_info(format!("Tamaño de letra: {}", self.config.font_size));
+                let size = match delta {
+                    0 => default,
+                    _ => Config::zoomed(document.font_size().unwrap_or(default), delta),
+                };
+                document.set_font_size((size != default).then_some(size));
+                self.show_info(format!("Tamaño de letra de esta pestaña: {size}"));
                 Task::none()
             }
             Message::OpenConfig => {

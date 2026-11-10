@@ -122,7 +122,7 @@ impl Lorca {
                 .show_line_endings
                 .then(|| document.format().line_ending),
             indent_guides: self.config.indent_guides,
-            metrics: self.metrics(),
+            metrics: self.metrics_for(id),
             completion_open: self
                 .lsp
                 .completion
@@ -136,7 +136,7 @@ impl Lorca {
                 view,
                 focused,
                 &self.active_theme.editor,
-                self.metrics(),
+                self.metrics_for(id),
                 move |action| Message::Editor(id, action),
             )
             .into();

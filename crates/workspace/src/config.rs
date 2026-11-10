@@ -178,6 +178,13 @@ impl Config {
     pub const FONT_SIZES: std::ops::RangeInclusive<u16> = 8..=40;
     pub const TAB_WIDTHS: std::ops::RangeInclusive<u8> = 1..=16;
 
+    /// Tamaño de letra tras ampliar o reducir `delta` puntos desde `size`, dentro de los
+    /// límites admitidos.
+    pub fn zoomed(size: u16, delta: i8) -> u16 {
+        size.saturating_add_signed(i16::from(delta))
+            .clamp(*Self::FONT_SIZES.start(), *Self::FONT_SIZES.end())
+    }
+
     /// Tamaño de fuente dentro de los límites admitidos.
     pub fn font_size(&self) -> u16 {
         self.font_size
@@ -270,6 +277,9 @@ mod tests {
         assert!(config.wrap_markdown);
         assert!(!config.show_markdown_markers);
         assert!(config.check_updates);
+        assert_eq!(Config::zoomed(14, 3), 17);
+        assert_eq!(Config::zoomed(9, -5), 8);
+        assert_eq!(Config::zoomed(39, 8), 40);
         assert_eq!(config.search, SearchConfig::default());
         assert!(!config.show_whitespace);
     }

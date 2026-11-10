@@ -49,6 +49,9 @@ pub struct SessionDocument {
     /// `true` si `language` se dedujo al pegar (no se eligió a mano).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub language_guessed: bool,
+    /// Zoom de la pestaña (tamaño de letra propio), si lo tiene.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<u16>,
     /// Huella del archivo en disco en el que se basan los cambios sin guardar.
     pub disk_stamp: Option<DiskStamp>,
 }
@@ -163,6 +166,7 @@ impl SessionStore {
                 language: (document.is_language_manual() || document.is_language_guessed())
                     .then(|| document.language().id().to_owned()),
                 language_guessed: document.is_language_guessed(),
+                font_size: document.font_size(),
                 disk_stamp: document.disk_stamp(),
             });
         }
@@ -222,6 +226,7 @@ impl Workspace {
                         Some(language) => document.set_language(language),
                         None => {}
                     }
+                    document.set_font_size(saved.font_size);
                 }
                 report.scrolls.push((id, saved.scroll_x, saved.scroll_y));
             }
@@ -525,6 +530,18 @@ mod tests {
     }
 
     #[test]
+    fn tab_zoom_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::new();
+        ws.new_document();
+        ws.active_mut().unwrap().set_font_size(Some(20));
+        ws.new_document();
+        let (restored, _) = save_and_restore(&ws, dir.path());
+        let sizes: Vec<_> = restored.documents().map(Document::font_size).collect();
+        assert_eq!(sizes, vec![Some(20), None]);
+    }
+
+    #[test]
     fn manual_language_survives_restart() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = Workspace::new();
@@ -612,6 +629,7 @@ mod tests {
                 scroll_y: 0.0,
                 language: None,
                 language_guessed: false,
+                font_size: None,
                 disk_stamp: None,
             }],
         };

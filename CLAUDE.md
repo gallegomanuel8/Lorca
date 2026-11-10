@@ -265,6 +265,9 @@ mensaje en español.
       `refresh_theme` al final de cada `update` solo si cambió el aspecto o el nombre.
       `editor/palette.rs`: `EditorColors::new(spec, theme)` resuelve los colores del editor
       y del resaltado; el widget los recibe con `.colors(...)`.
+    - Zoom **por pestaña**: `Document::font_size` (`None` = `Config::font_size`, que es el
+      tamaño de partida), guardado en la sesión; `Lorca::metrics_for(id)` da las medidas
+      de cada documento y `metrics()` las del activo. `Config::zoomed` limita el tamaño.
     - Zoom: ⌘+/−/0 (Ctrl fuera de macOS) y ⌘/Ctrl + rueda en los dos editores
       (`EditorAction::Zoom` → `Message::Zoom`; `editor::zoom_steps` acumula los píxeles del
       touchpad, 40 px por paso). En Windows el pellizco del touchpad llega como Ctrl + rueda.

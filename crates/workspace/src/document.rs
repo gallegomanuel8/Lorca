@@ -36,6 +36,8 @@ pub struct Document {
     /// `true` si el lenguaje se dedujo del texto pegado: se conserva aunque la ruta no lo
     /// indique (hasta que el documento quede vacío).
     language_guessed: bool,
+    /// Tamaño de letra propio de esta pestaña (zoom); `None` usa el de la configuración.
+    font_size: Option<u16>,
     /// Revisión del historial en el momento de abrir o guardar.
     saved_revision: u64,
     /// Cambios que no pasan por el historial (p. ej. cambiar la codificación).
@@ -55,6 +57,7 @@ impl Document {
             language: Language::PlainText,
             language_manual: false,
             language_guessed: false,
+            font_size: None,
             saved_revision: 0,
             forced_modified: false,
             disk_stamp: None,
@@ -69,6 +72,7 @@ impl Document {
             language: Language::detect(Some(&path), &editor.buffer().line_text(0)),
             language_manual: false,
             language_guessed: false,
+            font_size: None,
             editor,
             disk_stamp: DiskStamp::of(&path),
             path: Some(path),
@@ -95,6 +99,7 @@ impl Document {
             language: Language::detect(path.as_deref(), &editor.buffer().line_text(0)),
             language_manual: false,
             language_guessed: false,
+            font_size: None,
             editor,
             untitled_number: if path.is_some() {
                 None
@@ -140,6 +145,16 @@ impl Document {
     pub fn set_language(&mut self, language: Language) {
         self.language = language;
         self.language_manual = true;
+    }
+
+    /// Tamaño de letra propio (zoom de la pestaña), si lo tiene.
+    pub fn font_size(&self) -> Option<u16> {
+        self.font_size
+    }
+
+    /// Fija el zoom de la pestaña (`None`: vuelve al tamaño de la configuración).
+    pub fn set_font_size(&mut self, size: Option<u16>) {
+        self.font_size = size;
     }
 
     pub fn is_language_guessed(&self) -> bool {
