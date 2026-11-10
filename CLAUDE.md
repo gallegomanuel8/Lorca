@@ -318,6 +318,10 @@ mensaje en español.
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos
   (`HKCU\Software\Classes\*\shell\Lorca`; en Windows 11, en «Mostrar más opciones»).
+- Linux: `.deb` y AppImage con cargo-packager; `.rpm` con `cargo generate-rpm -p crates/app`
+  (`[package.metadata.generate-rpm]`, tras `cargo build --release`). El `.desktop` del rpm es
+  `assets/linux/lorca.desktop`; su nombre debe coincidir con el `application_id` de la ventana
+  (`"lorca"`, en `main.rs`), o Wayland muestra el icono genérico.
 - `release.yml` adjunta también un portable de macOS: el `.app` comprimido con `ditto`
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - Actualizaciones automáticas (`crates/app/src/updates.rs`, `cargo-packager-updater`): al

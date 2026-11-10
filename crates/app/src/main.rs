@@ -47,6 +47,13 @@ fn main() -> anyhow::Result<()> {
         exit_on_close_request: false,
         // Si no se pudiera decodificar, la ventana sale sin icono.
         icon: iced::window::icon::from_file_data(ICON, None).ok(),
+        // En Linux el escritorio asocia la ventana a su `.desktop` (y a su icono) por el
+        // app_id de Wayland / WM_CLASS de X11; vacío, sale el icono genérico.
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: "lorca".to_owned(),
+            ..Default::default()
+        },
         ..iced::window::Settings::default()
     };
     iced::application(Lorca::boot, Lorca::update, Lorca::view)

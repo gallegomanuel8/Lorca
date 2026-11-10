@@ -45,6 +45,7 @@ jobs:
             files: |
               target/packages/*.deb
               target/packages/*.AppImage
+              target/packages/*.rpm
               target/packages/*.sig
     runs-on: ${{ matrix.os }}
     steps:
@@ -85,6 +86,13 @@ jobs:
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "lorca") | .version')
           ditto -c -k --keepParent target/packages/Lorca.app "target/packages/Lorca_${version}_$(uname -m)-portable.zip"
+      # .rpm (Fedora, openSUSE…): cargo-packager no lo genera; lo hace cargo-generate-rpm
+      # con el binario ya compilado (configuración en crates/app/Cargo.toml).
+      - name: Paquete .rpm
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-generate-rpm --locked
+          cargo generate-rpm -p crates/app -o target/packages/
       - uses: actions/upload-artifact@v4
         with:
           name: lorca-${{ runner.os }}

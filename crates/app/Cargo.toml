@@ -67,3 +67,20 @@ section = "editors"
 [package.metadata.packager.nsis]
 template = "windows/installer.nsi"
 languages = ["Spanish"]
+
+# Paquete .rpm (Fedora, openSUSE…) con cargo-generate-rpm, que cargo-packager no hace:
+# `cargo build --release -p lorca && cargo generate-rpm -p crates/app`; salida en
+# `target/generate-rpm/` (en CI, `target/packages/`). El `.desktop` se llama como el app_id de la ventana (`main.rs`).
+[package.metadata.generate-rpm]
+name = "lorca"
+summary = "Editor de texto y código, en homenaje a Federico García Lorca"
+# winit carga estas bibliotecas en tiempo de ejecución (dlopen), así que rpm no las detecta.
+requires = { libxkbcommon = "*", libwayland-client = "*", libwayland-cursor = "*" }
+assets = [
+  { source = "target/release/lorca", dest = "/usr/bin/lorca", mode = "755" },
+  { source = "../../assets/linux/lorca.desktop", dest = "/usr/share/applications/lorca.desktop", mode = "644" },
+  { source = "../../assets/icons/png/lorca-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/lorca.png", mode = "644" },
+  { source = "../../assets/icons/png/lorca-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/lorca.png", mode = "644" },
+  { source = "../../assets/icons/png/lorca-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/lorca.png", mode = "644" },
+  { source = "../../assets/icons/png/lorca-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/lorca.png", mode = "644" },
+]

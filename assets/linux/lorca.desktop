@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Lorca
+Comment=Editor de texto y código, en homenaje a Federico García Lorca
+Exec=lorca %F
+Icon=lorca
+Terminal=false
+Categories=Development;TextEditor;
+MimeType=text/plain;text/markdown;
+StartupWMClass=lorca
+StartupNotify=true
