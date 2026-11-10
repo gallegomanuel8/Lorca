@@ -94,6 +94,19 @@ const MAGNIFY_PER_STEP: f64 = 0.06;
 /// Pasos de zoom pendientes de entregar a la aplicación.
 static PINCH: OnceLock<UnboundedSender<i8>> = OnceLock::new();
 static PINCH_RECEIVER: Mutex<Option<UnboundedReceiver<i8>>> = Mutex::new(None);
+
+/// Canal de los pasos de zoom, creado en el primer uso. La suscripción puede arrancar
+/// antes de que se instale el monitor (o al revés): los dos lo piden aquí, así que el
+/// receptor siempre existe cuando la suscripción lo busca.
+fn pinch_sender() -> &'static UnboundedSender<i8> {
+    PINCH.get_or_init(|| {
+        let (sender, receiver) = unbounded();
+        if let Ok(mut slot) = PINCH_RECEIVER.lock() {
+            *slot = Some(receiver);
+        }
+        sender
+    })
+}
 /// Ampliación acumulada que aún no llega a un paso.
 static PINCH_PENDING: Mutex<f64> = Mutex::new(0.0);
 
@@ -114,20 +127,14 @@ fn pinch_steps(pending: &mut f64, magnification: f64) -> i8 {
 pub fn install_pinch_zoom() {
     static INSTALLED: Once = Once::new();
     INSTALLED.call_once(|| {
-        let (sender, receiver) = unbounded();
-        if let Ok(mut slot) = PINCH_RECEIVER.lock() {
-            *slot = Some(receiver);
-        }
-        let _ = PINCH.set(sender);
-        let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
+        let sender = pinch_sender().clone();
+        let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit pasa un evento válido durante la llamada.
             let magnification = unsafe { event.as_ref() }.magnification();
             let steps = PINCH_PENDING
                 .lock()
                 .map_or(0, |mut pending| pinch_steps(&mut pending, magnification));
-            if steps != 0
-                && let Some(sender) = PINCH.get()
-            {
+            if steps != 0 {
                 let _ = sender.unbounded_send(steps);
             }
             // Se devuelve el mismo evento: el resto de la aplicación lo sigue recibiendo.
@@ -146,6 +153,7 @@ pub fn install_pinch_zoom() {
 pub fn pinch_events() -> Subscription<Message> {
     Subscription::run(|| {
         iced::stream::channel(8, async |mut output| {
+            pinch_sender();
             let receiver = PINCH_RECEIVER.lock().ok().and_then(|mut slot| slot.take());
             let Some(mut receiver) = receiver else {
                 return;
