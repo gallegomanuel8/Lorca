@@ -480,6 +480,32 @@ SectionEnd
   app_check_done:
 !macroend
 
+; Lorca: tipo de documento propio (ProgID «Lorca.Document», con el icono de documento que
+; build.rs incrusta en el .exe con el ID 2) ofrecido en «Abrir con» de las extensiones de
+; texto con OpenWithProgids. No toca el valor por defecto de la extensión: no le quita la
+; asociación a otra app. El icono se ve cuando el usuario elige Lorca como predeterminada.
+!define LORCA_PROGID "${PRODUCTNAME}.Document"
+!macro LorcaDocumentTypes Action
+  !insertmacro ${Action} "md"
+  !insertmacro ${Action} "markdown"
+  !insertmacro ${Action} "txt"
+  !insertmacro ${Action} "text"
+  !insertmacro ${Action} "log"
+  !insertmacro ${Action} "json"
+  !insertmacro ${Action} "toml"
+  !insertmacro ${Action} "yaml"
+  !insertmacro ${Action} "yml"
+  !insertmacro ${Action} "xml"
+  !insertmacro ${Action} "csv"
+  !insertmacro ${Action} "ini"
+!macroend
+!macro LorcaOfferDocumentType Ext
+  WriteRegStr SHCTX "Software\Classes\.${Ext}\OpenWithProgids" "${LORCA_PROGID}" ""
+!macroend
+!macro LorcaForgetDocumentType Ext
+  DeleteRegValue SHCTX "Software\Classes\.${Ext}\OpenWithProgids" "${LORCA_PROGID}"
+!macroend
+
 ; Lorca: obligatoria (RO) y con el nombre visible en la página de componentes.
 Section "${PRODUCTNAME}" SecInstall
   SectionIn RO
@@ -564,6 +590,9 @@ Section "${PRODUCTNAME}" SecInstall
   ; Lorca: se quita la opción del menú contextual de una instalación anterior; la vuelve a
   ; crear la sección siguiente si sigue marcada.
   DeleteRegKey SHCTX "Software\Classes\*\shell\${PRODUCTNAME}"
+  ; Lorca: igual con el tipo de documento de «Abrir con» (lo crea SecOpenWith).
+  !insertmacro LorcaDocumentTypes LorcaForgetDocumentType
+  DeleteRegKey SHCTX "Software\Classes\${LORCA_PROGID}"
 
   ; Auto close this page for passive mode
   ${IfThen} $PassiveMode == 1 ${|} SetAutoClose true ${|}
@@ -575,6 +604,16 @@ Section "Añadir «Abrir con ${PRODUCTNAME}» al menú contextual de los archivo
   WriteRegStr SHCTX "Software\Classes\*\shell\${PRODUCTNAME}" "" "Abrir con ${PRODUCTNAME}"
   WriteRegStr SHCTX "Software\Classes\*\shell\${PRODUCTNAME}" "Icon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
   WriteRegStr SHCTX "Software\Classes\*\shell\${PRODUCTNAME}\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+SectionEnd
+
+; Lorca: ver LorcaDocumentTypes.
+Section "Ofrecer ${PRODUCTNAME} en «Abrir con» de los archivos de texto" SecOpenWith
+  WriteRegStr SHCTX "Software\Classes\${LORCA_PROGID}" "" "Documento de texto"
+  WriteRegStr SHCTX "Software\Classes\${LORCA_PROGID}\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",-2"
+  WriteRegStr SHCTX "Software\Classes\${LORCA_PROGID}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+  !insertmacro LorcaDocumentTypes LorcaOfferDocumentType
+  ; Que el Explorador vuelva a leer los iconos.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
 Function .onInstSuccess
@@ -650,6 +689,9 @@ Section Uninstall
 
   ; Lorca: quitar «Abrir con Lorca» del menú contextual
   DeleteRegKey SHCTX "Software\Classes\*\shell\${PRODUCTNAME}"
+  ; Lorca: quitar el tipo de documento y su oferta en «Abrir con»
+  !insertmacro LorcaDocumentTypes LorcaForgetDocumentType
+  DeleteRegKey SHCTX "Software\Classes\${LORCA_PROGID}"
 
   ; Remove registry information for add/remove programs
   !if "${INSTALLMODE}" == "both"

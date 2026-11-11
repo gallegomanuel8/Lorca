@@ -317,7 +317,11 @@ mensaje en español.
 - Instalador de Windows (NSIS, en español): plantilla propia `crates/app/windows/installer.nsi`
   (copia de la de cargo-packager; cambios marcados con «Lorca:»). Añade una página de
   componentes con «Abrir con Lorca» en el menú contextual de los archivos
-  (`HKCU\Software\Classes\*\shell\Lorca`; en Windows 11, en «Mostrar más opciones»).
+  (`HKCU\Software\Classes\*\shell\Lorca`; en Windows 11, en «Mostrar más opciones») y
+  otra que ofrece Lorca en «Abrir con» de las extensiones de texto (`SecOpenWith`: ProgID
+  `Lorca.Document` + `OpenWithProgids`, sin tocar la asociación por defecto; lista en la
+  macro `LorcaDocumentTypes`). Su `DefaultIcon` es `lorca.exe,-2`: el icono de documento
+  que `build.rs` incrusta con el ID 2.
 - Linux: `.deb` y AppImage con cargo-packager; `.rpm` con `cargo generate-rpm -p crates/app`
   (`[package.metadata.generate-rpm]`, tras `cargo build --release`). El `.desktop` del rpm es
   `assets/linux/lorca.desktop`; su nombre debe coincidir con el `application_id` de la ventana
@@ -344,6 +348,11 @@ mensaje en español.
   argumentos: `macos.rs` añade `application:openURLs:` a `NSObject` con `objc2` antes
   de arrancar iced y pasa las rutas a `instance::deliver` (mismo canal que la instancia
   única → `Message::OpenedElsewhere`).
+- Icono de documento (`assets/icons/documento/`): en macOS, `CFBundleTypeIconFile` de los
+  dos tipos del `Info.plist`; el `.icns` llega a `Contents/Resources` por `resources` de
+  cargo-packager (que lo copia también en Windows y Linux, donde no se usa). Con el rango
+  `Alternate` solo se ve en los archivos que el usuario abre con Lorca por defecto. En Linux
+  no hay: el icono depende del tipo MIME, no de la app.
 - Código solo para macOS: lo que no se use fuera necesita
   `#[cfg_attr(not(target_os = "macos"), allow(dead_code))]` o la CI de Windows/Linux falla.
 

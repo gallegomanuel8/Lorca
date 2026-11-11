@@ -10,6 +10,7 @@ Copia esta carpeta en tu proyecto como `assets/icons/`.
 | `macos/Lorca.icon` | Origen del icono (Icon Composer): degradado marfil y dos capas, renglones (delante, sin translucidez para que no se vea la luna a través) y luna |
 | `macos/dibujar-capas.swift` | Dibuja las capas de `Lorca.icon` |
 | `macos/generar-icns.sh` | Genera `lorca.icns`, `lorca.ico` y `png/` desde `Lorca.icon` (Xcode 26 o posterior) |
+| `documento/` | Icono de documento (hoja con renglones y el logo): `lorca-documento.icns` (macOS), `.ico` (Windows, incrustado en el `.exe` con el ID 2) y `png/`. Lo genera `dibujar-documento.py` (Python + Pillow, desde su carpeta). En Linux no se usa: allí el icono de un archivo depende de su tipo MIME |
 | `retrato/` | Retrato de Lorca hecho con caracteres: el README y «Acerca de» (no es el icono de la app) |
 
 El icono de la aplicación es una luna llena roja con cuatro renglones de código sangrados

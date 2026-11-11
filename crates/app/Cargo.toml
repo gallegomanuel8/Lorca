@@ -50,6 +50,12 @@ icons = [
   "../../assets/icons/lorca.ico",
 ]
 binaries = [{ path = "lorca", main = true }]
+# Icono de documento de macOS (CFBundleTypeIconFile en macos/Info.plist): tiene que quedar en
+# la raíz de Contents/Resources. cargo-packager no tiene recursos solo para macOS, así que
+# también se copia junto al ejecutable en Windows y Linux (no se usa allí).
+resources = [
+  { src = "../../assets/icons/documento/lorca-documento.icns", target = "lorca-documento.icns" },
+]
 
 [package.metadata.packager.macos]
 # Firma ad hoc («-»): sella el bundle para que macOS no lo dé por dañado. La release la

@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Se añade al Info.plist que genera cargo-packager (info-plist-path en Cargo.toml).
      Tipos de archivo que Lorca sabe abrir: así aparece en «Abrir con» del Finder y se
-     puede elegir como app por defecto. «Alternate» = no se adueña de esos tipos. -->
+     puede elegir como app por defecto. «Alternate» = no se adueña de esos tipos.
+     CFBundleTypeIconFile: icono de documento (lorca-documento.icns, copiado a Resources por
+     `resources` en Cargo.toml); solo se ve si el usuario elige Lorca como app por defecto. -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDocumentTypes</key>
@@ -12,6 +14,8 @@
 			<string>Texto con formato (Markdown)</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>lorca-documento</string>
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
@@ -29,6 +33,8 @@
 			<string>Texto</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>lorca-documento</string>
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
