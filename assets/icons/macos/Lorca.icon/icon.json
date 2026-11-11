@@ -9,10 +9,14 @@
     {
       "layers" : [
         {
-          "image-name" : "signos.png",
-          "name" : "signos"
+          "image-name" : "renglones.png",
+          "name" : "renglones"
         }
-      ]
+      ],
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
     },
     {
       "layers" : [

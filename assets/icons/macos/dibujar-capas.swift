@@ -1,7 +1,8 @@
 // Dibuja las capas del icono de la aplicación (1024 px, fondo transparente) para
-// Lorca.icon: los signos `< >` de las etiquetas de código y, entre ellos, una luna
-// creciente roja (la luna de Lorca: «Romance de la luna, luna», Bodas de sangre). Colores
-// de Mariana Pineda: tinta negra y rojo sobre marfil (el degradado de icon.json).
+// Lorca.icon: una luna llena roja (la luna redonda de Bodas de sangre, la «luna roja» de
+// «Canción de jinete») y, delante, cuatro renglones de código sangrados que la cruzan como
+// nubes. Colores de Mariana Pineda: tinta negra y rojo sobre marfil (el degradado de
+// icon.json).
 //
 // Uso, desde esta carpeta: swift dibujar-capas.swift && sh generar-icns.sh
 
@@ -39,28 +40,23 @@ func stroke(_ points: [CGPoint], width: CGFloat, color: NSColor) {
     path.stroke()
 }
 
-/// Luna creciente: un círculo menos otro desplazado hacia arriba a la derecha.
-func crescent(center: CGPoint, radius: CGFloat, color: NSColor) {
-    let context = NSGraphicsContext.current!.cgContext
-    context.beginTransparencyLayer(auxiliaryInfo: nil)
+/// Luna llena: un disco.
+func disc(center: CGPoint, radius: CGFloat, color: NSColor) {
     color.setFill()
-    context.fillEllipse(in: CGRect(x: center.x - radius, y: center.y - radius,
-                                   width: 2 * radius, height: 2 * radius))
-    context.setBlendMode(.clear)
-    let cut = radius * 0.86
-    context.fillEllipse(in: CGRect(x: center.x - cut + radius * 0.42, y: center.y - cut - radius * 0.22,
-                                   width: 2 * cut, height: 2 * cut))
-    context.setBlendMode(.normal)
-    context.endTransparencyLayer()
+    NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius,
+                                width: 2 * radius, height: 2 * radius)).fill()
 }
 
-layer("Lorca.icon/Assets/signos.png") {
-    let width: CGFloat = 92
-    stroke([CGPoint(x: 330, y: 330), CGPoint(x: 170, y: 512), CGPoint(x: 330, y: 694)],
-           width: width, color: ink)
-    stroke([CGPoint(x: 694, y: 330), CGPoint(x: 854, y: 512), CGPoint(x: 694, y: 694)],
-           width: width, color: ink)
+// Los renglones van en la capa de delante (el primer grupo de icon.json).
+layer("Lorca.icon/Assets/renglones.png") {
+    let rows: [(y: CGFloat, from: CGFloat, to: CGFloat)] = [
+        (429, 235, 505), (533, 315, 685), (637, 315, 585), (741, 235, 455),
+    ]
+    for row in rows {
+        stroke([CGPoint(x: row.from, y: row.y), CGPoint(x: row.to, y: row.y)],
+               width: 62, color: ink)
+    }
 }
 layer("Lorca.icon/Assets/luna.png") {
-    crescent(center: CGPoint(x: 512, y: 512), radius: 168, color: red)
+    disc(center: CGPoint(x: 585, y: 487), radius: 236, color: red)
 }
