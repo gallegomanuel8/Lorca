@@ -305,7 +305,9 @@ mensaje en español.
   sobre marfil; colores de Mariana Pineda): `lorca.icns`, `lorca.ico` y
   `png/` se generan con `assets/icons/macos/generar-icns.sh` desde `macos/Lorca.icon`
   (Icon Composer; capas de `dibujar-capas.swift`). Desde macOS 26 un `.icns` sin la forma
-  de Apple sale dentro de un cuadro claro. El retrato de Lorca (`assets/icons/retrato/`)
+  de Apple sale dentro de un cuadro claro. El `.ico` y `png/` se recortan al cuerpo del icono (sin
+  el margen ni la sombra de macOS): con margen, en la barra de tareas de Windows sale más
+  pequeño que los demás. El retrato de Lorca (`assets/icons/retrato/`)
   queda para el README y «Acerca de» (`menu::native::portrait`, crate `image` solo en
   macOS).
 - Firma de macOS: `signing-identity = "-"` (ad hoc) en `crates/app/Cargo.toml`, para que el
@@ -321,7 +323,10 @@ mensaje en español.
   otra que ofrece Lorca en «Abrir con» de las extensiones de texto (`SecOpenWith`: ProgID
   `Lorca.Document` + `OpenWithProgids`, sin tocar la asociación por defecto; lista en la
   macro `LorcaDocumentTypes`). Su `DefaultIcon` es `lorca.exe,-2`: el icono de documento
-  que `build.rs` incrusta con el ID 2.
+  que `build.rs` incrusta con el ID 2 (también en `Applications\lorca.exe\DefaultIcon`, la
+  asociación que crea Windows si se elige el `.exe` a mano). La sección oculta
+  `-RefreshIcons` llama a `SHChangeNotify` al terminar para que el Explorador no se quede
+  con los iconos de la versión anterior.
 - Linux: `.deb` y AppImage con cargo-packager; `.rpm` con `cargo generate-rpm -p crates/app`
   (`[package.metadata.generate-rpm]`, tras `cargo build --release`). El `.desktop` del rpm es
   `assets/linux/lorca.desktop`; su nombre debe coincidir con el `application_id` de la ventana

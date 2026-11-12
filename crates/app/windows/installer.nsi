@@ -593,6 +593,7 @@ Section "${PRODUCTNAME}" SecInstall
   ; Lorca: igual con el tipo de documento de «Abrir con» (lo crea SecOpenWith).
   !insertmacro LorcaDocumentTypes LorcaForgetDocumentType
   DeleteRegKey SHCTX "Software\Classes\${LORCA_PROGID}"
+  DeleteRegKey SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\DefaultIcon"
 
   ; Auto close this page for passive mode
   ${IfThen} $PassiveMode == 1 ${|} SetAutoClose true ${|}
@@ -612,7 +613,15 @@ Section "Ofrecer ${PRODUCTNAME} en «Abrir con» de los archivos de texto" SecOp
   WriteRegStr SHCTX "Software\Classes\${LORCA_PROGID}\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",-2"
   WriteRegStr SHCTX "Software\Classes\${LORCA_PROGID}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
   !insertmacro LorcaDocumentTypes LorcaOfferDocumentType
-  ; Que el Explorador vuelva a leer los iconos.
+  ; Si el usuario eligió lorca.exe a mano («Buscar otra aplicación»), Windows asocia los
+  ; archivos a «Applications\lorca.exe» y no a Lorca.Document: también ahí el icono.
+  WriteRegStr SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",-2"
+SectionEnd
+
+; Lorca: al terminar (también al actualizar), que el Explorador olvide los iconos que tiene
+; en caché (SHCNE_ASSOCCHANGED): si no, la barra de tareas y los archivos siguen con los de
+; la versión anterior.
+Section "-RefreshIcons"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
@@ -692,6 +701,7 @@ Section Uninstall
   ; Lorca: quitar el tipo de documento y su oferta en «Abrir con»
   !insertmacro LorcaDocumentTypes LorcaForgetDocumentType
   DeleteRegKey SHCTX "Software\Classes\${LORCA_PROGID}"
+  DeleteRegKey SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe\DefaultIcon"
 
   ; Remove registry information for add/remove programs
   !if "${INSTALLMODE}" == "both"

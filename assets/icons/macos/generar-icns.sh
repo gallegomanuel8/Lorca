@@ -45,9 +45,12 @@ for size in 16 32 128 256 512; do
     sips -z $double $double "$tmp/master.png" --out "$set/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$set" -o ../lorca.icns
-# PNG para Windows, Linux y el icono de la ventana, y el .ico de Windows.
+# PNG para Windows, Linux y el icono de la ventana, y el .ico de Windows. Se recortan al
+# cuerpo del icono (824 de 1024 px, centrado): el margen y la sombra son cosa de macOS; en
+# Windows los iconos llenan el lienzo y con margen el de Lorca sale más pequeño que los demás.
+sips -c 824 824 "$tmp/master.png" --out "$tmp/body.png" >/dev/null
 for size in 16 24 32 48 64 128 256 512 1024; do
-    sips -z $size $size "$tmp/master.png" --out "../png/lorca-$size.png" >/dev/null
+    sips -z $size $size "$tmp/body.png" --out "../png/lorca-$size.png" >/dev/null
 done
 python3 crear-ico.py ../lorca.ico ../png/lorca-16.png ../png/lorca-24.png \
     ../png/lorca-32.png ../png/lorca-48.png ../png/lorca-64.png ../png/lorca-128.png \
