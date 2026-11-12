@@ -332,8 +332,9 @@ mensaje en español.
   (`Lorca_<versión>_<arquitectura>-portable.zip`).
 - Actualizaciones automáticas (`crates/app/src/updates.rs`, `cargo-packager-updater`): al
   arrancar (si `Config::check_updates`) y con «Buscar actualizaciones…» se pide
-  `releases/latest/download/latest.json`; si hay versión nueva sale un aviso arriba
-  (`UpdateState`, `update_banner`). «Actualizar» descarga, verifica la firma con
+  `releases/latest/download/latest.json`; si hay versión nueva sale una ventana encima
+  (`UpdateState`, `update_dialog.rs`: icono, «v actual → nueva», «Más tarde» / «Actualizar y
+  reiniciar»; durante la descarga, barra de progreso; Escape = «Más tarde», Intro no instala). «Actualizar» descarga, verifica la firma con
   `assets/actualizaciones/clave-publica.txt`, instala (macOS: sustituye el `.app`;
   Windows: instalador NSIS, que cierra Lorca; Linux: solo el AppImage) y reabre
   (`updates::relaunch`, con un retraso para no chocar con la instancia única). La clave

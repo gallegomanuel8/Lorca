@@ -113,6 +113,7 @@ impl Lorca {
         let focused = is_active
             && self.focus == super::Focus::Editor
             && !self.dialog_open
+            && !self.update_dialog_open()
             && self.context_menu.is_none()
             && self.palette.is_none();
         let options = ViewOptions {

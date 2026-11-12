@@ -32,6 +32,7 @@ use crate::palette::{self, Palette};
 use crate::prompt::{Prompt, SaveChoice};
 use crate::shortcuts::shortcut;
 use crate::theme::{ActiveTheme, system_is_dark};
+use crate::update_dialog;
 use crate::updates;
 use crate::watcher;
 use crate::welcome;
@@ -959,6 +960,10 @@ impl Lorca {
                     None => Task::none(),
                 }
             }
+            // «Más tarde» (durante la descarga no se puede cerrar).
+            Message::Escape if matches!(self.update, UpdateState::Available(_)) => {
+                self.update(Message::DismissUpdate)
+            }
             Message::CheckUpdates { manual } => {
                 if manual {
                     self.show_info("Buscando actualizaciones…".to_owned());
@@ -1609,9 +1614,6 @@ impl Lorca {
             };
             layout = layout.push(menu::bar(open));
         }
-        if let Some(banner) = self.update_banner() {
-            layout = layout.push(banner);
-        }
         layout = layout.push(format_bar::bar(self.bar_state(), tab_bar_color));
         layout = layout.push(self.tab_bar());
         if let Some(input) = &self.goto {
@@ -1646,6 +1648,15 @@ impl Lorca {
         let base = match self.format_popup {
             Some(popup) => format_bar::layer(base, popup, self.bar_state(), self.window_size),
             None => base,
+        };
+        let base = match &self.update {
+            UpdateState::None => base,
+            UpdateState::Available(available) => {
+                update_dialog::layer(base, update_dialog::View::Available(available))
+            }
+            UpdateState::Working { version, progress } => {
+                update_dialog::layer(base, update_dialog::View::Working { version, progress })
+            }
         };
         match &self.prompt {
             Some(prompt) => crate::prompt::layer(base, prompt),
@@ -1685,76 +1696,9 @@ impl Lorca {
         base
     }
 
-    /// Aviso de versión nueva (o progreso de la actualización) en lo alto de la ventana.
-    fn update_banner(&self) -> Option<Element<'_, Message>> {
-        let content: Element<'_, Message> = match &self.update {
-            UpdateState::None => return None,
-            UpdateState::Available(available) => {
-                let action = if available.installable {
-                    "Actualizar"
-                } else {
-                    "Descargar"
-                };
-                row![
-                    text(format!(
-                        "Hay una versión nueva de Lorca: {}",
-                        available.version.trim_start_matches('v')
-                    ))
-                    .size(13),
-                    space::horizontal(),
-                    button(text("Novedades").size(12))
-                        .padding([3, 10])
-                        .style(button::text)
-                        .on_press(Message::OpenUpdatePage),
-                    button(text("Más tarde").size(12))
-                        .padding([3, 10])
-                        .style(button::secondary)
-                        .on_press(Message::DismissUpdate),
-                    button(text(action).size(12))
-                        .padding([3, 12])
-                        .style(button::primary)
-                        .on_press(Message::InstallUpdate),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .into()
-            }
-            UpdateState::Working { version, progress } => {
-                let version = version.trim_start_matches('v');
-                let (label, fraction) = match progress {
-                    updates::Progress::Downloading(Some(fraction)) => (
-                        format!("Descargando Lorca {version}… {:.0} %", fraction * 100.0),
-                        *fraction,
-                    ),
-                    updates::Progress::Downloading(None) => {
-                        (format!("Descargando Lorca {version}…"), 0.0)
-                    }
-                    _ => (format!("Instalando Lorca {version}…"), 1.0),
-                };
-                row![
-                    text(label).size(13),
-                    space::horizontal(),
-                    iced::widget::progress_bar(0.0..=1.0, fraction)
-                        .length(Length::Fixed(220.0))
-                        .girth(Length::Fixed(6.0)),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center)
-                .into()
-            }
-        };
-        Some(
-            container(content)
-                .padding([6, 12])
-                .width(Length::Fill)
-                .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style::default()
-                        .background(palette.primary.weak.color)
-                        .color(palette.primary.weak.text)
-                })
-                .into(),
-        )
+    /// El aviso de actualización está a la vista (el editor no recibe teclas).
+    pub(crate) fn update_dialog_open(&self) -> bool {
+        !matches!(self.update, UpdateState::None)
     }
 
     /// Estado del documento activo para la barra de formato.
@@ -2096,7 +2040,7 @@ fn palette_keys(
 #[derive(Debug, Clone)]
 enum UpdateState {
     None,
-    /// Hay una versión nueva (se muestra el aviso).
+    /// Hay una versión nueva (se muestra el aviso, `update_dialog`).
     Available(updates::Available),
     /// Descargando o instalando.
     Working {
