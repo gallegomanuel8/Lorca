@@ -185,6 +185,12 @@ mensaje en español.
     `<nombre>_imagenes/` junto al documento (`import_image`, `save_png` → `imagen-N.png`) y
     se enlazan con ruta relativa (`insert_images`). Un documento sin ruta se guarda antes
     (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún no incluye las imágenes.
+    Clic en una imagen: selecciona su línea con el salto (`EditorAction::SelectRange`, cursor
+    al principio para que `snap_cursor` no lo lleve a la línea siguiente) y se ve un marco.
+    Arrastrarla (`ImageDrag` en el estado del widget) muestra una raya en el hueco de destino
+    y una copia translúcida; al soltar, `EditorAction::MoveLine` (`lorca_formats::move_line`,
+    una sola transacción). Marco y arrastre se dibujan en una capa aparte: en la misma, las
+    imágenes tapan los quads.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
   - Ajuste de línea (`Config::wrap_markdown`, «Ver → Ajuste de línea al ver las marcas»):
     solo en los textos con formato vistos con sus marcas (con formato ya se ajustan; el

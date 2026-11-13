@@ -120,6 +120,41 @@ pub fn insert_images(
     }
 }
 
+/// Mueve la línea `from` al hueco `to` (entre líneas: 0 = antes de la primera, el número
+/// de líneas = después de la última). La selección resultante es la línea movida, con su
+/// salto si lo tiene. `None` si no hay que mover nada.
+pub fn move_line(text: &str, from: usize, to: usize) -> Option<MarkupEdit> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let count = lines.len();
+    if from >= count || to > count || to == from || to == from + 1 {
+        return None;
+    }
+    // Índice final de la línea movida.
+    let target = if to > from { to - 1 } else { to };
+    let (first, last) = (from.min(target), from.max(target));
+    let mut region: Vec<&str> = lines.get(first..=last)?.to_vec();
+    let moved = region.remove(from - first);
+    region.insert(target - first, moved);
+    let offset =
+        |line: usize| -> usize { lines.iter().take(line).map(|l| l.chars().count() + 1).sum() };
+    let start = offset(first);
+    let end = offset(last) + lines.get(last)?.chars().count();
+    let moved_start = start
+        + region
+            .iter()
+            .take(target - first)
+            .map(|l| l.chars().count() + 1)
+            .sum::<usize>();
+    let mut moved_end = moved_start + moved.chars().count();
+    if target + 1 < count {
+        moved_end += 1;
+    }
+    Some(MarkupEdit {
+        replacements: vec![(start..end, region.join("\n"))],
+        selection: moved_start..moved_end,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +165,36 @@ mod tests {
             chars.splice(range.clone(), replacement.chars());
         }
         chars.into_iter().collect()
+    }
+
+    #[test]
+    fn moves_lines_up_and_down() {
+        let text = "a\nimg\nb\nc";
+        // Abajo, detrás de «b».
+        let edit = move_line(text, 1, 3).unwrap();
+        let result = apply(text, &edit);
+        assert_eq!(result, "a\nb\nimg\nc");
+        let selected: String = result
+            .chars()
+            .skip(edit.selection.start)
+            .take(edit.selection.len())
+            .collect();
+        assert_eq!(selected, "img\n");
+        // Arriba del todo.
+        let edit = move_line(text, 1, 0).unwrap();
+        assert_eq!(apply(text, &edit), "img\na\nb\nc");
+        // Al final (la última línea no tiene salto).
+        let edit = move_line(text, 1, 4).unwrap();
+        let result = apply(text, &edit);
+        assert_eq!(result, "a\nb\nc\nimg");
+        assert_eq!(edit.selection, 6..9);
+        // La última, hacia arriba.
+        let edit = move_line(text, 3, 1).unwrap();
+        assert_eq!(apply(text, &edit), "a\nc\nimg\nb");
+        // Soltar en su propio sitio no hace nada.
+        assert!(move_line(text, 1, 1).is_none());
+        assert!(move_line(text, 1, 2).is_none());
+        assert!(move_line(text, 9, 0).is_none());
     }
 
     #[test]

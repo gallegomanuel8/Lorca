@@ -10,7 +10,9 @@
 //!
 //! Una línea con solo una imagen (`![descripción](ruta)`, [`Block::Image`]) muestra la
 //! imagen (ajustada al ancho, sin agrandarla) y debajo la descripción como pie: el párrafo
-//! de la línea, donde se coloca el cursor, empieza en `text_top`.
+//! de la línea, donde se coloca el cursor, empieza en `text_top`. Un clic en la imagen
+//! selecciona su línea entera (se ve con un marco) y arrastrarla la mueve a otro hueco
+//! entre líneas (`EditorAction::MoveLine`).
 
 use std::path::{Path, PathBuf};
 
@@ -52,6 +54,10 @@ const LINE_HEIGHT: f32 = 1.45;
 const CAPTION_SCALE: f32 = 0.85;
 /// Separación entre una imagen y su pie.
 const IMAGE_GAP: f32 = 6.0;
+/// Distancia que hay que mover el ratón para empezar a arrastrar una imagen.
+const DRAG_THRESHOLD: f32 = 4.0;
+/// Anchura máxima de la copia translúcida que sigue al ratón al arrastrar una imagen.
+const GHOST_WIDTH: f32 = 200.0;
 
 /// Crea el editor con formato de un documento.
 pub fn rich_editor<'a, Message>(
@@ -117,6 +123,18 @@ struct LineImage {
     size: Size,
 }
 
+/// Imagen pulsada (y quizá arrastrada).
+struct ImageDrag {
+    line: usize,
+    /// Dónde se pulsó y dónde está el ratón (pantalla).
+    start: Point,
+    position: Point,
+    /// Ya se ha movido lo bastante para considerarlo un arrastre.
+    moving: bool,
+    /// Hueco entre líneas donde caería.
+    drop_at: Option<usize>,
+}
+
 struct State {
     lines: Vec<LineLayout>,
     /// Posición vertical de cada línea (una más: el alto total).
@@ -139,6 +157,7 @@ struct State {
     goal_x: Option<f32>,
     /// Rueda acumulada para el zoom (ver `zoom_steps`).
     zoom_pending: f32,
+    image_drag: Option<ImageDrag>,
 }
 
 impl Default for State {
@@ -160,6 +179,7 @@ impl Default for State {
             revealed: None,
             goal_x: None,
             zoom_pending: 0.0,
+            image_drag: None,
         }
     }
 }
@@ -212,6 +232,33 @@ impl State {
             .unwrap_or(layout.col_byte.len().saturating_sub(1));
         let col = layout.markup.snap(col, true);
         buffer.line_start(line) + col
+    }
+
+    /// Rectángulo de la imagen de `line` (coordenadas del contenido).
+    fn image_rect(&self, line: usize) -> Option<Rectangle> {
+        let image = self.lines.get(line)?.image.as_ref()?;
+        let top = self.tops.get(line).copied()?;
+        Some(Rectangle::new(Point::new(0.0, top), image.size))
+    }
+
+    /// Línea cuya imagen está bajo un punto del contenido.
+    fn image_at(&self, point: Point) -> Option<usize> {
+        let line = self.line_at(point.y.max(0.0));
+        self.image_rect(line)
+            .is_some_and(|rect| rect.contains(point))
+            .then_some(line)
+    }
+
+    /// Hueco entre líneas más cercano a la altura `y` (0 = antes de la primera).
+    fn drop_slot(&self, y: f32) -> usize {
+        let line = self.line_at(y.max(0.0));
+        let top = self.tops.get(line).copied().unwrap_or(0.0);
+        let height = self.lines.get(line).map_or(0.0, |l| l.height);
+        if y < top + height / 2.0 {
+            line
+        } else {
+            (line + 1).min(self.lines.len())
+        }
     }
 
     fn restart_blink(&mut self) {
@@ -751,6 +798,71 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                 state.restart_blink();
                 shell.capture_event();
             }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor
+                    .position_over(bounds)
+                    .is_some_and(|position| state.image_at(to_content(position)).is_some()) =>
+            {
+                let Some(position) = cursor.position_over(bounds) else {
+                    return;
+                };
+                let Some(line) = state.image_at(to_content(position)) else {
+                    return;
+                };
+                // La línea entera, salto incluido; el cursor al principio.
+                let buffer = self.editor.buffer();
+                let start = buffer.line_start(line);
+                let end = if line + 1 < buffer.len_lines() {
+                    buffer.line_start(line + 1)
+                } else {
+                    buffer.len_chars()
+                };
+                self.publish(
+                    shell,
+                    EditorAction::SelectRange {
+                        anchor: end,
+                        head: start,
+                    },
+                );
+                state.image_drag = Some(ImageDrag {
+                    line,
+                    start: position,
+                    position,
+                    moving: false,
+                    drop_at: None,
+                });
+                state.dragging = false;
+                state.goal_x = None;
+                state.restart_blink();
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) if state.image_drag.is_some() => {
+                let slot = state.drop_slot(to_content(*position).y);
+                if let Some(drag) = &mut state.image_drag {
+                    drag.position = *position;
+                    if drag.start.distance(*position) > DRAG_THRESHOLD {
+                        drag.moving = true;
+                    }
+                    if drag.moving {
+                        drag.drop_at = Some(slot);
+                    }
+                }
+                shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.image_drag.is_some() =>
+            {
+                if let Some(ImageDrag {
+                    line,
+                    moving: true,
+                    drop_at: Some(to),
+                    ..
+                }) = state.image_drag.take()
+                {
+                    self.publish(shell, EditorAction::MoveLine { from: line, to });
+                }
+                shell.request_redraw();
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let Some(position) = cursor.position_over(bounds) else {
                     return;
@@ -933,6 +1045,55 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
             }
         });
 
+        // Marco de la imagen seleccionada y, al arrastrar, la raya del destino y la copia
+        // translúcida. En otra capa: dentro de la de antes, las imágenes tapan los quads.
+        renderer.with_layer(bounds, |renderer| {
+            let selection = self.editor.selection().range();
+            for line in first..=last {
+                let Some(rect) = state.image_rect(line) else {
+                    continue;
+                };
+                let start = buffer.line_start(line);
+                let len = state.lines.get(line).map_or(0, |l| l.text.chars().count());
+                if selection.is_empty() || selection.start > start || selection.end < start + len {
+                    continue;
+                }
+                let rect = Rectangle {
+                    x: origin.x + rect.x,
+                    y: origin.y + rect.y,
+                    ..rect
+                };
+                outline(renderer, rect, colors.cursor);
+            }
+            if let Some(drag) = state.image_drag.as_ref().filter(|drag| drag.moving) {
+                if let Some(y) = drag.drop_at.and_then(|slot| state.tops.get(slot)) {
+                    fill(
+                        renderer,
+                        Rectangle {
+                            x: origin.x,
+                            y: (origin.y + y - 1.0).round(),
+                            width: Self::text_width(bounds),
+                            height: 2.0,
+                        },
+                        colors.cursor,
+                    );
+                }
+                if let Some(image) = state.lines.get(drag.line).and_then(|l| l.image.as_ref()) {
+                    let scale = (GHOST_WIDTH / image.size.width.max(1.0)).min(1.0);
+                    let size = Size::new(image.size.width * scale, image.size.height * scale);
+                    renderer.draw_image(
+                        advanced_image::Image::new(image.allocation.handle().clone())
+                            .opacity(0.5_f32),
+                        Rectangle::new(
+                            Point::new(drag.position.x + 8.0, drag.position.y + 8.0),
+                            size,
+                        ),
+                        bounds,
+                    );
+                }
+            }
+        });
+
         // Indicador de desplazamiento.
         let total = state.total_height() + 2.0 * PADDING;
         if total > bounds.height && total > 0.0 {
@@ -962,13 +1123,26 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
 
     fn mouse_interaction(
         &self,
-        _tree: &Tree,
+        tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) {
+        let state = tree.state.downcast_ref::<State>();
+        if state.image_drag.as_ref().is_some_and(|drag| drag.moving) {
+            return mouse::Interaction::Grabbing;
+        }
+        let bounds = layout.bounds();
+        let origin = self.origin(bounds);
+        if let Some(position) = cursor.position_over(bounds)
+            && state
+                .image_at(Point::new(position.x - origin.x, position.y - origin.y))
+                .is_some()
+        {
+            return mouse::Interaction::Grab;
+        }
+        if cursor.is_over(bounds) {
             mouse::Interaction::Text
         } else {
             mouse::Interaction::default()
@@ -980,6 +1154,55 @@ impl<'a, Message: 'a> From<RichEditor<'a, Message>> for Element<'a, Message, The
     fn from(editor: RichEditor<'a, Message>) -> Self {
         Element::new(editor)
     }
+}
+
+/// Marco de 2 px alrededor de `rect` (por fuera).
+fn outline(renderer: &mut Renderer, rect: Rectangle, color: Color) {
+    let w = 2.0;
+    let (x0, y0) = (rect.x - w, rect.y - w);
+    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
+    let width = rect.width + 2.0 * w;
+    let height = rect.height + 2.0 * w;
+    fill(
+        renderer,
+        Rectangle {
+            x: x0,
+            y: y0,
+            width,
+            height: w,
+        },
+        color,
+    );
+    fill(
+        renderer,
+        Rectangle {
+            x: x0,
+            y: y1,
+            width,
+            height: w,
+        },
+        color,
+    );
+    fill(
+        renderer,
+        Rectangle {
+            x: x0,
+            y: y0,
+            width: w,
+            height,
+        },
+        color,
+    );
+    fill(
+        renderer,
+        Rectangle {
+            x: x1,
+            y: y0,
+            width: w,
+            height,
+        },
+        color,
+    );
 }
 
 fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {

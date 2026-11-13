@@ -1,7 +1,7 @@
 //! Acciones que el widget pide a la aplicación y su aplicación sobre el núcleo.
 
 use iced::Point;
-use lorca_core::{CoreError, EditorState, Motion};
+use lorca_core::{CoreError, EditorState, Motion, Selection};
 
 use super::{DocView, INDENT, Viewport};
 
@@ -27,6 +27,16 @@ pub enum EditorAction {
     },
     Drag {
         index: usize,
+    },
+    /// Selecciona de `anchor` a `head` (clic en una imagen: su línea entera).
+    SelectRange {
+        anchor: usize,
+        head: usize,
+    },
+    /// Mueve la línea `from` al hueco `to` entre líneas (arrastrar una imagen).
+    MoveLine {
+        from: usize,
+        to: usize,
     },
     Insert(String),
     /// Como `Insert`, pero con texto del portapapeles (puede deducir el lenguaje).
@@ -163,6 +173,17 @@ pub fn apply_action(
             ClickKind::Triple => editor.select_line(editor.buffer().char_to_line(index)),
         },
         EditorAction::Drag { index } => editor.set_cursor(index, true),
+        EditorAction::SelectRange { anchor, head } => {
+            editor.set_selection(Selection::new(anchor, head));
+        }
+        EditorAction::MoveLine { from, to } => {
+            if let Some(edit) = lorca_formats::move_line(&editor.text(), from, to) {
+                editor.replace_ranges(&edit.replacements)?;
+                // La línea movida queda seleccionada (el cursor al principio, para que el
+                // ajuste del cursor no lo meta en la línea siguiente).
+                editor.set_selection(Selection::new(edit.selection.end, edit.selection.start));
+            }
+        }
         EditorAction::AddCursor { index } => editor.add_cursor(index),
         EditorAction::AddNextOccurrence => {
             editor.add_next_occurrence();
