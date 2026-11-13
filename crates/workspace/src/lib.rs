@@ -14,7 +14,7 @@ mod storage;
 mod theme;
 mod workspace;
 
-pub use config::{Config, LspConfig, LspServer, SearchConfig, ThemeMode};
+pub use config::{Config, LspConfig, LspServer, SearchConfig, ThemeMode, WELCOME_VERSION};
 pub use document::{Document, DocumentId};
 pub use error::WorkspaceError;
 pub use images::{

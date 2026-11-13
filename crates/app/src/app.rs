@@ -182,6 +182,10 @@ pub enum Message {
     /// Opción marcada en la pantalla de bienvenida (aún sin confirmar).
     WelcomeChoose(ThemeMode),
     WelcomeDone,
+    /// Página del resumen de funciones.
+    TourPage(usize),
+    /// Fin (o «Saltar») del resumen de funciones.
+    TourDone,
     /// Latido para el guardado diferido de la sesión.
     Tick,
     LanguageSelected(Language),
@@ -272,6 +276,8 @@ pub struct Lorca {
     system_mode: Mode,
     /// Opción marcada en la pantalla de bienvenida; `Some` mientras se muestra.
     welcome_choice: Option<ThemeMode>,
+    /// Página del resumen de funciones que se está enseñando (tras elegir el tema).
+    tour_page: Option<usize>,
     /// Temas disponibles (incluidos y del usuario) y el que se está mostrando.
     themes: ThemeSet,
     active_theme: ActiveTheme,
@@ -371,7 +377,11 @@ impl Lorca {
             pending_images: None,
             update: UpdateState::None,
             quit_queue: None,
-            welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
+            // Con una bienvenida nueva, quien ya usaba Lorca la ve con su tema marcado.
+            welcome_choice: config
+                .needs_welcome()
+                .then(|| config.theme.unwrap_or(ThemeMode::Auto)),
+            tour_page: None,
             themes,
             active_theme,
             config,
@@ -933,6 +943,17 @@ impl Lorca {
             }
             Message::WelcomeDone => {
                 self.config.theme = Some(self.welcome_choice.take().unwrap_or_default());
+                self.save_config();
+                self.tour_page = Some(0);
+                Task::none()
+            }
+            Message::TourPage(page) => {
+                self.tour_page = Some(page.min(welcome::TOUR_PAGES - 1));
+                Task::none()
+            }
+            Message::TourDone => {
+                self.tour_page = None;
+                self.config.welcome_seen = lorca_workspace::WELCOME_VERSION;
                 self.save_config();
                 Task::none()
             }
@@ -1626,6 +1647,9 @@ impl Lorca {
         if let Some(choice) = self.welcome_choice {
             return welcome::view(choice, self.system_mode, &self.themes, &self.config);
         }
+        if let Some(page) = self.tour_page {
+            return welcome::tour(page);
+        }
         // macOS tiene la barra de menús nativa; en el resto se dibuja dentro de la ventana.
         let mut layout = column![];
         if !cfg!(target_os = "macos") {
@@ -2089,6 +2113,8 @@ fn affects_session(message: &Message) -> bool {
             | Message::ThemeSelected(_)
             | Message::WelcomeChoose(_)
             | Message::WelcomeDone
+            | Message::TourPage(_)
+            | Message::TourDone
             | Message::Highlighted { .. }
             | Message::PdfExported(_)
             | Message::InstallMenu

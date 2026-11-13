@@ -230,7 +230,10 @@ mensaje en español.
     al flujo de confirmación por documento (`quit_queue`). ⌘W sigue preguntando.
   - Tema: `resolve_theme(ThemeMode, system Mode)`; el modo del sistema llega con
     `system::theme()` al arrancar y `system::theme_changes()`. `welcome.rs` es la
-    pantalla del primer arranque.
+    pantalla del primer arranque: tema y, después, un resumen de funciones en páginas
+    (`welcome::tour`, `Lorca::tour_page`; también en «Lo que puedes hacer con Lorca» del menú
+    y la paleta). Se enseña si `Config::needs_welcome()` (sin tema o `welcome_seen` menor que
+    `WELCOME_VERSION`): subir esa constante hace que quien ya usaba Lorca la vea otra vez.
   - Resaltado: `schedule_highlight` (al final de cada `update`) lanza `Task::perform` con
     una copia del texto si la revisión o el lenguaje del documento activo cambiaron y no
     hay otro cálculo en marcha; `Message::Highlighted` guarda el resultado en

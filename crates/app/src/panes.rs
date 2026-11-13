@@ -422,6 +422,11 @@ impl Lorca {
                 Message::CheckUpdates { manual: true },
             ),
             Command::new(
+                "Lorca: Lo que puedes hacer con Lorca",
+                "",
+                Message::TourPage(0),
+            ),
+            Command::new(
                 "Ver: Mostrar marcas de Markdown",
                 "",
                 context(ContextAction::ToggleMarkdownMarkers),

@@ -82,7 +82,14 @@ pub struct Config {
     pub lsp: LspConfig,
     /// Últimas opciones elegidas en la barra de búsqueda.
     pub search: SearchConfig,
+    /// Versión de la bienvenida (tema y resumen de funciones) que ya se vio. Si es menor
+    /// que [`WELCOME_VERSION`], se vuelve a mostrar al arrancar.
+    pub welcome_seen: u32,
 }
+
+/// Versión actual de la bienvenida. Subirla hace que todos la vean otra vez (por ejemplo,
+/// cuando el resumen de funciones cambia mucho).
+pub const WELCOME_VERSION: u32 = 1;
 
 /// Opciones de la barra de búsqueda que se recuerdan entre sesiones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,11 +176,18 @@ impl Default for Config {
             insert_spaces: true,
             lsp: LspConfig::default(),
             search: SearchConfig::default(),
+            welcome_seen: 0,
         }
     }
 }
 
 impl Config {
+    /// ¿Hay que mostrar la bienvenida? En el primer arranque y cuando hay una versión
+    /// nueva de ella.
+    pub fn needs_welcome(&self) -> bool {
+        self.theme.is_none() || self.welcome_seen < WELCOME_VERSION
+    }
+
     pub const DEFAULT_FONT_SIZE: u16 = 14;
     pub const FONT_SIZES: std::ops::RangeInclusive<u16> = 8..=40;
     pub const TAB_WIDTHS: std::ops::RangeInclusive<u8> = 1..=16;
@@ -249,6 +263,19 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_configs_see_the_new_welcome() {
+        // Una configuración de una versión anterior (sin `welcome_seen`) con tema elegido.
+        let old: Config = toml::from_str("theme = \"dark\"\n").unwrap();
+        assert!(old.needs_welcome());
+        let seen = Config {
+            welcome_seen: WELCOME_VERSION,
+            ..old
+        };
+        assert!(!seen.needs_welcome());
+        assert!(Config::default().needs_welcome());
+    }
 
     #[test]
     fn missing_file_is_first_run() {
