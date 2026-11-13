@@ -2788,9 +2788,9 @@ name = "lorca-workspace"
 version = "0.1.15"
 dependencies = [
  "dirs 7.0.0",
+ "image",
  "lorca-core",
  "lorca-syntax",
- "png 0.18.1",
  "serde",
  "tempfile",
  "thiserror 2.0.21",

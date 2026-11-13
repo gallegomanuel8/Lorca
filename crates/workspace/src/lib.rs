@@ -18,8 +18,8 @@ pub use config::{Config, LspConfig, LspServer, SearchConfig, ThemeMode};
 pub use document::{Document, DocumentId};
 pub use error::WorkspaceError;
 pub use images::{
-    IMAGE_EXTENSIONS, image_alt, image_target, images_dir, import_image, is_image_path,
-    resolve_image, save_png,
+    IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, image_alt, image_target, images_dir,
+    import_image, is_image_path, resolve_image, save_png,
 };
 pub use session::{RestoreReport, SESSION_VERSION, Session, SessionDocument, SessionStore};
 pub use storage::{DiskStamp, data_dir};

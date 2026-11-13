@@ -183,7 +183,11 @@ mensaje en español.
     archivos de imagen copiados se leen con `arboard`) o soltando archivos
     (`Message::FileDropped`; los que no son imágenes se abren). Se guardan en
     `<nombre>_imagenes/` junto al documento (`import_image`, `save_png` → `imagen-N.png`) y
-    se enlazan con ruta relativa (`insert_images`). Un documento sin ruta se guarda antes
+    se enlazan con ruta relativa (`insert_images`). Las grandes (lado mayor > 2000 px o
+    > 1 MB; `MAX_IMAGE_SIDE`, `MAX_IMAGE_BYTES`) se guardan reducidas, giradas según su EXIF
+    y sin metadatos: fotos en JPEG (calidad 85), PNG/BMP y transparencias en PNG; el
+    original no se toca y si la copia no ahorra nada se usa el original. Se hace en un hilo
+    aparte (`store_images` → `Message::ImagesStored`). Crate `image` (el mismo que trae iced). Un documento sin ruta se guarda antes
     (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún no incluye las imágenes.
     Clic en una imagen: selecciona su línea con el salto (`EditorAction::SelectRange`, cursor
     al principio para que `snap_cursor` no lo lleve a la línea siguiente) y se ve un marco.

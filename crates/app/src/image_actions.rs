@@ -1,7 +1,9 @@
 //! Insertar imágenes en el texto con formato: con el botón de la barra (selector de
 //! archivos), pegando (imagen o archivos de imagen copiados) o arrastrando archivos a la
 //! ventana. Las imágenes se guardan junto al documento (`lorca_workspace::import_image`,
-//! `save_png`), así que un documento sin ruta se guarda antes (`Then::InsertImages`).
+//! `save_png`, que reducen las grandes), así que un documento sin ruta se guarda antes
+//! (`Then::InsertImages`). Guardarlas (y reducirlas) se hace en un hilo aparte
+//! (`store_images` → `Message::ImagesStored`).
 //!
 //! Es un submódulo de `app` para poder usar su estado privado.
 
@@ -162,22 +164,20 @@ impl Lorca {
             return self.save_as(id, Then::InsertImages);
         };
 
-        let mut images = Vec::new();
-        let mut errors = Vec::new();
-        for source in sources {
-            let stored = match source {
-                ImageSource::File(file) => import_image(&path, &file),
-                ImageSource::Pixels {
-                    width,
-                    height,
-                    rgba,
-                } => save_png(&path, width, height, &rgba),
-            };
-            match stored {
-                Ok(image) => images.push((image_alt(&image), image_target(&path, &image))),
-                Err(error) => errors.push(error.to_string()),
-            }
-        }
+        Task::perform(store_images(path, sources), move |stored| {
+            Message::ImagesStored(id, stored)
+        })
+    }
+
+    /// Imágenes ya guardadas junto al documento: se enlazan donde está el cursor.
+    pub(super) fn images_stored(
+        &mut self,
+        id: DocumentId,
+        stored: Vec<Result<(String, String), String>>,
+    ) -> Task<Message> {
+        let (images, errors): (Vec<_>, Vec<_>) = stored.into_iter().partition(Result::is_ok);
+        let images: Vec<(String, String)> = images.into_iter().filter_map(Result::ok).collect();
+        let errors: Vec<String> = errors.into_iter().filter_map(Result::err).collect();
         if !errors.is_empty() {
             self.show_error(errors.join(" · "));
         }
@@ -215,6 +215,37 @@ impl Lorca {
             _ => Task::none(),
         }
     }
+}
+
+/// Guarda (y reduce si hace falta) las imágenes junto a `document` en un hilo aparte.
+/// Devuelve, por imagen, su (descripción, ruta para el enlace) o el error.
+async fn store_images(
+    document: PathBuf,
+    sources: Vec<ImageSource>,
+) -> Vec<Result<(String, String), String>> {
+    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let stored = sources
+            .into_iter()
+            .map(|source| {
+                let image = match source {
+                    ImageSource::File(file) => import_image(&document, &file),
+                    ImageSource::Pixels {
+                        width,
+                        height,
+                        rgba,
+                    } => save_png(&document, width, height, &rgba),
+                };
+                image
+                    .map(|image| (image_alt(&image), image_target(&document, &image)))
+                    .map_err(|error| error.to_string())
+            })
+            .collect();
+        let _ = sender.send(stored);
+    });
+    receiver
+        .await
+        .unwrap_or_else(|_| vec![Err("se interrumpió al guardar las imágenes".to_owned())])
 }
 
 /// Archivos de imagen copiados en el portapapeles (en el Finder, el Explorador…).

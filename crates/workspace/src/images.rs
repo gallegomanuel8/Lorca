@@ -87,20 +87,38 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Deja `source` a disposición de `document` y devuelve dónde queda. Si ya está dentro de
-/// la carpeta del documento se usa tal cual; si no, se copia a su carpeta de imágenes.
+/// Lado mayor (en píxeles) a partir del cual una imagen se reduce al insertarla.
+pub const MAX_IMAGE_SIDE: u32 = 2000;
+/// Tamaño de archivo a partir del cual una imagen se intenta reducir al insertarla.
+pub const MAX_IMAGE_BYTES: u64 = 1024 * 1024;
+/// Calidad JPEG de las fotos reducidas.
+const JPEG_QUALITY: u8 = 85;
+
+/// Deja `source` a disposición de `document` y devuelve dónde queda.
+///
+/// Las imágenes grandes (lado mayor de más de [`MAX_IMAGE_SIDE`] o más de
+/// [`MAX_IMAGE_BYTES`]) se guardan reducidas en la carpeta de imágenes: las fotos en JPEG,
+/// las PNG (capturas) y las que tienen transparencia en PNG, giradas según su orientación
+/// EXIF y sin sus metadatos (ubicación incluida). El original no se toca. Las demás se
+/// usan tal cual si ya están en la carpeta del documento o se copian a la de imágenes.
 pub fn import_image(document: &Path, source: &Path) -> Result<PathBuf, WorkspaceError> {
     let canonical = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let source = canonical(source);
+    let stem = source
+        .file_stem()
+        .map_or_else(|| "imagen".to_owned(), |s| s.to_string_lossy().into_owned());
+    if needs_reduction(&source) {
+        let dir = prepare_dir(document)?;
+        if let Some(reduced) = reduce(&source, &dir, &stem)? {
+            return Ok(reduced);
+        }
+    }
     if let Some(parent) = document.parent()
         && source.starts_with(canonical(parent))
     {
         return Ok(source);
     }
     let dir = prepare_dir(document)?;
-    let stem = source
-        .file_stem()
-        .map_or_else(|| "imagen".to_owned(), |s| s.to_string_lossy().into_owned());
     let ext = source
         .extension()
         .map_or_else(|| "png".to_owned(), |e| e.to_string_lossy().to_lowercase());
@@ -112,8 +130,102 @@ pub fn import_image(document: &Path, source: &Path) -> Result<PathBuf, Workspace
     Ok(target)
 }
 
+/// ¿Conviene reducir `path`? Los GIF no (pueden ser animados).
+fn needs_reduction(path: &Path) -> bool {
+    let is_gif = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
+    if is_gif {
+        return false;
+    }
+    let too_heavy = fs::metadata(path).is_ok_and(|meta| meta.len() > MAX_IMAGE_BYTES);
+    let too_big = image::image_dimensions(path)
+        .is_ok_and(|(width, height)| width.max(height) > MAX_IMAGE_SIDE);
+    too_heavy || too_big
+}
+
+/// Guarda en `dir` una copia reducida de `source`. `None` si la copia no pesaría menos
+/// que el original y tampoco hacía falta achicarla (entonces se usa el original).
+fn reduce(source: &Path, dir: &Path, stem: &str) -> Result<Option<PathBuf>, WorkspaceError> {
+    let image_error = |message: String| WorkspaceError::Image {
+        path: source.to_path_buf(),
+        message,
+    };
+    let reader = image::ImageReader::open(source)
+        .and_then(image::ImageReader::with_guessed_format)
+        .map_err(|error| image_error(error.to_string()))?;
+    let format = reader.format();
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|error| image_error(error.to_string()))?;
+    let orientation = image::ImageDecoder::orientation(&mut decoder)
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut picture =
+        image::DynamicImage::from_decoder(decoder).map_err(|e| image_error(e.to_string()))?;
+    picture.apply_orientation(orientation);
+    let oversized = picture.width().max(picture.height()) > MAX_IMAGE_SIDE;
+    let picture = shrink(picture);
+    // Capturas (PNG, BMP) y transparencias en PNG para no emborronar ni perder el canal
+    // alfa; el resto (fotos) en JPEG.
+    let lossless = matches!(
+        format,
+        Some(image::ImageFormat::Png | image::ImageFormat::Bmp)
+    ) || picture.color().has_alpha();
+    let target = unique_path(dir, stem, if lossless { "png" } else { "jpg" });
+    encode(&picture, &target, lossless)?;
+    let original = fs::metadata(source).map_or(u64::MAX, |meta| meta.len());
+    let reduced = fs::metadata(&target).map_or(0, |meta| meta.len());
+    if !oversized && reduced >= original {
+        let _ = fs::remove_file(&target);
+        return Ok(None);
+    }
+    Ok(Some(target))
+}
+
+/// Achica `picture` para que su lado mayor no pase de [`MAX_IMAGE_SIDE`].
+fn shrink(picture: image::DynamicImage) -> image::DynamicImage {
+    if picture.width().max(picture.height()) > MAX_IMAGE_SIDE {
+        picture.resize(
+            MAX_IMAGE_SIDE,
+            MAX_IMAGE_SIDE,
+            image::imageops::FilterType::CatmullRom,
+        )
+    } else {
+        picture
+    }
+}
+
+/// Escribe `picture` en `target` como PNG (`lossless`) o JPEG.
+fn encode(
+    picture: &image::DynamicImage,
+    target: &Path,
+    lossless: bool,
+) -> Result<(), WorkspaceError> {
+    let file = fs::File::create(target).map_err(|source| WorkspaceError::Write {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    let mut writer = std::io::BufWriter::new(file);
+    let result = if lossless {
+        picture.write_to(&mut writer, image::ImageFormat::Png)
+    } else {
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, JPEG_QUALITY);
+        picture.to_rgb8().write_with_encoder(encoder)
+    };
+    if let Err(error) = result {
+        drop(writer);
+        let _ = fs::remove_file(target);
+        return Err(WorkspaceError::Image {
+            path: target.to_path_buf(),
+            message: error.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Guarda una imagen RGBA (la del portapapeles) como PNG en la carpeta de imágenes de
-/// `document` (`imagen-1.png`, `imagen-2.png`…) y devuelve su ruta.
+/// `document` (`imagen-1.png`, `imagen-2.png`…), reducida si su lado mayor pasa de
+/// [`MAX_IMAGE_SIDE`], y devuelve su ruta.
 pub fn save_png(
     document: &Path,
     width: u32,
@@ -122,31 +234,20 @@ pub fn save_png(
 ) -> Result<PathBuf, WorkspaceError> {
     let dir = prepare_dir(document)?;
     let target = unique_path(&dir, "imagen", "png");
-    let image_error = |message: String| WorkspaceError::Image {
-        path: target.clone(),
-        message,
-    };
-    let expected = u64::from(width) * u64::from(height) * 4;
-    if u64::try_from(rgba.len()).ok() != Some(expected) {
-        return Err(image_error(format!(
-            "tamaño inesperado ({} bytes para {width}×{height})",
-            rgba.len()
-        )));
-    }
-    let file = fs::File::create(&target).map_err(|source| WorkspaceError::Write {
-        path: target.clone(),
-        source,
+    let picture = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
+        WorkspaceError::Image {
+            path: target.clone(),
+            message: format!(
+                "tamaño inesperado ({} bytes para {width}×{height})",
+                rgba.len()
+            ),
+        }
     })?;
-    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let result = encoder
-        .write_header()
-        .and_then(|mut writer| writer.write_image_data(rgba));
-    if let Err(error) = result {
-        let _ = fs::remove_file(&target);
-        return Err(image_error(error.to_string()));
-    }
+    encode(
+        &shrink(image::DynamicImage::ImageRgba8(picture)),
+        &target,
+        true,
+    )?;
     Ok(target)
 }
 
@@ -247,6 +348,49 @@ mod tests {
         assert_eq!(fs::read(second).unwrap(), b"miau");
     }
 
+    /// Escribe una imagen de prueba de `width`×`height` con ruido (para que no comprima
+    /// casi nada) en `path`.
+    fn noisy(path: &Path, width: u32, height: u32) {
+        let picture = image::RgbImage::from_fn(width, height, |x, y| {
+            let v = (x.wrapping_mul(7919) ^ y.wrapping_mul(104_729)).to_le_bytes();
+            image::Rgb([v[0], v[1], v[2]])
+        });
+        picture.save(path).unwrap();
+    }
+
+    #[test]
+    fn big_photos_are_reduced_to_jpeg_and_small_ones_copied() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("notas.md");
+        let other = tempfile::tempdir().unwrap();
+
+        let photo = other.path().join("foto.jpg");
+        noisy(&photo, 2400, 1200);
+        let stored = import_image(&doc, &photo).unwrap();
+        assert_eq!(stored, dir.path().join("notas_imagenes/foto.jpg"));
+        assert_eq!(image::image_dimensions(&stored).unwrap(), (2000, 1000));
+        // El original no se toca.
+        assert_eq!(image::image_dimensions(&photo).unwrap(), (2400, 1200));
+
+        let capture = other.path().join("captura.png");
+        noisy(&capture, 2600, 100);
+        let stored = import_image(&doc, &capture).unwrap();
+        assert_eq!(stored.extension().unwrap(), "png");
+        assert_eq!(image::image_dimensions(&stored).unwrap().0, 2000);
+
+        let small = other.path().join("icono.png");
+        noisy(&small, 32, 32);
+        let stored = import_image(&doc, &small).unwrap();
+        assert_eq!(fs::read(&stored).unwrap(), fs::read(&small).unwrap());
+
+        // Una grande que ya está junto al documento: se reduce en una copia.
+        let inside = dir.path().join("grande.jpg");
+        noisy(&inside, 3000, 300);
+        let stored = import_image(&doc, &inside).unwrap();
+        assert_eq!(stored, dir.path().join("notas_imagenes/grande.jpg"));
+        assert!(inside.exists());
+    }
+
     #[test]
     fn saves_clipboard_images_as_numbered_pngs() {
         let dir = tempfile::tempdir().unwrap();
@@ -258,5 +402,9 @@ mod tests {
         assert_eq!(second, dir.path().join("notas_imagenes/imagen-2.png"));
         assert!(fs::read(&first).unwrap().starts_with(b"\x89PNG"));
         assert!(save_png(&doc, 3, 3, &pixels).is_err());
+        // Una captura enorme se reduce.
+        let big = [10_u8, 20, 30, 255].repeat(3000 * 10);
+        let reduced = save_png(&doc, 3000, 10, &big).unwrap();
+        assert_eq!(image::image_dimensions(&reduced).unwrap().0, 2000);
     }
 }

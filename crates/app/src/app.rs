@@ -216,6 +216,8 @@ pub enum Message {
     OpenUpdatePage,
     /// Imágenes elegidas para insertar en el documento.
     ImagesPicked(DocumentId, Vec<PathBuf>),
+    /// Imágenes ya guardadas junto al documento: (descripción, ruta) o error.
+    ImagesStored(DocumentId, Vec<Result<(String, String), String>>),
     /// Archivo soltado en la ventana.
     FileDropped(PathBuf),
     /// Abre un desplegable de la barra de formato bajo `Point`.
@@ -1062,6 +1064,7 @@ impl Lorca {
                 Task::none()
             }
             Message::ImagesPicked(id, paths) => self.images_picked(id, paths),
+            Message::ImagesStored(id, stored) => self.images_stored(id, stored),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenFormatMenu(menu, position) => {
                 self.context_menu = None;
