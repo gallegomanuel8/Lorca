@@ -111,7 +111,8 @@ mensaje en español.
   las fuentes completas (≈6 MB).
 - `workspace`: `Workspace` (documentos por `DocumentId`, orden de pestañas, activa) y
   `Document` (editor, ruta, número «Sin título N», formato, lenguaje, `DiskStamp`). Sin
-  ruta, `display_name` es el comienzo del texto (primera línea con contenido, sin `#`,
+  ruta, `display_name` es el comienzo del texto (primera línea con contenido que no sea una
+  imagen, sin `#`,
   15 caracteres como máximo, sin puntos suspensivos, como el Bloc de notas) y `suggested_file_name` lo propone al
   guardar (sin `/\:*?"<>|`).
   - `storage`: `data_dir()` (respeta `LORCA_DATA_DIR`), `write_atomic` (temporal + rename),

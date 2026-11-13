@@ -270,7 +270,8 @@ impl Document {
         let buffer = self.editor.buffer();
         let line = (0..buffer.len_lines().min(LOOKAHEAD))
             .map(|line| buffer.line_text(line))
-            .find(|text| !text.trim().is_empty())?;
+            // Las imágenes (`![…](…)`) no dan nombre: se mira el texto que sigue.
+            .find(|text| !text.trim().is_empty() && lorca_formats::parse_image(text).is_none())?;
         let words = line
             .trim_start()
             .trim_start_matches('#')
@@ -359,6 +360,15 @@ mod tests {
         // Solo almohadillas o espacios: no hay título.
         doc.editor.select_all();
         doc.editor.insert_text("###").unwrap();
+        assert_eq!(doc.display_name(), "Sin título 3");
+        // Las líneas de imagen se saltan.
+        doc.editor.select_all();
+        doc.editor
+            .insert_text("![imagen-1](</tmp/datos/imagenes/imagen-1.png>)\nRomancero")
+            .unwrap();
+        assert_eq!(doc.display_name(), "Romancero");
+        doc.editor.select_all();
+        doc.editor.insert_text("![imagen-1](/tmp/a.png)").unwrap();
         assert_eq!(doc.display_name(), "Sin título 3");
     }
 
