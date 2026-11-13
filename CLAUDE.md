@@ -408,6 +408,10 @@ mensaje en español.
 - Windows y Linux no tienen barra de menús nativa (muda exige `unsafe` en Windows y GTK
   en Linux): se dibuja una con iced (`menu::bar`), sin teclas Alt ni paso de un menú a
   otro al pasar el ratón.
+- Linux con Wayland: soltar archivos en la ventana no hace nada (winit 0.30 no entrega
+  `DroppedFile` en Wayland). Pegar imágenes sí funciona: `arboard` lleva la feature
+  `wayland-data-control` (sin ella lee el portapapeles de X11, que en KDE no recibe lo
+  copiado en Dolphin).
 - Instancia única por carpeta de datos: con Lorca abierto, `cargo run` (sin otro
   `LORCA_DATA_DIR`) no abre ventana, sino que pasa los archivos a la instancia abierta. Dos
   arranques exactamente simultáneos pueden quedar como dos instancias.
