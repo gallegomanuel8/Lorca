@@ -8,6 +8,7 @@ description = "Editor de texto y código, en homenaje a Federico García Lorca"
 
 [dependencies]
 anyhow = "1.0.104"
+arboard = "3.7.0"
 cargo-packager-updater = "0.2.3"
 iced = { version = "0.14.0", features = ["advanced", "image", "markdown", "smol", "svg"] }
 lorca-core = { version = "0.1.0", path = "../core" }

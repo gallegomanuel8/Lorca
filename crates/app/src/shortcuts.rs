@@ -16,6 +16,7 @@ use crate::context_menu::ContextAction;
 /// Traduce un evento en un mensaje de la aplicación (firma de `event::listen_with`).
 pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
+        Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))
         }

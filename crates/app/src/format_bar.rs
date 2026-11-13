@@ -64,6 +64,7 @@ const CHEVRON: &[u8] = include_bytes!("../icons/chevron.svg");
 const LIST: &[u8] = include_bytes!("../icons/list.svg");
 const LINK: &[u8] = include_bytes!("../icons/link.svg");
 const TABLE: &[u8] = include_bytes!("../icons/table.svg");
+const IMAGE: &[u8] = include_bytes!("../icons/image.svg");
 const CLEAR: &[u8] = include_bytes!("../icons/clear-format.svg");
 
 /// Icono SVG teñido con el color del texto (o atenuado si está desactivado).
@@ -225,6 +226,12 @@ pub fn bar<'a>(state: BarState, background: fn(&Theme) -> Color) -> Element<'a, 
             icon(LINK, 16.0, enabled),
             with_keys("Vínculo", keys::LINK),
             ContextAction::Link,
+            enabled,
+        ),
+        tool(
+            icon(IMAGE, 16.0, enabled),
+            "Insertar imagen (también se pueden pegar o arrastrar)".to_owned(),
+            ContextAction::InsertImage,
             enabled,
         ),
         menu_tool(

@@ -26,6 +26,21 @@ pub async fn pick_save_path(file_name: String, directory: Option<PathBuf>) -> Op
     dialog.save_file().await.map(|f| f.path().to_path_buf())
 }
 
+/// Pide una o varias imágenes para insertar.
+pub async fn pick_images(directory: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut dialog = AsyncFileDialog::new()
+        .set_title("Insertar imagen")
+        .add_filter("Imágenes", &lorca_workspace::IMAGE_EXTENSIONS);
+    if let Some(directory) = directory {
+        dialog = dialog.set_directory(directory);
+    }
+    dialog
+        .pick_files()
+        .await
+        .map(|files| files.iter().map(|f| f.path().to_path_buf()).collect())
+        .unwrap_or_default()
+}
+
 /// Pide una carpeta para buscar en ella.
 pub async fn pick_folder(directory: Option<PathBuf>) -> Option<PathBuf> {
     let mut dialog = AsyncFileDialog::new().set_title("Buscar en carpeta");

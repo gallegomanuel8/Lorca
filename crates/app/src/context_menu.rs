@@ -86,6 +86,8 @@ pub enum ContextAction {
     Heading(Option<u8>),
     /// `[texto](url)`.
     Link,
+    /// Insertar imágenes (selector de archivos).
+    InsertImage,
     ClearFormatting,
     /// Aumentar (`true`) o reducir la sangría de los elementos de lista.
     IndentList(bool),

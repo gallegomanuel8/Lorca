@@ -1138,6 +1138,7 @@ impl Lorca {
                 self.apply_markup(insert_link);
                 Task::none()
             }
+            ContextAction::InsertImage => self.pick_images(),
             ContextAction::ClearFormatting => {
                 self.apply_markup(clear_formatting);
                 Task::none()

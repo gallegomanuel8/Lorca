@@ -173,6 +173,18 @@ mensaje en español.
     continúa listas y el cursor nunca queda dentro de una marca (`snap_cursor`). Análisis
     de cada línea en `lorca_formats::parse_line`. Sin números de línea ni resaltado de
     búsqueda en este modo; la barra de desplazamiento es solo indicador.
+  - Imágenes (solo en texto con formato): una línea con solo `![descripción](ruta)`
+    (`lorca_formats::parse_image`, `Block::Image`) se dibuja como la imagen (ajustada al
+    ancho, sin agrandarla; `LineImage`, cargada con `Renderer::load_image`) con la
+    descripción debajo como pie; el párrafo empieza en `LineLayout::text_top`. Rutas
+    relativas al documento (`lorca_workspace::resolve_image`); si no se puede mostrar, el pie
+    lo dice. Se insertan (`image_actions.rs`, submódulo de `app`) con el botón de la barra,
+    pegando (sin texto en el portapapeles el editor publica `EditorAction::PasteImage`; los
+    archivos de imagen copiados se leen con `arboard`) o soltando archivos
+    (`Message::FileDropped`; los que no son imágenes se abren). Se guardan en
+    `<nombre>_imagenes/` junto al documento (`import_image`, `save_png` → `imagen-N.png`) y
+    se enlazan con ruta relativa (`insert_images`). Un documento sin ruta se guarda antes
+    (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún no incluye las imágenes.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
   - Ajuste de línea (`Config::wrap_markdown`, «Ver → Ajuste de línea al ver las marcas»):
     solo en los textos con formato vistos con sus marcas (con formato ya se ajustan; el

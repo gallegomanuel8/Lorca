@@ -734,8 +734,10 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                         }
                     }
                     KeyCommand::Paste => {
-                        if let Some(contents) = clipboard.read(clipboard::Kind::Standard) {
-                            self.publish(shell, EditorAction::Paste(contents));
+                        match clipboard.read(clipboard::Kind::Standard) {
+                            Some(contents) => self.publish(shell, EditorAction::Paste(contents)),
+                            // Sin texto puede haber una imagen (la app lo mira).
+                            None => self.publish(shell, EditorAction::PasteImage),
                         }
                     }
                 }

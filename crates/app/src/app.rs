@@ -46,6 +46,8 @@ use find_actions::{Focus, MatchCache};
 #[path = "panes.rs"]
 mod panes;
 
+#[path = "image_actions.rs"]
+mod image_actions;
 #[path = "lsp_actions.rs"]
 mod lsp_actions;
 
@@ -77,6 +79,8 @@ pub enum Then {
     ContinueQuit,
     /// Cerrar la pestaña y seguir con la siguiente de `close_queue`.
     CloseAndContinue,
+    /// Insertar las imágenes pendientes (`Lorca::pending_images`).
+    InsertImages,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +214,10 @@ pub enum Message {
     UpdateProgress(updates::Progress),
     DismissUpdate,
     OpenUpdatePage,
+    /// Imágenes elegidas para insertar en el documento.
+    ImagesPicked(DocumentId, Vec<PathBuf>),
+    /// Archivo soltado en la ventana.
+    FileDropped(PathBuf),
     /// Abre un desplegable de la barra de formato bajo `Point`.
     OpenFormatMenu(FormatMenu, Point),
     CloseFormatMenu,
@@ -246,6 +254,8 @@ pub struct Lorca {
     prompt: Option<Prompt>,
     /// Desplegable abierto de la barra de formato.
     format_popup: Option<FormatPopup>,
+    /// Imágenes por insertar en un documento que se está guardando por primera vez.
+    pending_images: Option<(DocumentId, Vec<image_actions::ImageSource>)>,
     /// Actualización disponible o en curso.
     update: UpdateState,
     /// Documentos con cambios que quedan por confirmar antes de salir. Solo se usa si
@@ -356,6 +366,7 @@ impl Lorca {
             dialog_open: false,
             prompt: None,
             format_popup: None,
+            pending_images: None,
             update: UpdateState::None,
             quit_queue: None,
             welcome_choice: config.theme.is_none().then_some(ThemeMode::Auto),
@@ -539,6 +550,12 @@ impl Lorca {
                         self.completion_key(key);
                         return Task::none();
                     }
+                    EditorAction::PasteImage => return self.paste_image(id),
+                    EditorAction::Paste(_) => {
+                        if let Some(task) = self.paste_image_files(id) {
+                            return task;
+                        }
+                    }
                     _ => {}
                 }
                 self.apply_editor_action(id, action.clone());
@@ -585,6 +602,7 @@ impl Lorca {
                 let Some(path) = path else {
                     self.quit_queue = None;
                     self.close_queue.clear();
+                    self.pending_images = None;
                     return Task::none();
                 };
                 match self.workspace.save_as(id, &path) {
@@ -1043,6 +1061,8 @@ impl Lorca {
                 }
                 Task::none()
             }
+            Message::ImagesPicked(id, paths) => self.images_picked(id, paths),
+            Message::FileDropped(path) => self.file_dropped(path),
             Message::OpenFormatMenu(menu, position) => {
                 self.context_menu = None;
                 self.format_popup = Some(FormatPopup {
@@ -1491,6 +1511,7 @@ impl Lorca {
                 self.process_close_queue()
             }
             Then::ContinueQuit => self.process_quit(),
+            Then::InsertImages => self.insert_pending_images(id),
         }
     }
 

@@ -31,6 +31,8 @@ pub enum EditorAction {
     Insert(String),
     /// Como `Insert`, pero con texto del portapapeles (puede deducir el lenguaje).
     Paste(String),
+    /// Pegar sin texto en el portapapeles (puede haber una imagen): lo resuelve la app.
+    PasteImage,
     Newline,
     Indent,
     Backspace,
@@ -120,7 +122,7 @@ pub fn apply_action(
             view.scroll_to(x, y, viewport, editor);
             return Ok(());
         }
-        EditorAction::Zoom(_) => return Ok(()),
+        EditorAction::Zoom(_) | EditorAction::PasteImage => return Ok(()),
         EditorAction::RichHeight(height) => {
             view.rich_height = Some(height);
             view.clamp(viewport, editor);
