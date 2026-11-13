@@ -12,7 +12,9 @@
 //! imagen (ajustada al ancho, sin agrandarla) y debajo la descripción como pie: el párrafo
 //! de la línea, donde se coloca el cursor, empieza en `text_top`. Un clic en la imagen
 //! selecciona su línea entera (se ve con un marco) y arrastrarla la mueve a otro hueco
-//! entre líneas (`EditorAction::MoveLine`).
+//! entre líneas (`EditorAction::MoveLine`). Con la imagen seleccionada, el tirador de su
+//! esquina inferior derecha cambia su ancho (`EditorAction::ResizeImage`, que lo guarda como
+//! `![descripción|300](ruta)`); doble clic en él la deja a su tamaño.
 
 use std::path::{Path, PathBuf};
 
@@ -58,6 +60,10 @@ const IMAGE_GAP: f32 = 6.0;
 const DRAG_THRESHOLD: f32 = 4.0;
 /// Anchura máxima de la copia translúcida que sigue al ratón al arrastrar una imagen.
 const GHOST_WIDTH: f32 = 200.0;
+/// Lado del tirador para cambiar el tamaño de una imagen.
+const HANDLE: f32 = 10.0;
+/// Ancho mínimo de una imagen al cambiar su tamaño.
+const MIN_IMAGE_WIDTH: f32 = 32.0;
 
 /// Crea el editor con formato de un documento.
 pub fn rich_editor<'a, Message>(
@@ -135,6 +141,16 @@ struct ImageDrag {
     drop_at: Option<usize>,
 }
 
+/// Cambio de tamaño de una imagen con su tirador.
+struct ImageResize {
+    line: usize,
+    /// Dónde se pulsó (pantalla) y el ancho que tenía.
+    start: Point,
+    start_width: f32,
+    /// Ancho mientras se arrastra.
+    width: f32,
+}
+
 struct State {
     lines: Vec<LineLayout>,
     /// Posición vertical de cada línea (una más: el alto total).
@@ -158,6 +174,7 @@ struct State {
     /// Rueda acumulada para el zoom (ver `zoom_steps`).
     zoom_pending: f32,
     image_drag: Option<ImageDrag>,
+    image_resize: Option<ImageResize>,
 }
 
 impl Default for State {
@@ -180,6 +197,7 @@ impl Default for State {
             goal_x: None,
             zoom_pending: 0.0,
             image_drag: None,
+            image_resize: None,
         }
     }
 }
@@ -369,10 +387,16 @@ fn line_image(
         .load_image(&handle)
         .map_err(|_| format!("no se puede abrir «{}»", image.target))?;
     let size = allocation.size();
-    Ok(LineImage {
-        size: Size::new(size.width as f32, size.height as f32),
-        allocation,
-    })
+    let natural = Size::new(size.width as f32, size.height as f32);
+    // Con ancho propio (`|300`) se escala a él, manteniendo la proporción.
+    let size = match image.width {
+        Some(width) if natural.width > 0.0 => {
+            let width = width as f32;
+            Size::new(width, natural.height * width / natural.width)
+        }
+        _ => natural,
+    };
+    Ok(LineImage { size, allocation })
 }
 
 /// Maqueta una línea para la anchura `width`.
@@ -559,6 +583,30 @@ impl<Message> RichEditor<'_, Message> {
         state.tops = tops;
         state.built_for = Some(key);
         state.built_path = self.document.map(Path::to_path_buf);
+    }
+
+    /// ¿Está seleccionada entera la línea de imagen `line`?
+    fn is_image_selected(&self, state: &State, line: usize) -> bool {
+        if state.image_rect(line).is_none() {
+            return false;
+        }
+        let selection = self.editor.selection().range();
+        let start = self.editor.buffer().line_start(line);
+        let len = state.lines.get(line).map_or(0, |l| l.text.chars().count());
+        !selection.is_empty() && selection.start <= start && selection.end >= start + len
+    }
+
+    /// Línea de la imagen seleccionada cuyo tirador está bajo un punto del contenido.
+    fn handle_at(&self, state: &State, point: Point) -> Option<usize> {
+        let line = state.line_at(point.y.max(0.0));
+        // El tirador sobresale un poco por debajo de la imagen.
+        let candidates = [line, line.saturating_sub(1)];
+        candidates.into_iter().find(|&line| {
+            self.is_image_selected(state, line)
+                && state
+                    .image_rect(line)
+                    .is_some_and(|rect| handle_rect(rect).expand(3.0).contains(point))
+        })
     }
 
     /// Esquina del contenido en pantalla.
@@ -799,6 +847,59 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor.position_over(bounds).is_some_and(|position| {
+                    self.handle_at(state, to_content(position)).is_some()
+                }) =>
+            {
+                let Some(position) = cursor.position_over(bounds) else {
+                    return;
+                };
+                let Some(line) = self.handle_at(state, to_content(position)) else {
+                    return;
+                };
+                let click = mouse::Click::new(position, mouse::Button::Left, state.last_click);
+                state.last_click = Some(click);
+                if click.kind() == mouse::click::Kind::Double {
+                    // Doble clic: tamaño original.
+                    state.image_resize = None;
+                    self.publish(shell, EditorAction::ResizeImage { line, width: None });
+                } else if let Some(rect) = state.image_rect(line) {
+                    state.image_resize = Some(ImageResize {
+                        line,
+                        start: position,
+                        start_width: rect.width,
+                        width: rect.width,
+                    });
+                }
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position })
+                if state.image_resize.is_some() =>
+            {
+                let max = Self::text_width(bounds);
+                if let Some(resize) = &mut state.image_resize {
+                    resize.width = (resize.start_width + position.x - resize.start.x)
+                        .clamp(MIN_IMAGE_WIDTH.min(max), max);
+                }
+                shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.image_resize.is_some() =>
+            {
+                if let Some(resize) = state.image_resize.take()
+                    && (resize.width - resize.start_width).abs() >= 1.0
+                {
+                    self.publish(
+                        shell,
+                        EditorAction::ResizeImage {
+                            line: resize.line,
+                            width: Some(resize.width.round() as u32),
+                        },
+                    );
+                }
+                shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor
                     .position_over(bounds)
                     .is_some_and(|position| state.image_at(to_content(position)).is_some()) =>
@@ -996,7 +1097,8 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                         );
                     }
                 }
-                if let Some(image) = &layout.image {
+                let resizing = state.image_resize.as_ref().is_some_and(|r| r.line == line);
+                if let Some(image) = layout.image.as_ref().filter(|_| !resizing) {
                     renderer.draw_image(
                         advanced_image::Image::new(image.allocation.handle().clone()),
                         Rectangle::new(Point::new(origin.x, origin.y + top), image.size),
@@ -1048,22 +1150,35 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
         // Marco de la imagen seleccionada y, al arrastrar, la raya del destino y la copia
         // translúcida. En otra capa: dentro de la de antes, las imágenes tapan los quads.
         renderer.with_layer(bounds, |renderer| {
-            let selection = self.editor.selection().range();
             for line in first..=last {
                 let Some(rect) = state.image_rect(line) else {
                     continue;
                 };
-                let start = buffer.line_start(line);
-                let len = state.lines.get(line).map_or(0, |l| l.text.chars().count());
-                if selection.is_empty() || selection.start > start || selection.end < start + len {
+                let resize = state.image_resize.as_ref().filter(|r| r.line == line);
+                if !self.is_image_selected(state, line) && resize.is_none() {
                     continue;
                 }
-                let rect = Rectangle {
+                let mut rect = Rectangle {
                     x: origin.x + rect.x,
                     y: origin.y + rect.y,
                     ..rect
                 };
+                if let (Some(resize), Some(image)) =
+                    (resize, state.lines.get(line).and_then(|l| l.image.as_ref()))
+                {
+                    // Vista previa del tamaño nuevo, con la misma proporción.
+                    rect.height = image.size.height * resize.width / image.size.width.max(1.0);
+                    rect.width = resize.width;
+                    renderer.draw_image(
+                        advanced_image::Image::new(image.allocation.handle().clone()),
+                        rect,
+                        bounds,
+                    );
+                }
                 outline(renderer, rect, colors.cursor);
+                let handle = handle_rect(rect);
+                fill(renderer, handle.expand(1.0), colors.background);
+                fill(renderer, handle, colors.cursor);
             }
             if let Some(drag) = state.image_drag.as_ref().filter(|drag| drag.moving) {
                 if let Some(y) = drag.drop_at.and_then(|slot| state.tops.get(slot)) {
@@ -1133,8 +1248,21 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
         if state.image_drag.as_ref().is_some_and(|drag| drag.moving) {
             return mouse::Interaction::Grabbing;
         }
+        if state.image_resize.is_some() {
+            return mouse::Interaction::ResizingDiagonallyDown;
+        }
         let bounds = layout.bounds();
         let origin = self.origin(bounds);
+        if let Some(position) = cursor.position_over(bounds)
+            && self
+                .handle_at(
+                    state,
+                    Point::new(position.x - origin.x, position.y - origin.y),
+                )
+                .is_some()
+        {
+            return mouse::Interaction::ResizingDiagonallyDown;
+        }
         if let Some(position) = cursor.position_over(bounds)
             && state
                 .image_at(Point::new(position.x - origin.x, position.y - origin.y))
@@ -1153,6 +1281,16 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
 impl<'a, Message: 'a> From<RichEditor<'a, Message>> for Element<'a, Message, Theme, Renderer> {
     fn from(editor: RichEditor<'a, Message>) -> Self {
         Element::new(editor)
+    }
+}
+
+/// Tirador de cambio de tamaño de una imagen que ocupa `rect` (esquina inferior derecha).
+fn handle_rect(rect: Rectangle) -> Rectangle {
+    Rectangle {
+        x: rect.x + rect.width - HANDLE / 2.0,
+        y: rect.y + rect.height - HANDLE / 2.0,
+        width: HANDLE,
+        height: HANDLE,
     }
 }
 

@@ -1,5 +1,8 @@
 //! Imágenes en el texto con formato: una línea que solo contiene `![descripción](ruta)` se
 //! muestra como la imagen, con la descripción debajo como pie.
+//!
+//! El ancho en pantalla se guarda como en Obsidian: `![descripción|300](ruta)` (en píxeles).
+//! Otros visores muestran la imagen igual y solo ven `|300` en la descripción.
 
 use std::ops::Range;
 
@@ -8,10 +11,14 @@ use crate::markup::MarkupEdit;
 /// Imagen de una línea `![descripción](destino)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageRef {
-    /// Texto alternativo (se ve como pie).
+    /// Texto alternativo (se ve como pie), sin el ancho.
     pub alt: String,
-    /// Columnas del texto alternativo en la línea.
+    /// Columnas del texto alternativo en la línea (sin el ancho).
     pub alt_range: Range<usize>,
+    /// Ancho en pantalla (`|300`), si lo tiene.
+    pub width: Option<u32>,
+    /// Columnas de todo lo que hay entre `![` y `]` (descripción y ancho).
+    pub label_range: Range<usize>,
     /// Ruta o dirección tal como está escrita (sin `<>` ni título).
     pub target: String,
 }
@@ -48,11 +55,41 @@ pub fn parse_image(line: &str) -> Option<ImageRef> {
         target.to_owned()
     };
     let alt_start = start + 2;
+    let label_range = alt_start..alt_start + alt.chars().count();
+    let (alt, width) = split_width(&alt);
     Some(ImageRef {
         alt_range: alt_start..alt_start + alt.chars().count(),
         alt,
+        width,
+        label_range,
         target,
     })
+}
+
+/// Separa `descripción|300` en la descripción y el ancho.
+fn split_width(label: &str) -> (String, Option<u32>) {
+    if let Some((alt, width)) = label.rsplit_once('|')
+        && !width.is_empty()
+        && width.chars().all(|c| c.is_ascii_digit())
+        && let Ok(width) = width.parse::<u32>()
+    {
+        return (alt.to_owned(), Some(width));
+    }
+    (label.to_owned(), None)
+}
+
+/// Cambia el ancho de la imagen de `line` (`None`: tamaño original). Devuelve la línea
+/// nueva, o `None` si no es una imagen.
+pub fn set_image_width(line: &str, width: Option<u32>) -> Option<String> {
+    let image = parse_image(line)?;
+    let label = match width {
+        Some(width) => format!("{}|{width}", image.alt),
+        None => image.alt,
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let before: String = chars.get(..image.label_range.start)?.iter().collect();
+    let after: String = chars.get(image.label_range.end..)?.iter().collect();
+    Some(format!("{before}{label}{after}"))
 }
 
 /// `"título"` o `'título'` (el título opcional de una imagen de Markdown).
@@ -195,6 +232,31 @@ mod tests {
         assert!(move_line(text, 1, 1).is_none());
         assert!(move_line(text, 1, 2).is_none());
         assert!(move_line(text, 9, 0).is_none());
+    }
+
+    #[test]
+    fn reads_and_changes_the_width() {
+        let image = parse_image("![Gato|320](g.png)").unwrap();
+        assert_eq!(image.alt, "Gato");
+        assert_eq!(image.alt_range, 2..6);
+        assert_eq!(image.width, Some(320));
+        // Una barra que no va seguida de un número es parte de la descripción.
+        let image = parse_image("![a|b](g.png)").unwrap();
+        assert_eq!((image.alt.as_str(), image.width), ("a|b", None));
+
+        assert_eq!(
+            set_image_width("![Gato](g.png)", Some(200)).as_deref(),
+            Some("![Gato|200](g.png)")
+        );
+        assert_eq!(
+            set_image_width("  ![Gato|320](<a b.png>)", None).as_deref(),
+            Some("  ![Gato](<a b.png>)")
+        );
+        assert_eq!(
+            set_image_width("![|90](g.png)", Some(150)).as_deref(),
+            Some("![|150](g.png)")
+        );
+        assert_eq!(set_image_width("texto", Some(1)), None);
     }
 
     #[test]

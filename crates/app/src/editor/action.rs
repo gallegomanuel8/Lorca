@@ -38,6 +38,11 @@ pub enum EditorAction {
         from: usize,
         to: usize,
     },
+    /// Cambia el ancho de la imagen de `line` (`None`: tamaño original).
+    ResizeImage {
+        line: usize,
+        width: Option<u32>,
+    },
     Insert(String),
     /// Como `Insert`, pero con texto del portapapeles (puede deducir el lenguaje).
     Paste(String),
@@ -175,6 +180,25 @@ pub fn apply_action(
         EditorAction::Drag { index } => editor.set_cursor(index, true),
         EditorAction::SelectRange { anchor, head } => {
             editor.set_selection(Selection::new(anchor, head));
+        }
+        EditorAction::ResizeImage { line, width } => {
+            let buffer = editor.buffer();
+            if line < buffer.len_lines() {
+                let start = buffer.line_start(line);
+                let text = buffer.line_text(line);
+                let end = start + text.chars().count();
+                let next = if line + 1 < buffer.len_lines() {
+                    end + 1
+                } else {
+                    end
+                };
+                if let Some(new) = lorca_formats::set_image_width(&text, width) {
+                    let new_next = next - (end - start) + new.chars().count();
+                    editor.replace_ranges(&[(start..end, new)])?;
+                    // La imagen sigue seleccionada.
+                    editor.set_selection(Selection::new(new_next, start));
+                }
+            }
         }
         EditorAction::MoveLine { from, to } => {
             if let Some(edit) = lorca_formats::move_line(&editor.text(), from, to) {

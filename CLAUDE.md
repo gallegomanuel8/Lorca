@@ -195,6 +195,10 @@ mensaje en español.
     y una copia translúcida; al soltar, `EditorAction::MoveLine` (`lorca_formats::move_line`,
     una sola transacción). Marco y arrastre se dibujan en una capa aparte: en la misma, las
     imágenes tapan los quads.
+    Tamaño: `![descripción|300](ruta)` (como Obsidian; `ImageRef::width`, `set_image_width`).
+    Con la imagen seleccionada, el tirador de su esquina (`ImageResize`) cambia el ancho con
+    vista previa y al soltar publica `EditorAction::ResizeImage`; doble clic = tamaño
+    original. Nunca más ancha que el texto.
   - Rejilla monoespaciada: ancho de celda medido de `Font::MONOSPACE`.
   - Ajuste de línea (`Config::wrap_markdown`, «Ver → Ajuste de línea al ver las marcas»):
     solo en los textos con formato vistos con sus marcas (con formato ya se ajustan; el
