@@ -26,6 +26,9 @@ pub enum WorkspaceError {
     #[error("no se pudo serializar «{}»: {message}", path.display())]
     Serialize { path: PathBuf, message: String },
 
+    #[error("no se pudo crear la imagen «{}»: {message}", path.display())]
+    Image { path: PathBuf, message: String },
+
     #[error(transparent)]
     Core(#[from] CoreError),
 

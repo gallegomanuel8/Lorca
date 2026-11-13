@@ -9,6 +9,7 @@ repository.workspace = true
 dirs = "7.0.0"
 lorca-core = { version = "0.1.0", path = "../core" }
 lorca-syntax = { version = "0.1.0", path = "../syntax" }
+png = "0.18.1"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.1.8"

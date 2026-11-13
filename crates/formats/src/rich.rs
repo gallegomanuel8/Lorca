@@ -3,8 +3,9 @@
 //! incluido si es una marca que no se dibuja (`**`, `#`, `[`, `](url)`…).
 //!
 //! Solo se reconoce lo que pone la barra de formato: títulos, listas, negrita, cursiva,
-//! tachado, código entre comillas invertidas, vínculos y tablas.
+//! tachado, código entre comillas invertidas, vínculos, tablas e imágenes (una por línea).
 
+use crate::image::parse_image;
 use crate::markup::heading_level;
 
 /// Tipo de bloque de una línea.
@@ -19,6 +20,9 @@ pub enum Block {
     Numbered,
     /// Fila de tabla o valla de código: se muestra tal cual, en monoespaciada.
     Raw,
+    /// Línea con solo una imagen (`![descripción](ruta)`): se ve la imagen y, como pie, la
+    /// descripción (lo único visible del texto). Ver [`parse_image`].
+    Image,
 }
 
 /// Estilo de un carácter.
@@ -147,6 +151,17 @@ pub fn parse_line(line: &str) -> LineMarkup {
     if trimmed.starts_with('|') || trimmed.starts_with("```") || trimmed.starts_with("~~~") {
         return LineMarkup {
             block: Block::Raw,
+            chars: styles,
+            prefix: 0,
+        };
+    }
+
+    if let Some(image) = parse_image(line) {
+        for (index, style) in styles.iter_mut().enumerate() {
+            style.hidden = !image.alt_range.contains(&index);
+        }
+        return LineMarkup {
+            block: Block::Image,
             chars: styles,
             prefix: 0,
         };
@@ -307,6 +322,21 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_lines_only_show_their_description() {
+        let markup = parse_line("![Un gato](gato.png)");
+        assert_eq!(markup.block, Block::Image);
+        let shown: String = "![Un gato](gato.png)"
+            .chars()
+            .zip(&markup.chars)
+            .filter(|(_, style)| !style.hidden)
+            .map(|(c, _)| c)
+            .collect();
+        assert_eq!(shown, "Un gato");
+        // Con más texto en la línea no es una imagen.
+        assert_ne!(parse_line("Mira ![x](a.png)").block, Block::Image);
+    }
 
     /// Texto visible y caracteres con un estilo.
     fn visible(line: &str) -> String {

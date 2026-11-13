@@ -4,6 +4,7 @@
 //! Funciones puras sobre texto, sin dependencias de interfaz.
 
 mod case;
+mod image;
 mod json;
 mod markdown;
 mod markup;
@@ -12,6 +13,7 @@ mod rich;
 mod sql;
 
 pub use case::{Case, change_case};
+pub use image::{ImageRef, insert_images, parse_image};
 pub use json::{FormatError, format_json, minify_json};
 pub use markdown::markdown_to_html;
 pub use markup::{
