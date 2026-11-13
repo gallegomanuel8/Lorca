@@ -290,7 +290,8 @@ mensaje en español.
     macOS, instalado con `Task::done(Message::InstallMenu)`; en Windows y Linux `bar` +
     `BAR`, desplegables como `MenuTarget::MenuBar` y `ContextAction::MenuCommand(id)`),
     con un menú «Ayuda» al final (resumen, actualizaciones y «Acerca de», que en Windows y
-    Linux es una ventana propia, `about.rs`, `Lorca::about_open`; en macOS la da el sistema),
+    Linux es una ventana propia, `about.rs`, `Lorca::about_open`, con accesos directos al
+    repositorio, a las versiones y a abrir un aviso, con iconos SVG teñidos; en macOS la da el sistema),
     arrastre de pestañas con
     `mouse_area` + `Message::MouseReleased` global.
   - Fase 6:
