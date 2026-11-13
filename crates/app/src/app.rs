@@ -374,6 +374,12 @@ impl Lorca {
             }
         }
 
+        // Imágenes de los documentos sin guardar: se borran las que ya nadie enlaza.
+        if let Some(dir) = &data_dir {
+            workspace.set_scratch_images(lorca_workspace::scratch_images_dir(dir));
+            workspace.clean_scratch_images();
+        }
+
         let mut app = Self {
             workspace,
             views,

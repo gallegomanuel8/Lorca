@@ -2,8 +2,12 @@
 //! (`notas.md` → `notas_imagenes/`) y se enlazan con una ruta relativa, para que el
 //! documento y sus imágenes se puedan mover juntos y se vean igual en otros editores.
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
+
+use lorca_formats::{parse_image, set_image_target};
 
 use crate::WorkspaceError;
 
@@ -102,27 +106,43 @@ const JPEG_QUALITY: u8 = 85;
 /// EXIF y sin sus metadatos (ubicación incluida). El original no se toca. Las demás se
 /// usan tal cual si ya están en la carpeta del documento o se copian a la de imágenes.
 pub fn import_image(document: &Path, source: &Path) -> Result<PathBuf, WorkspaceError> {
-    let canonical = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = images_dir(document).ok_or(WorkspaceError::NoPath)?;
+    import_into(&dir, document.parent(), source)
+}
+
+/// Como [`import_image`], para un documento sin guardar: la imagen queda en `scratch`
+/// (la carpeta de [`scratch_images_dir`]) hasta que se guarde el documento.
+pub fn import_scratch_image(scratch: &Path, source: &Path) -> Result<PathBuf, WorkspaceError> {
+    import_into(scratch, Some(scratch), source)
+}
+
+/// Deja `source` en `dir` (reducida si hace falta). Si ya está dentro de `keep_in` y no
+/// hay que reducirla, se usa tal cual.
+fn import_into(
+    dir: &Path,
+    keep_in: Option<&Path>,
+    source: &Path,
+) -> Result<PathBuf, WorkspaceError> {
     let source = canonical(source);
     let stem = source
         .file_stem()
         .map_or_else(|| "imagen".to_owned(), |s| s.to_string_lossy().into_owned());
     if needs_reduction(&source) {
-        let dir = prepare_dir(document)?;
-        if let Some(reduced) = reduce(&source, &dir, &stem)? {
+        create_dir(dir)?;
+        if let Some(reduced) = reduce(&source, dir, &stem)? {
             return Ok(reduced);
         }
     }
-    if let Some(parent) = document.parent()
-        && source.starts_with(canonical(parent))
+    if let Some(keep_in) = keep_in
+        && source.starts_with(canonical(keep_in))
     {
         return Ok(source);
     }
-    let dir = prepare_dir(document)?;
+    create_dir(dir)?;
     let ext = source
         .extension()
         .map_or_else(|| "png".to_owned(), |e| e.to_string_lossy().to_lowercase());
-    let target = unique_path(&dir, &stem, &ext);
+    let target = unique_path(dir, &stem, &ext);
     fs::copy(&source, &target).map_err(|source| WorkspaceError::Write {
         path: target.clone(),
         source,
@@ -232,8 +252,28 @@ pub fn save_png(
     height: u32,
     rgba: &[u8],
 ) -> Result<PathBuf, WorkspaceError> {
-    let dir = prepare_dir(document)?;
-    let target = unique_path(&dir, "imagen", "png");
+    let dir = images_dir(document).ok_or(WorkspaceError::NoPath)?;
+    save_png_into(&dir, width, height, rgba)
+}
+
+/// Como [`save_png`], para un documento sin guardar (en `scratch`).
+pub fn save_scratch_png(
+    scratch: &Path,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<PathBuf, WorkspaceError> {
+    save_png_into(scratch, width, height, rgba)
+}
+
+fn save_png_into(
+    dir: &Path,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<PathBuf, WorkspaceError> {
+    create_dir(dir)?;
+    let target = unique_path(dir, "imagen", "png");
     let picture = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
         WorkspaceError::Image {
             path: target.clone(),
@@ -251,14 +291,111 @@ pub fn save_png(
     Ok(target)
 }
 
-/// Crea (si hace falta) la carpeta de imágenes de `document`.
-fn prepare_dir(document: &Path) -> Result<PathBuf, WorkspaceError> {
-    let dir = images_dir(document).ok_or(WorkspaceError::NoPath)?;
-    fs::create_dir_all(&dir).map_err(|source| WorkspaceError::Write {
-        path: dir.clone(),
+/// Crea `dir` si no existe.
+fn create_dir(dir: &Path) -> Result<(), WorkspaceError> {
+    fs::create_dir_all(dir).map_err(|source| WorkspaceError::Write {
+        path: dir.to_path_buf(),
         source,
-    })?;
-    Ok(dir)
+    })
+}
+
+/// Ruta canónica de `path` (o la misma si no existe).
+fn canonical(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Carpeta de las imágenes insertadas en documentos sin guardar: `<datos>/imagenes`. Se
+/// enlazan con su ruta absoluta y al guardar el documento pasan a su carpeta de imágenes
+/// ([`relocate_images`]).
+pub fn scratch_images_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("imagenes")
+}
+
+/// Cambios para guardar el documento (hasta ahora en `old`, o sin ruta) en `new`: las
+/// imágenes que están en `scratch` o enlazadas con una ruta relativa que desde `new` ya no
+/// lleva al mismo archivo se copian a la carpeta de imágenes de `new`, y su línea pasa a
+/// enlazar la copia. Devuelve las sustituciones (rangos de líneas en caracteres) en orden.
+pub fn relocate_images(
+    text: &str,
+    old: Option<&Path>,
+    new: &Path,
+    scratch: Option<&Path>,
+) -> Result<Vec<(Range<usize>, String)>, WorkspaceError> {
+    let scratch = scratch.map(canonical);
+    let mut copies: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut replacements = Vec::new();
+    let mut start = 0;
+    for line in text.split('\n') {
+        let len = line.chars().count();
+        let range = start..start + len;
+        start += len + 1;
+        let Some(image) = parse_image(line) else {
+            continue;
+        };
+        let Some(source) = resolve_image(old, &image.target).filter(|p| p.is_file()) else {
+            continue;
+        };
+        let source = canonical(&source);
+        let in_scratch = scratch.as_ref().is_some_and(|dir| source.starts_with(dir));
+        let relative = !Path::new(&image.target).is_absolute() && !image.target.contains("://");
+        let left_behind = relative
+            && resolve_image(Some(new), &image.target).map(|p| canonical(&p))
+                != Some(source.clone());
+        if !in_scratch && !left_behind {
+            continue;
+        }
+        let copy = match copies.get(&source) {
+            Some(copy) => copy.clone(),
+            None => {
+                let dir = images_dir(new).ok_or(WorkspaceError::NoPath)?;
+                create_dir(&dir)?;
+                let stem = source
+                    .file_stem()
+                    .map_or_else(|| "imagen".to_owned(), |s| s.to_string_lossy().into_owned());
+                let ext = source
+                    .extension()
+                    .map_or_else(|| "png".to_owned(), |e| e.to_string_lossy().to_lowercase());
+                let copy = unique_path(&dir, &stem, &ext);
+                fs::copy(&source, &copy).map_err(|error| WorkspaceError::Write {
+                    path: copy.clone(),
+                    source: error,
+                })?;
+                copies.insert(source, copy.clone());
+                copy
+            }
+        };
+        if let Some(line) = set_image_target(line, &image_target(new, &copy)) {
+            replacements.push((range, line));
+        }
+    }
+    Ok(replacements)
+}
+
+/// Borra de `scratch` las imágenes que no enlaza ninguno de `texts` (documento y su ruta):
+/// las de documentos cerrados sin guardar o que ya se guardaron con su documento.
+pub fn clean_scratch_images<'a>(
+    scratch: &Path,
+    texts: impl IntoIterator<Item = (String, Option<&'a Path>)>,
+) {
+    let Ok(entries) = fs::read_dir(scratch) else {
+        return;
+    };
+    let used: HashSet<PathBuf> = texts
+        .into_iter()
+        .flat_map(|(text, document)| {
+            text.lines()
+                .filter_map(parse_image)
+                .filter_map(|image| resolve_image(document, &image.target))
+                .map(|path| canonical(&path))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for entry in entries.flatten() {
+        let path = canonical(&entry.path());
+        if path.is_file() && !used.contains(&path) {
+            let _ = fs::remove_file(&path);
+        }
+    }
 }
 
 /// `<dir>/<stem>.<ext>` o, si existe, `<stem>-2`, `<stem>-3`… (para «imagen», desde
@@ -406,5 +543,84 @@ mod tests {
         let big = [10_u8, 20, 30, 255].repeat(3000 * 10);
         let reduced = save_png(&doc, 3000, 10, &big).unwrap();
         assert_eq!(image::image_dimensions(&reduced).unwrap().0, 2000);
+    }
+
+    #[test]
+    fn saving_takes_scratch_images_along() {
+        let data = tempfile::tempdir().unwrap();
+        let scratch = scratch_images_dir(data.path());
+        let pixels = [255_u8, 0, 0, 255].repeat(4);
+        let pasted = save_scratch_png(&scratch, 2, 2, &pixels).unwrap();
+        assert_eq!(pasted, scratch.join("imagen-1.png"));
+        let pasted = image_target(Path::new("/"), &pasted);
+        let text = format!("# Notas\n![gato|200]({pasted})\ntexto\n![otra vez]({pasted})");
+
+        let docs = tempfile::tempdir().unwrap();
+        let doc = docs.path().join("mis notas.md");
+        let edits = relocate_images(&text, None, &doc, Some(&scratch)).unwrap();
+        assert_eq!(
+            edits,
+            vec![
+                (
+                    8..8 + text.lines().nth(1).unwrap().chars().count(),
+                    "![gato|200](<mis notas_imagenes/imagen-1.png>)".to_owned()
+                ),
+                (
+                    text.chars().count() - text.lines().nth(3).unwrap().chars().count()
+                        ..text.chars().count(),
+                    "![otra vez](<mis notas_imagenes/imagen-1.png>)".to_owned()
+                ),
+            ]
+        );
+        // La misma imagen se copia una sola vez.
+        let copied: Vec<_> = fs::read_dir(docs.path().join("mis notas_imagenes"))
+            .unwrap()
+            .collect();
+        assert_eq!(copied.len(), 1);
+    }
+
+    #[test]
+    fn save_as_elsewhere_takes_relative_images_along() {
+        let old_dir = tempfile::tempdir().unwrap();
+        let old = old_dir.path().join("notas.md");
+        let pixels = [255_u8, 0, 0, 255].repeat(4);
+        save_png(&old, 2, 2, &pixels).unwrap();
+        let text = "![a](notas_imagenes/imagen-1.png)\n![web](https://x.org/a.png)";
+
+        // Al guardar sin más, o en la misma carpeta, el enlace sigue valiendo: no cambia nada.
+        assert!(
+            relocate_images(text, Some(&old), &old, None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            relocate_images(text, Some(&old), &old_dir.path().join("otra.md"), None)
+                .unwrap()
+                .is_empty()
+        );
+
+        let new_dir = tempfile::tempdir().unwrap();
+        let new = new_dir.path().join("copia.md");
+        let edits = relocate_images(text, Some(&old), &new, None).unwrap();
+        assert_eq!(
+            edits,
+            vec![(0..33, "![a](copia_imagenes/imagen-1.png)".to_owned())]
+        );
+        assert!(new_dir.path().join("copia_imagenes/imagen-1.png").is_file());
+        // El original sigue en su sitio.
+        assert!(old_dir.path().join("notas_imagenes/imagen-1.png").is_file());
+    }
+
+    #[test]
+    fn unused_scratch_images_are_removed() {
+        let data = tempfile::tempdir().unwrap();
+        let scratch = scratch_images_dir(data.path());
+        let pixels = [255_u8, 0, 0, 255].repeat(4);
+        let kept = save_scratch_png(&scratch, 2, 2, &pixels).unwrap();
+        let gone = save_scratch_png(&scratch, 2, 2, &pixels).unwrap();
+        let text = format!("![x]({})", image_target(Path::new("/"), &kept));
+        clean_scratch_images(&scratch, [(text, None)]);
+        assert!(kept.is_file());
+        assert!(!gone.exists());
     }
 }

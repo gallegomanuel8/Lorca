@@ -13,7 +13,9 @@ mod rich;
 mod sql;
 
 pub use case::{Case, change_case};
-pub use image::{ImageRef, insert_images, move_line, parse_image, set_image_width};
+pub use image::{
+    ImageRef, insert_images, move_line, parse_image, set_image_target, set_image_width,
+};
 pub use json::{FormatError, format_json, minify_json};
 pub use markdown::markdown_to_html;
 pub use markup::{

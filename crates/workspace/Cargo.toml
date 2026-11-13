@@ -9,6 +9,7 @@ repository.workspace = true
 dirs = "7.0.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 lorca-core = { version = "0.2.0", path = "../core" }
+lorca-formats = { version = "0.2.0", path = "../formats" }
 lorca-syntax = { version = "0.2.0", path = "../syntax" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"

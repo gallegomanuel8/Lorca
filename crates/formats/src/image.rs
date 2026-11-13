@@ -92,6 +92,31 @@ pub fn set_image_width(line: &str, width: Option<u32>) -> Option<String> {
     Some(format!("{before}{label}{after}"))
 }
 
+/// `line` con la imagen apuntando a `target` (conserva descripción, ancho y título).
+/// `None` si la línea no es una imagen.
+pub fn set_image_target(line: &str, target: &str) -> Option<String> {
+    let image = parse_image(line)?;
+    let chars: Vec<char> = line.chars().collect();
+    // Lo que hay entre paréntesis empieza tras el primer «](» (como en `parse_image`).
+    let open = chars.windows(2).position(|pair| pair == [']', '('])? + 2;
+    let start = open
+        + chars
+            .get(open..)?
+            .iter()
+            .take_while(|c| c.is_whitespace())
+            .count();
+    let (start, end, written) = if chars.get(start) == Some(&'<') {
+        let close = start + chars.get(start..)?.iter().position(|&c| c == '>')?;
+        (start + 1, close, target.to_owned())
+    } else {
+        let len = image.target.chars().count();
+        (start, start + len, markdown_target(target))
+    };
+    let before: String = chars.get(..start)?.iter().collect();
+    let after: String = chars.get(end..)?.iter().collect();
+    Some(format!("{before}{written}{after}"))
+}
+
 /// `"título"` o `'título'` (el título opcional de una imagen de Markdown).
 fn is_title(text: &str) -> bool {
     text.len() >= 2
@@ -202,6 +227,28 @@ mod tests {
             chars.splice(range.clone(), replacement.chars());
         }
         chars.into_iter().collect()
+    }
+
+    #[test]
+    fn image_target_is_replaced() {
+        assert_eq!(
+            set_image_target(
+                "![gato|300](/tmp/a.png \"Mi gato\")",
+                "notas_imagenes/a.png"
+            )
+            .as_deref(),
+            Some("![gato|300](notas_imagenes/a.png \"Mi gato\")")
+        );
+        // Con espacios, entre `<>`; si ya lo estaba, se mantiene.
+        assert_eq!(
+            set_image_target("  ![x](/tmp/a.png)", "mis notas_imagenes/a.png").as_deref(),
+            Some("  ![x](<mis notas_imagenes/a.png>)")
+        );
+        assert_eq!(
+            set_image_target("![x](</tmp/una foto.png>)", "b.png").as_deref(),
+            Some("![x](<b.png>)")
+        );
+        assert_eq!(set_image_target("texto", "b.png"), None);
     }
 
     #[test]

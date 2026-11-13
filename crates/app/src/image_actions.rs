@@ -1,7 +1,9 @@
 //! Insertar imágenes en el texto con formato: con el botón de la barra (selector de
 //! archivos), pegando (imagen o archivos de imagen copiados) o arrastrando archivos a la
 //! ventana. Las imágenes se guardan junto al documento (`lorca_workspace::import_image`,
-//! `save_png`, que reducen las grandes), así que un documento sin ruta se guarda antes
+//! `save_png`, que reducen las grandes). Las de un documento sin ruta van a la carpeta de
+//! datos (`scratch_images_dir`) y pasan a la del documento al guardarlo
+//! (`Workspace::save_as`); sin carpeta de datos, el documento se guarda antes
 //! (`Then::InsertImages`). Guardarlas (y reducirlas) se hace en un hilo aparte
 //! (`store_images` → `Message::ImagesStored`).
 //!
@@ -13,7 +15,10 @@ use std::sync::Arc;
 use iced::Task;
 use lorca_core::Selection;
 use lorca_formats::insert_images;
-use lorca_workspace::{DocumentId, image_alt, image_target, import_image, is_image_path, save_png};
+use lorca_workspace::{
+    DocumentId, image_alt, image_target, import_image, import_scratch_image, is_image_path,
+    save_png, save_scratch_png,
+};
 
 use super::{Lorca, Message, Then, is_prose};
 use crate::dialogs;
@@ -148,8 +153,13 @@ impl Lorca {
             self.show_info("Las imágenes son para texto y Markdown".to_owned());
             return Task::none();
         }
-        let Some(path) = document.path().map(Path::to_path_buf) else {
-            // Sin ruta no hay carpeta donde dejarlas: se guarda antes. Lo que llegue
+        let destination = match (document.path(), self.workspace.scratch_images()) {
+            (Some(path), _) => Some(Destination::Document(path.to_path_buf())),
+            (None, Some(scratch)) => Some(Destination::Scratch(scratch.to_path_buf())),
+            (None, None) => None,
+        };
+        let Some(destination) = destination else {
+            // Sin ruta ni carpeta de datos no hay dónde dejarlas: se guarda antes. Lo que llegue
             // mientras está abierto el diálogo se añade a lo pendiente.
             match &mut self.pending_images {
                 Some((pending_id, pending)) if *pending_id == id => pending.extend(sources),
@@ -164,7 +174,7 @@ impl Lorca {
             return self.save_as(id, Then::InsertImages);
         };
 
-        Task::perform(store_images(path, sources), move |stored| {
+        Task::perform(store_images(destination, sources), move |stored| {
             Message::ImagesStored(id, stored)
         })
     }
@@ -217,10 +227,52 @@ impl Lorca {
     }
 }
 
-/// Guarda (y reduce si hace falta) las imágenes junto a `document` en un hilo aparte.
+/// Dónde se guardan las imágenes que se insertan.
+enum Destination {
+    /// Junto al documento guardado en esta ruta (enlace relativo).
+    Document(PathBuf),
+    /// En la carpeta de los documentos sin guardar (enlace absoluto).
+    Scratch(PathBuf),
+}
+
+impl Destination {
+    fn store(&self, source: ImageSource) -> Result<PathBuf, lorca_workspace::WorkspaceError> {
+        match (self, source) {
+            (Self::Document(document), ImageSource::File(file)) => import_image(document, &file),
+            (Self::Scratch(dir), ImageSource::File(file)) => import_scratch_image(dir, &file),
+            (
+                Self::Document(document),
+                ImageSource::Pixels {
+                    width,
+                    height,
+                    rgba,
+                },
+            ) => save_png(document, width, height, &rgba),
+            (
+                Self::Scratch(dir),
+                ImageSource::Pixels {
+                    width,
+                    height,
+                    rgba,
+                },
+            ) => save_scratch_png(dir, width, height, &rgba),
+        }
+    }
+
+    /// Ruta con la que el documento enlaza `image`.
+    fn target(&self, image: &Path) -> String {
+        match self {
+            Self::Document(document) => image_target(document, image),
+            // Desde la raíz, `image_target` da la ruta absoluta (con `/`).
+            Self::Scratch(_) => image_target(Path::new("/"), image),
+        }
+    }
+}
+
+/// Guarda (y reduce si hace falta) las imágenes en `destination` en un hilo aparte.
 /// Devuelve, por imagen, su (descripción, ruta para el enlace) o el error.
 async fn store_images(
-    document: PathBuf,
+    destination: Destination,
     sources: Vec<ImageSource>,
 ) -> Vec<Result<(String, String), String>> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
@@ -228,16 +280,9 @@ async fn store_images(
         let stored = sources
             .into_iter()
             .map(|source| {
-                let image = match source {
-                    ImageSource::File(file) => import_image(&document, &file),
-                    ImageSource::Pixels {
-                        width,
-                        height,
-                        rgba,
-                    } => save_png(&document, width, height, &rgba),
-                };
-                image
-                    .map(|image| (image_alt(&image), image_target(&document, &image)))
+                destination
+                    .store(source)
+                    .map(|image| (image_alt(&image), destination.target(&image)))
                     .map_err(|error| error.to_string())
             })
             .collect();

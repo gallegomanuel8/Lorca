@@ -187,8 +187,17 @@ mensaje en español.
     > 1 MB; `MAX_IMAGE_SIDE`, `MAX_IMAGE_BYTES`) se guardan reducidas, giradas según su EXIF
     y sin metadatos: fotos en JPEG (calidad 85), PNG/BMP y transparencias en PNG; el
     original no se toca y si la copia no ahorra nada se usa el original. Se hace en un hilo
-    aparte (`store_images` → `Message::ImagesStored`). Crate `image` (el mismo que trae iced). Un documento sin ruta se guarda antes
-    (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún no incluye las imágenes.
+    aparte (`store_images` → `Message::ImagesStored`). Crate `image` (el mismo que trae iced).
+    Las de un documento sin ruta van a `<datos>/imagenes/` (`scratch_images_dir`,
+    `import_scratch_image`, `save_scratch_png`; `Workspace::scratch_images`) con enlace
+    absoluto. Al guardar (`Workspace::save_as` → `relocate_images`, solo texto y Markdown) se
+    copian a `<nombre>_imagenes/` las que están ahí y las relativas que desde la nueva ruta
+    ya no llegarían («Guardar como» en otra carpeta), y sus líneas pasan a enlazar la copia
+    (`lorca_formats::set_image_target`, una transacción). Al arrancar,
+    tras restaurar la sesión, `Workspace::clean_scratch_images` borra las que ningún
+    documento enlaza (no antes: deshacer podría volver a necesitarlas). Sin carpeta de datos,
+    el documento se guarda antes (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún
+    no incluye las imágenes.
     Clic en una imagen: selecciona su línea con el salto (`EditorAction::SelectRange`, cursor
     al principio para que `snap_cursor` no lo lleve a la línea siguiente) y se ve un marco.
     Arrastrarla (`ImageDrag` en el estado del widget) muestra una raya en el hueco de destino

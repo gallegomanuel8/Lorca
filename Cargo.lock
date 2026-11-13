@@ -2797,6 +2797,7 @@ dependencies = [
  "dirs 7.0.0",
  "image",
  "lorca-core",
+ "lorca-formats",
  "lorca-syntax",
  "serde",
  "tempfile",

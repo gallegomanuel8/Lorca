@@ -7,6 +7,9 @@ use lorca_core::{
     LineEnding, LoadedText, TextEncoding, TextFormat, decode_as, load_bytes, save_bytes,
 };
 
+use lorca_syntax::Language;
+
+use crate::images::{clean_scratch_images, relocate_images};
 use crate::{Document, DocumentId, WorkspaceError};
 
 /// Documentos abiertos y estado de las pestañas.
@@ -27,11 +30,36 @@ pub struct Workspace {
     /// dividir; si no, entre 2 y [`MAX_PANES`]). El activo siempre es uno de ellos.
     panes: Vec<DocumentId>,
     next_id: u64,
+    /// Carpeta de las imágenes de los documentos sin guardar ([`scratch_images_dir`]).
+    scratch_images: Option<PathBuf>,
 }
 
 impl Workspace {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Usa `dir` para las imágenes de los documentos sin guardar.
+    pub fn set_scratch_images(&mut self, dir: PathBuf) {
+        self.scratch_images = Some(dir);
+    }
+
+    /// Carpeta de las imágenes de los documentos sin guardar, si hay.
+    pub fn scratch_images(&self) -> Option<&Path> {
+        self.scratch_images.as_deref()
+    }
+
+    /// Borra las imágenes de documentos sin guardar que ya no enlaza ningún documento
+    /// abierto. Al arrancar, tras restaurar la sesión (sin historial de deshacer que
+    /// pudiera volver a necesitarlas).
+    pub fn clean_scratch_images(&self) {
+        if let Some(dir) = &self.scratch_images {
+            clean_scratch_images(
+                dir,
+                self.documents()
+                    .map(|document| (document.editor.text(), document.path())),
+            );
+        }
     }
 
     // --- Consultas --------------------------------------------------------------------
@@ -300,6 +328,21 @@ impl Workspace {
             .documents
             .get_mut(&id)
             .ok_or(WorkspaceError::UnknownDocument(id))?;
+        // Las imágenes del texto con formato se van con el documento a su carpeta.
+        if matches!(
+            document.language(),
+            Language::PlainText | Language::Markdown
+        ) {
+            let replacements = relocate_images(
+                &document.editor.text(),
+                document.path(),
+                path,
+                self.scratch_images.as_deref(),
+            )?;
+            if !replacements.is_empty() {
+                document.editor.replace_ranges(&replacements)?;
+            }
+        }
         let bytes = save_bytes(&document.editor.text(), document.format())?;
         std::fs::write(path, bytes).map_err(|source| WorkspaceError::Write {
             path: path.to_owned(),
@@ -705,6 +748,37 @@ mod tests {
             .apply("fn main() {}\n")
             .into_owned();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn saving_an_untitled_document_moves_its_images_next_to_it() {
+        let data = tempfile::tempdir().unwrap();
+        let scratch = crate::scratch_images_dir(data.path());
+        let pixels = [255_u8, 0, 0, 255].repeat(4);
+        let pasted = crate::save_scratch_png(&scratch, 2, 2, &pixels).unwrap();
+
+        let mut ws = Workspace::new();
+        ws.set_scratch_images(scratch.clone());
+        let id = ws.new_document();
+        let line = format!(
+            "![imagen-1]({})\n",
+            crate::image_target(Path::new("/"), &pasted)
+        );
+        ws.active_mut().unwrap().editor.insert_text(&line).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notas.md");
+        ws.save_as(id, &path).unwrap();
+        let expected = "![imagen-1](notas_imagenes/imagen-1.png)\n";
+        assert_eq!(ws.document(id).unwrap().editor.text(), expected);
+        assert!(!ws.document(id).unwrap().is_modified());
+        assert!(dir.path().join("notas_imagenes/imagen-1.png").is_file());
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, LineEnding::platform_default().apply(expected));
+
+        // Ya nadie enlaza la copia temporal: se borra al limpiar.
+        ws.clean_scratch_images();
+        assert!(!pasted.exists());
     }
 
     #[test]
