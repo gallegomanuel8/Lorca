@@ -7,8 +7,15 @@
 //! [`EditorAction`]. Cada línea del documento es un párrafo de iced (con ajuste de línea)
 //! que se guarda en caché mientras su texto no cambie. Las posiciones se traducen entre
 //! columnas del texto y bytes del párrafo (las marcas ocultas no ocupan sitio).
+//!
+//! Una línea con solo una imagen (`![descripción](ruta)`, [`Block::Image`]) muestra la
+//! imagen (ajustada al ancho, sin agrandarla) y debajo la descripción como pie: el párrafo
+//! de la línea, donde se coloca el cursor, empieza en `text_top`.
+
+use std::path::{Path, PathBuf};
 
 use iced::advanced::graphics::text::cosmic_text;
+use iced::advanced::image::{self as advanced_image, Renderer as _};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::{self, Quad, Renderer as _};
 use iced::advanced::text::{self, Paragraph as _, Renderer as _, Span, Text};
@@ -23,7 +30,7 @@ use iced::{
     Theme,
 };
 use lorca_core::{EditorState, Motion};
-use lorca_formats::{Block, CharStyle, LineMarkup, parse_line};
+use lorca_formats::{Block, CharStyle, LineMarkup, parse_image, parse_line};
 
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
@@ -41,10 +48,15 @@ const BLINK_MILLIS: u128 = 530;
 const HEADING_SCALE: [f32; 6] = [2.0, 1.6, 1.35, 1.15, 1.0, 0.9];
 /// Altura de línea relativa al tamaño de letra.
 const LINE_HEIGHT: f32 = 1.45;
+/// Tamaño del pie de las imágenes respecto al texto.
+const CAPTION_SCALE: f32 = 0.85;
+/// Separación entre una imagen y su pie.
+const IMAGE_GAP: f32 = 6.0;
 
 /// Crea el editor con formato de un documento.
 pub fn rich_editor<'a, Message>(
     editor: &'a EditorState,
+    document: Option<&'a Path>,
     view: &'a DocView,
     focused: bool,
     colors: &'a EditorColors,
@@ -53,6 +65,7 @@ pub fn rich_editor<'a, Message>(
 ) -> RichEditor<'a, Message> {
     RichEditor {
         editor,
+        document,
         view,
         focused,
         colors,
@@ -63,6 +76,8 @@ pub fn rich_editor<'a, Message>(
 
 pub struct RichEditor<'a, Message> {
     editor: &'a EditorState,
+    /// Ruta del documento: las imágenes con ruta relativa se buscan junto a él.
+    document: Option<&'a Path>,
     view: &'a DocView,
     focused: bool,
     colors: &'a EditorColors,
@@ -86,9 +101,20 @@ struct LineLayout {
     col_byte: Vec<usize>,
     markup: LineMarkup,
     height: f32,
+    /// Imagen de la línea (solo en [`Block::Image`] con la imagen cargada).
+    image: Option<LineImage>,
+    /// Altura a la que empieza el párrafo dentro de la línea (debajo de la imagen).
+    text_top: f32,
     /// Tramos tachados o subrayados (índice del tramo, tachado, color o `None` para el
     /// del texto): iced no dibuja esas líneas al pintar un párrafo.
     lines_on: Vec<(usize, bool, Option<Color>)>,
+}
+
+/// Imagen ya cargada de una línea.
+struct LineImage {
+    /// Mantiene la imagen en la caché del renderizador mientras se usa.
+    allocation: advanced_image::Allocation,
+    size: Size,
 }
 
 struct State {
@@ -97,6 +123,8 @@ struct State {
     tops: Vec<f32>,
     /// Versión del documento, anchura y tamaño de letra de la maquetación.
     built_for: Option<(u64, f32, f32)>,
+    /// Ruta del documento de la maquetación (de ella dependen las imágenes).
+    built_path: Option<PathBuf>,
     last_click: Option<mouse::Click>,
     dragging: bool,
     modifiers: keyboard::Modifiers,
@@ -120,6 +148,7 @@ impl Default for State {
             lines: Vec::new(),
             tops: vec![0.0],
             built_for: None,
+            built_path: None,
             last_click: None,
             dragging: false,
             modifiers: keyboard::Modifiers::default(),
@@ -154,7 +183,7 @@ impl State {
         let (x, y, height) = caret_in(layout, byte)?;
         Some(Rectangle {
             x,
-            y: top + y,
+            y: top + layout.text_top + y,
             width: 2.0,
             height,
         })
@@ -168,7 +197,8 @@ impl State {
             return buffer.len_chars();
         };
         let top = self.tops.get(line).copied().unwrap_or(0.0);
-        let local_y = (point.y - top).clamp(0.0, layout.height - 1.0);
+        let text_height = (layout.height - layout.text_top).max(1.0);
+        let local_y = (point.y - top - layout.text_top).clamp(0.0, text_height - 1.0);
         let byte = layout
             .paragraph
             .buffer()
@@ -269,10 +299,59 @@ fn size_for(block: Block, base: f32) -> f32 {
     }
 }
 
+/// Imagen de una línea [`Block::Image`]: la cargada, o el aviso que se pone en el pie si
+/// no se puede mostrar.
+fn line_image(
+    text: &str,
+    document: Option<&Path>,
+    renderer: &Renderer,
+) -> Result<LineImage, String> {
+    let image = parse_image(text).ok_or_else(String::new)?;
+    let Some(path) = lorca_workspace::resolve_image(document, &image.target) else {
+        return Err(if image.target.contains("://") {
+            format!("imagen de internet: {}", image.target)
+        } else {
+            format!("guarda el documento para ver «{}»", image.target)
+        });
+    };
+    if !path.is_file() {
+        return Err(format!("no se encuentra «{}»", image.target));
+    }
+    let handle = advanced_image::Handle::from_path(path);
+    let allocation = renderer
+        .load_image(&handle)
+        .map_err(|_| format!("no se puede abrir «{}»", image.target))?;
+    let size = allocation.size();
+    Ok(LineImage {
+        size: Size::new(size.width as f32, size.height as f32),
+        allocation,
+    })
+}
+
 /// Maqueta una línea para la anchura `width`.
-fn build_line(text: &str, width: f32, base: f32, colors: &EditorColors) -> LineLayout {
+fn build_line(
+    text: &str,
+    width: f32,
+    base: f32,
+    colors: &EditorColors,
+    document: Option<&Path>,
+    renderer: &Renderer,
+) -> LineLayout {
     let markup = parse_line(text);
-    let size = size_for(markup.block, base);
+    let is_image = markup.block == Block::Image;
+    let (image, image_note) = if is_image {
+        match line_image(text, document, renderer) {
+            Ok(image) => (Some(image), None),
+            Err(note) => (None, Some(note)),
+        }
+    } else {
+        (None, None)
+    };
+    let size = if is_image {
+        base * CAPTION_SCALE
+    } else {
+        size_for(markup.block, base)
+    };
     let mut display = String::new();
     let mut col_byte = Vec::with_capacity(markup.chars.len() + 1);
     // Tramos: (inicio en bytes, estilo).
@@ -304,7 +383,12 @@ fn build_line(text: &str, width: f32, base: f32, colors: &EditorColors) -> LineL
                 .size(size)
                 .strikethrough(style.strike)
                 .underline(style.link);
-            if style.link {
+            if is_image {
+                span = span.color(colors.line_number).font(Font {
+                    style: iced::font::Style::Italic,
+                    ..font_for(markup.block, *style)
+                });
+            } else if style.link {
                 span = span.color(colors.bookmark);
             } else if style.code {
                 span = span.color(colors.line_number_active);
@@ -312,6 +396,18 @@ fn build_line(text: &str, width: f32, base: f32, colors: &EditorColors) -> LineL
             span
         })
         .collect();
+    // El aviso de una imagen que no se ve va detrás de la descripción (fuera de las
+    // columnas del texto: el cursor no entra en él).
+    let mut spans = spans;
+    if let Some(note) = image_note {
+        let gap = if display.is_empty() { "" } else { " — " };
+        spans.push(
+            Span::new(format!("{gap}🖼 {note}"))
+                .size(size)
+                .color(colors.line_number)
+                .font(font_for(Block::Paragraph, CharStyle::default())),
+        );
+    }
     let lines_on = runs
         .iter()
         .enumerate()
@@ -336,13 +432,27 @@ fn build_line(text: &str, width: f32, base: f32, colors: &EditorColors) -> LineL
     } else {
         0.0
     };
-    let height = paragraph.min_bounds().height.max(min_height) + extra;
+    // La imagen, ajustada al ancho (sin agrandarla) y encima del pie.
+    let image = image.map(|image| {
+        let scale = (width / image.size.width.max(1.0)).min(1.0);
+        LineImage {
+            size: Size::new(image.size.width * scale, image.size.height * scale),
+            ..image
+        }
+    });
+    let text_top = image
+        .as_ref()
+        .map_or(0.0, |image| image.size.height + IMAGE_GAP);
+    let extra = if is_image { size * 0.5 } else { extra };
+    let height = text_top + paragraph.min_bounds().height.max(min_height) + extra;
     LineLayout {
         text: text.to_owned(),
         paragraph,
         col_byte,
         markup,
         height,
+        image,
+        text_top,
         lines_on,
     }
 }
@@ -358,14 +468,16 @@ impl<Message> RichEditor<'_, Message> {
 
     /// Rehace la maquetación si cambió el documento, la anchura o la letra. Reaprovecha
     /// las líneas cuyo texto no ha cambiado.
-    fn rebuild(&self, state: &mut State, width: f32) {
+    fn rebuild(&self, state: &mut State, width: f32, renderer: &Renderer) {
         let key = (self.editor.version(), width, self.metrics.font_size);
-        if state.built_for == Some(key) {
+        let same_path = state.built_path.as_deref() == self.document;
+        if state.built_for == Some(key) && same_path {
             return;
         }
-        let same_metrics = state
-            .built_for
-            .is_some_and(|(_, w, size)| w == width && size == self.metrics.font_size);
+        let same_metrics = same_path
+            && state
+                .built_for
+                .is_some_and(|(_, w, size)| w == width && size == self.metrics.font_size);
         let mut old: std::collections::HashMap<String, Vec<LineLayout>> =
             std::collections::HashMap::new();
         if same_metrics {
@@ -377,10 +489,16 @@ impl<Message> RichEditor<'_, Message> {
         let mut lines = Vec::with_capacity(buffer.len_lines());
         for line in 0..buffer.len_lines() {
             let text = buffer.line_text(line);
-            let layout = old
-                .get_mut(&text)
-                .and_then(Vec::pop)
-                .unwrap_or_else(|| build_line(&text, width, self.metrics.font_size, self.colors));
+            let layout = old.get_mut(&text).and_then(Vec::pop).unwrap_or_else(|| {
+                build_line(
+                    &text,
+                    width,
+                    self.metrics.font_size,
+                    self.colors,
+                    self.document,
+                    renderer,
+                )
+            });
             lines.push(layout);
         }
         let mut tops = Vec::with_capacity(lines.len() + 1);
@@ -393,6 +511,7 @@ impl<Message> RichEditor<'_, Message> {
         state.lines = lines;
         state.tops = tops;
         state.built_for = Some(key);
+        state.built_path = self.document.map(Path::to_path_buf);
     }
 
     /// Esquina del contenido en pantalla.
@@ -442,12 +561,12 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
     fn layout(
         &mut self,
         tree: &mut Tree,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         let state = tree.state.downcast_mut::<State>();
         let width = Self::text_width(Rectangle::new(Point::ORIGIN, limits.max()));
-        self.rebuild(state, width);
+        self.rebuild(state, width, renderer);
         layout::atomic(limits, Length::Fill, Length::Fill)
     }
 
@@ -755,7 +874,7 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                             renderer,
                             Rectangle {
                                 x: origin.x + x,
-                                y: origin.y + top + run.line_top,
+                                y: origin.y + top + layout.text_top + run.line_top,
                                 width: w,
                                 height: run.line_height,
                             },
@@ -763,7 +882,14 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                         );
                     }
                 }
-                let at = Point::new(origin.x, origin.y + top);
+                if let Some(image) = &layout.image {
+                    renderer.draw_image(
+                        advanced_image::Image::new(image.allocation.handle().clone()),
+                        Rectangle::new(Point::new(origin.x, origin.y + top), image.size),
+                        bounds,
+                    );
+                }
+                let at = Point::new(origin.x, origin.y + top + layout.text_top);
                 renderer.fill_paragraph(&layout.paragraph, at, colors.text, bounds);
                 // Tachado (por la mitad) y subrayado de los vínculos (abajo).
                 for &(span, strike, color) in &layout.lines_on {

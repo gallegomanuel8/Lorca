@@ -134,6 +134,7 @@ impl Lorca {
         if self.is_rich(document.language()) {
             let editor: Element<'_, Message> = crate::editor::rich_editor(
                 &document.editor,
+                document.path(),
                 view,
                 focused,
                 &self.active_theme.editor,
