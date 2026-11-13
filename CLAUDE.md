@@ -231,7 +231,9 @@ mensaje en español.
   - Tema: `resolve_theme(ThemeMode, system Mode)`; el modo del sistema llega con
     `system::theme()` al arrancar y `system::theme_changes()`. `welcome.rs` es la
     pantalla del primer arranque: tema y, después, un resumen de funciones en páginas
-    (`welcome::tour`, `Lorca::tour_page`; también en «Lo que puedes hacer con Lorca» del menú
+    (`tour.rs`, `Lorca::tour_page`: cada página con una ilustración dibujada con widgets y
+    los colores del tema, que parece una captura y no pesa; ←/→ sin capturar = `TourNav`, Intro
+    avanza y Escape cierra; también en «Lo que puedes hacer con Lorca» del menú
     y la paleta). Se enseña si `Config::needs_welcome()` (sin tema o `welcome_seen` menor que
     `WELCOME_VERSION`): subir esa constante hace que quien ya usaba Lorca la vea otra vez.
   - Resaltado: `schedule_highlight` (al final de cada `update`) lanza `Task::perform` con

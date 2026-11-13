@@ -23,6 +23,7 @@ mod prompt;
 mod shortcut_labels;
 mod shortcuts;
 mod theme;
+mod tour;
 mod update_dialog;
 mod updates;
 mod watcher;

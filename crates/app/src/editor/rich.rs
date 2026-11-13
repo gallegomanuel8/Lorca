@@ -320,7 +320,7 @@ fn caret_in(layout: &LineLayout, byte: usize) -> Option<(f32, f32, f32)> {
 
 /// Familia del texto: una concreta por sistema, para que la negrita y la cursiva sean de
 /// la misma familia (con «sans-serif» genérico, la negrita caía en otra letra en macOS).
-const PROSE_FAMILY: iced::font::Family = if cfg!(target_os = "macos") {
+pub const PROSE_FAMILY: iced::font::Family = if cfg!(target_os = "macos") {
     iced::font::Family::Name("Helvetica Neue")
 } else if cfg!(windows) {
     iced::font::Family::Name("Segoe UI")

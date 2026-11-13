@@ -14,8 +14,20 @@ use crate::app::{BookmarkAction, Message};
 use crate::context_menu::ContextAction;
 
 /// Traduce un evento en un mensaje de la aplicación (firma de `event::listen_with`).
-pub fn shortcut(event: Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+pub fn shortcut(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
+        // ←/→ sin capturar (no hay editor a la vista): páginas del resumen de funciones.
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(named @ (Named::ArrowLeft | Named::ArrowRight)),
+            modifiers,
+            ..
+        }) if status == event::Status::Ignored && modifiers.is_empty() => {
+            Some(Message::TourNav(if named == Named::ArrowRight {
+                1
+            } else {
+                -1
+            }))
+        }
         Event::Window(window::Event::FileDropped(path)) => Some(Message::FileDropped(path)),
         Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
             Some(Message::ModifiersChanged(modifiers))

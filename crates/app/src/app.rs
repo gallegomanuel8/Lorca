@@ -186,6 +186,8 @@ pub enum Message {
     TourPage(usize),
     /// Fin (o «Saltar») del resumen de funciones.
     TourDone,
+    /// ←/→ en el resumen de funciones.
+    TourNav(i8),
     /// Latido para el guardado diferido de la sesión.
     Tick,
     LanguageSelected(Language),
@@ -948,8 +950,27 @@ impl Lorca {
                 Task::none()
             }
             Message::TourPage(page) => {
-                self.tour_page = Some(page.min(welcome::TOUR_PAGES - 1));
+                self.tour_page = Some(page.min(crate::tour::PAGES - 1));
                 Task::none()
+            }
+            Message::TourNav(step) => {
+                if let Some(page) = self.tour_page {
+                    let page = page.saturating_add_signed(isize::from(step));
+                    self.tour_page = Some(page.min(crate::tour::PAGES - 1));
+                }
+                Task::none()
+            }
+            // En el resumen: Intro avanza (y en la última página lo cierra), Escape lo cierra.
+            Message::PromptAccept if self.tour_page.is_some() && self.prompt.is_none() => {
+                match self.tour_page {
+                    Some(page) if page + 1 < crate::tour::PAGES => {
+                        self.update(Message::TourPage(page + 1))
+                    }
+                    _ => self.update(Message::TourDone),
+                }
+            }
+            Message::Escape if self.tour_page.is_some() && self.prompt.is_none() => {
+                self.update(Message::TourDone)
             }
             Message::TourDone => {
                 self.tour_page = None;
@@ -1648,7 +1669,7 @@ impl Lorca {
             return welcome::view(choice, self.system_mode, &self.themes, &self.config);
         }
         if let Some(page) = self.tour_page {
-            return welcome::tour(page);
+            return crate::tour::view(page, &self.active_theme.editor);
         }
         // macOS tiene la barra de menús nativa; en el resto se dibuja dentro de la ventana.
         let mut layout = column![];
@@ -2115,6 +2136,7 @@ fn affects_session(message: &Message) -> bool {
             | Message::WelcomeDone
             | Message::TourPage(_)
             | Message::TourDone
+            | Message::TourNav(_)
             | Message::Highlighted { .. }
             | Message::PdfExported(_)
             | Message::InstallMenu

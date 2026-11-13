@@ -31,7 +31,7 @@ pub enum View<'a> {
 
 /// Icono de la aplicación (se carga una vez: un `Handle` nuevo en cada `view` volvería a
 /// subir la imagen a la GPU).
-fn icon() -> image::Handle {
+pub(crate) fn icon() -> image::Handle {
     static ICON: OnceLock<image::Handle> = OnceLock::new();
     ICON.get_or_init(|| {
         image::Handle::from_bytes(
