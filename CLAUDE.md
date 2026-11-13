@@ -377,6 +377,9 @@ mensaje en español.
   privada está en los secretos `CARGO_PACKAGER_SIGN_PRIVATE_KEY(_PASSWORD)`: con ellos
   cargo-packager deja un `.sig` junto a cada paquete y el trabajo `manifest` de
   `release.yml` crea `latest.json`. Solo se ve cuando la release deja de ser borrador.
+- Versión: `version` de `[workspace.package]` en el `Cargo.toml` raíz. Al cambiar la menor o
+  la mayor (0.1 → 0.2) hay que subir también `version = "…"` de las dependencias internas
+  (`lorca-core = { version, path }`…) en los `Cargo.toml` de los crates, o no compila.
 - `.github/workflows/ci.yml` (fmt, clippy, tests en los tres sistemas) y `release.yml`
   (paquetes al publicar una etiqueta `v*`).
 - «Abrir con» y doble clic en macOS: `crates/app/macos/Info.plist` (se fusiona con el que

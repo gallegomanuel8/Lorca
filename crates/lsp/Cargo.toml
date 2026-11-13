@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-lorca-syntax = { version = "0.1.0", path = "../syntax" }
+lorca-syntax = { version = "0.2.0", path = "../syntax" }
 lsp-types = "0.97.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

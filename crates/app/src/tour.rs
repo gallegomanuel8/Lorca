@@ -664,7 +664,7 @@ fn memory(colors: &EditorColors) -> Element<'static, Message> {
         row![
             image(crate::update_dialog::icon()).width(26).height(26),
             column![
-                ink("Lorca 0.2.0", 12, c.text).font(Font {
+                text(next_version()).size(12).color(c.text).font(Font {
                     weight: iced::font::Weight::Semibold,
                     ..PROSE
                 }),
@@ -728,6 +728,17 @@ fn memory(colors: &EditorColors) -> Element<'static, Message> {
 /// Tramo de texto de una ilustración (sin vínculos).
 fn sp(content: &'static str) -> iced::widget::text::Span<'static, ()> {
     span(content)
+}
+
+/// «Lorca X.(Y+1).0»: una versión que aún no existe, para el aviso de ejemplo.
+fn next_version() -> String {
+    let mut parts = env!("CARGO_PKG_VERSION").split('.');
+    let major = parts.next().unwrap_or("0");
+    let minor = parts
+        .next()
+        .and_then(|minor| minor.parse::<u32>().ok())
+        .unwrap_or(0);
+    format!("Lorca {major}.{}.0", minor + 1)
 }
 
 /// Fondo de un trozo de la ilustración.
