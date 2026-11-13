@@ -47,8 +47,6 @@ pub const BAR: &[BarMenu] = &[
             Item("export_pdf", "Exportar a PDF…", ""),
             Separator,
             Item("open_config", "Ajustes…", keys::SETTINGS),
-            Item("check_updates", "Buscar actualizaciones…", ""),
-            Item("tour", "Lo que puedes hacer con Lorca", ""),
             Separator,
             Item("close", "Cerrar pestaña", keys::CLOSE),
             Item("quit", "Salir", keys::QUIT),
@@ -130,6 +128,16 @@ pub const BAR: &[BarMenu] = &[
             Item("new_theme", "Crear tema a partir del actual", ""),
         ],
     },
+    // Último, como es habitual en Windows y Linux (en macOS esto va en el menú «Lorca»).
+    BarMenu {
+        title: "Ayuda",
+        entries: &[
+            Item("tour", "Lo que puedes hacer con Lorca", ""),
+            Item("check_updates", "Buscar actualizaciones…", ""),
+            Separator,
+            Item("about", "Acerca de Lorca", ""),
+        ],
+    },
 ];
 
 /// Barra de menús dibujada. `open` es el índice del menú desplegado, si lo hay.
@@ -209,6 +217,7 @@ pub fn message_for(id: &str) -> Option<Message> {
         "open_config" => Message::OpenConfig,
         "check_updates" => Message::CheckUpdates { manual: true },
         "tour" => Message::TourPage(0),
+        "about" => Message::ShowAbout,
         "new_theme" => Message::NewTheme,
         "complete" => Message::TriggerCompletion,
         "hover" => Message::ShowHover,
@@ -507,6 +516,7 @@ mod tests {
             "open_config",
             "check_updates",
             "tour",
+            "about",
             "new_theme",
             "complete",
             "hover",

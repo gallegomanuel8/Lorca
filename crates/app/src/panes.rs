@@ -114,6 +114,7 @@ impl Lorca {
             && self.focus == super::Focus::Editor
             && !self.dialog_open
             && !self.update_dialog_open()
+            && !self.about_open
             && self.context_menu.is_none()
             && self.palette.is_none();
         let options = ViewOptions {
@@ -426,6 +427,7 @@ impl Lorca {
                 "",
                 Message::TourPage(0),
             ),
+            Command::new("Lorca: Acerca de Lorca", "", Message::ShowAbout),
             Command::new(
                 "Ver: Mostrar marcas de Markdown",
                 "",

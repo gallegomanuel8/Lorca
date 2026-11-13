@@ -6,6 +6,7 @@
 // del editor. En depuración se mantiene la consola para ver los mensajes.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod about;
 mod app;
 mod context_menu;
 mod dialogs;

@@ -289,6 +289,8 @@ mensaje en español.
     `watcher.rs` (notify, vigila carpetas; `Message::FileChanged`), `menu.rs` (muda en
     macOS, instalado con `Task::done(Message::InstallMenu)`; en Windows y Linux `bar` +
     `BAR`, desplegables como `MenuTarget::MenuBar` y `ContextAction::MenuCommand(id)`),
+    con un menú «Ayuda» al final (resumen, actualizaciones y «Acerca de», que en Windows y
+    Linux es una ventana propia, `about.rs`, `Lorca::about_open`; en macOS la da el sistema),
     arrastre de pestañas con
     `mouse_area` + `Message::MouseReleased` global.
   - Fase 6:

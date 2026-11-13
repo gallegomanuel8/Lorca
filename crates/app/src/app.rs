@@ -188,6 +188,9 @@ pub enum Message {
     TourDone,
     /// ←/→ en el resumen de funciones.
     TourNav(i8),
+    /// Abre o cierra la ventana «Acerca de».
+    ShowAbout,
+    CloseAbout,
     /// Latido para el guardado diferido de la sesión.
     Tick,
     LanguageSelected(Language),
@@ -280,6 +283,8 @@ pub struct Lorca {
     welcome_choice: Option<ThemeMode>,
     /// Página del resumen de funciones que se está enseñando (tras elegir el tema).
     tour_page: Option<usize>,
+    /// Ventana «Acerca de» abierta (Windows y Linux; en macOS la da el sistema).
+    about_open: bool,
     /// Temas disponibles (incluidos y del usuario) y el que se está mostrando.
     themes: ThemeSet,
     active_theme: ActiveTheme,
@@ -384,6 +389,7 @@ impl Lorca {
                 .needs_welcome()
                 .then(|| config.theme.unwrap_or(ThemeMode::Auto)),
             tour_page: None,
+            about_open: false,
             themes,
             active_theme,
             config,
@@ -951,6 +957,19 @@ impl Lorca {
             }
             Message::TourPage(page) => {
                 self.tour_page = Some(page.min(crate::tour::PAGES - 1));
+                Task::none()
+            }
+            Message::ShowAbout => {
+                self.about_open = true;
+                self.context_menu = None;
+                Task::none()
+            }
+            Message::CloseAbout => {
+                self.about_open = false;
+                Task::none()
+            }
+            Message::Escape if self.about_open => {
+                self.about_open = false;
                 Task::none()
             }
             Message::TourNav(step) => {
@@ -1727,6 +1746,11 @@ impl Lorca {
                 update_dialog::layer(base, update_dialog::View::Working { version, progress })
             }
         };
+        let base = if self.about_open {
+            crate::about::layer(base)
+        } else {
+            base
+        };
         match &self.prompt {
             Some(prompt) => crate::prompt::layer(base, prompt),
             None => base,
@@ -2137,6 +2161,8 @@ fn affects_session(message: &Message) -> bool {
             | Message::TourPage(_)
             | Message::TourDone
             | Message::TourNav(_)
+            | Message::ShowAbout
+            | Message::CloseAbout
             | Message::Highlighted { .. }
             | Message::PdfExported(_)
             | Message::InstallMenu
