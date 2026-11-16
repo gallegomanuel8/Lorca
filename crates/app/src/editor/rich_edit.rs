@@ -2,7 +2,7 @@
 //! cursor las salta, Retroceso no las rompe y Intro continúa las listas.
 
 use lorca_core::{CoreError, EditorState, Motion, Selection};
-use lorca_formats::{ListContinuation, continue_list, parse_line};
+use lorca_formats::{CodeFences, LineMarkup, ListContinuation, continue_list, parse_line_in};
 
 use super::EditorAction;
 
@@ -22,7 +22,7 @@ pub fn apply(action: &EditorAction, editor: &mut EditorState) -> Option<Result<(
         EditorAction::Backspace if single && empty => Some(backspace(editor)),
         EditorAction::Delete if single && empty => {
             let (line, col) = head(editor);
-            let markup = parse_line(&editor.buffer().line_text(line));
+            let markup = markup(editor, line);
             if let Some(run) = markup
                 .hidden_runs()
                 .into_iter()
@@ -46,7 +46,7 @@ pub fn snap_cursor(editor: &mut EditorState) {
     }
     let selection = editor.selection();
     let (line, col) = head(editor);
-    let markup = parse_line(&editor.buffer().line_text(line));
+    let markup = markup(editor, line);
     let snapped = markup.snap(col, true);
     if snapped != col {
         let start = editor.buffer().line_start(line);
@@ -60,6 +60,23 @@ pub fn snap_cursor(editor: &mut EditorState) {
     }
 }
 
+/// Análisis de la línea `line`, teniendo en cuenta los bloques de código (se recorren las
+/// líneas anteriores mirando solo su comienzo).
+fn markup(editor: &EditorState, line: usize) -> LineMarkup {
+    let buffer = editor.buffer();
+    let mut fences = CodeFences::default();
+    for index in 0..line {
+        // Basta el comienzo de la línea para reconocer una valla.
+        let head: String = buffer
+            .line(index)
+            .map(|text| text.chars().take(64).collect())
+            .unwrap_or_default();
+        fences.next_line(&head);
+    }
+    let text = buffer.line_text(line);
+    parse_line_in(&text, fences.next_line(&text))
+}
+
 fn head(editor: &EditorState) -> (usize, usize) {
     let position = editor.buffer().char_to_position(editor.selection().head);
     (position.line, position.column)
@@ -70,7 +87,7 @@ fn head(editor: &EditorState) -> (usize, usize) {
 fn move_visibly(editor: &mut EditorState, motion: Motion, extend: bool) {
     let forward = motion == Motion::Right;
     let (line, col) = head(editor);
-    let before = parse_line(&editor.buffer().line_text(line)).visible_offset(col);
+    let before = markup(editor, line).visible_offset(col);
     for _ in 0..16 {
         let previous = editor.selection().head;
         editor.move_cursor(motion, extend);
@@ -78,7 +95,7 @@ fn move_visibly(editor: &mut EditorState, motion: Motion, extend: bool) {
         if editor.selection().head == previous || new_line != line {
             break;
         }
-        let markup = parse_line(&editor.buffer().line_text(new_line));
+        let markup = markup(editor, new_line);
         let snapped = markup.snap(new_col, forward);
         if markup.visible_offset(snapped) != before {
             if snapped != new_col {
@@ -99,7 +116,7 @@ fn move_visibly(editor: &mut EditorState, motion: Motion, extend: bool) {
 /// notas); detrás de una marca oculta borra el carácter visible anterior.
 fn backspace(editor: &mut EditorState) -> Result<(), CoreError> {
     let (line, col) = head(editor);
-    let markup = parse_line(&editor.buffer().line_text(line));
+    let markup = markup(editor, line);
     let start = editor.buffer().line_start(line);
     if markup.prefix > 0 && col <= markup.prefix {
         editor.replace_ranges(&[(start..start + markup.prefix, String::new())])?;
@@ -119,6 +136,9 @@ fn backspace(editor: &mut EditorState) -> Result<(), CoreError> {
 /// Intro en una lista: continúa la lista o, en un elemento vacío, la termina.
 fn newline(editor: &mut EditorState) -> Option<Result<(), CoreError>> {
     let (line, _) = head(editor);
+    if markup(editor, line).block == lorca_formats::Block::Code {
+        return None;
+    }
     let text = editor.buffer().line_text(line);
     match continue_list(&text)? {
         ListContinuation::Continue(prefix) => Some(editor.insert_text(&format!("\n{prefix}"))),

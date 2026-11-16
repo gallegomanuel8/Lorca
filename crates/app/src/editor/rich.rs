@@ -15,6 +15,10 @@
 //! entre líneas (`EditorAction::MoveLine`). Con la imagen seleccionada, el tirador de su
 //! esquina inferior derecha cambia su ancho (`EditorAction::ResizeImage`, que lo guarda como
 //! `![descripción|300](ruta)`); doble clic en él la deja a su tamaño.
+//!
+//! Los bloques de código con vallas (`CodeFences`) se ven tal cual, en monoespaciada,
+//! sobre un fondo propio y con el resaltado del documento (las gramáticas de Markdown
+//! inyectan la del lenguaje del bloque).
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +38,8 @@ use iced::{
     Theme,
 };
 use lorca_core::{EditorState, Motion};
-use lorca_formats::{Block, CharStyle, LineMarkup, parse_image, parse_line};
+use lorca_formats::{Block, CharStyle, CodeFences, LineMarkup, parse_image, parse_line_in};
+use lorca_syntax::{Highlights, StyledSpan};
 
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
@@ -82,7 +87,16 @@ pub fn rich_editor<'a, Message>(
         focused,
         colors,
         metrics,
+        highlights: None,
         on_action: Box::new(on_action),
+    }
+}
+
+impl<'a, Message> RichEditor<'a, Message> {
+    /// Resaltado del documento, para colorear los bloques de código.
+    pub fn highlights(mut self, highlights: Option<&'a Highlights>) -> Self {
+        self.highlights = highlights;
+        self
     }
 }
 
@@ -94,6 +108,9 @@ pub struct RichEditor<'a, Message> {
     focused: bool,
     colors: &'a EditorColors,
     metrics: Metrics,
+    /// Resaltado del documento (para los bloques de código); puede ir una versión por
+    /// detrás.
+    highlights: Option<&'a Highlights>,
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -120,6 +137,8 @@ struct LineLayout {
     /// Tramos tachados o subrayados (índice del tramo, tachado, color o `None` para el
     /// del texto): iced no dibuja esas líneas al pintar un párrafo.
     lines_on: Vec<(usize, bool, Option<Color>)>,
+    /// Línea de un bloque de código: el resaltado con que se maquetó.
+    code: Option<Vec<StyledSpan>>,
 }
 
 /// Imagen ya cargada de una línea.
@@ -156,7 +175,8 @@ struct State {
     /// Posición vertical de cada línea (una más: el alto total).
     tops: Vec<f32>,
     /// Versión del documento, anchura y tamaño de letra de la maquetación.
-    built_for: Option<(u64, f32, f32)>,
+    /// (versión, anchura, tamaño de letra, resaltado) de la maquetación.
+    built_for: Option<(u64, f32, f32, usize)>,
     /// Ruta del documento de la maquetación (de ella dependen las imágenes).
     built_path: Option<PathBuf>,
     last_click: Option<mouse::Click>,
@@ -354,7 +374,7 @@ pub const PROSE_FAMILY: iced::font::Family = if cfg!(target_os = "macos") {
 
 /// Estilo de letra de un carácter según su bloque.
 fn font_for(block: Block, style: CharStyle) -> Font {
-    if style.code || block == Block::Raw {
+    if style.code || matches!(block, Block::Raw | Block::Code) {
         return Font::MONOSPACE;
     }
     let bold = style.bold || matches!(block, Block::Heading(_));
@@ -383,7 +403,7 @@ fn size_for(block: Block, base: f32) -> f32 {
                 .copied()
                 .unwrap_or(1.0)
         }
-        Block::Raw => base * 0.95,
+        Block::Raw | Block::Code => base * 0.95,
         _ => base,
     }
 }
@@ -426,13 +446,15 @@ fn line_image(
 /// Maqueta una línea para la anchura `width`.
 fn build_line(
     text: &str,
+    code: Option<Vec<StyledSpan>>,
     width: f32,
     base: f32,
     colors: &EditorColors,
     document: Option<&Path>,
     renderer: &Renderer,
 ) -> LineLayout {
-    let markup = parse_line(text);
+    let markup = parse_line_in(text, code.is_some());
+    let fence = markup.block == Block::Raw && is_fence(text);
     let is_image = markup.block == Block::Image;
     let (image, image_note) = if is_image {
         match line_image(text, document, renderer) {
@@ -479,6 +501,13 @@ fn build_line(
         .enumerate()
         .map(|(index, (start, style))| {
             let end = runs.get(index + 1).map_or(display.len(), |(next, _)| *next);
+            if fence {
+                // Valla del bloque: atenuada.
+                return Span::new(display.get(*start..end).unwrap_or_default().to_owned())
+                    .font(Font::MONOSPACE)
+                    .size(size)
+                    .color(colors.line_number);
+            }
             let mut span = Span::new(display.get(*start..end).unwrap_or_default().to_owned())
                 .font(font_for(markup.block, *style))
                 .size(size)
@@ -501,6 +530,12 @@ fn build_line(
             span
         })
         .collect();
+    // Código: un tramo por trozo resaltado (las columnas son caracteres; aquí no hay
+    // marcas ocultas, así que el texto es el mismo).
+    let spans = match &code {
+        Some(highlighted) => code_spans(text, highlighted, size, colors),
+        None => spans,
+    };
     // El aviso de una imagen que no se ve va detrás de la descripción (fuera de las
     // columnas del texto: el cursor no entra en él).
     let mut spans = spans;
@@ -515,6 +550,7 @@ fn build_line(
     }
     let lines_on = runs
         .iter()
+        .filter(|_| code.is_none())
         .enumerate()
         .filter(|(_, (_, style))| style.strike || style.link)
         .map(|(index, (_, style))| (index, style.strike, style.link.then_some(colors.bookmark)))
@@ -559,7 +595,60 @@ fn build_line(
         image,
         text_top,
         lines_on,
+        code,
     }
+}
+
+/// ¿Es `text` una valla de bloque de código (```` ``` ```` o `~~~`)?
+fn is_fence(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+/// Tramos de una línea de código con su resaltado (`highlighted`, columnas de carácter
+/// ordenadas y sin solapes).
+fn code_spans(
+    text: &str,
+    highlighted: &[StyledSpan],
+    size: f32,
+    colors: &EditorColors,
+) -> Vec<Span<'static, (), Font>> {
+    let chars: Vec<char> = text.chars().collect();
+    let piece = |from: usize, to: usize| -> String {
+        chars
+            .get(from.min(chars.len())..to.min(chars.len()))
+            .unwrap_or_default()
+            .iter()
+            .collect()
+    };
+    let plain = |from, to| {
+        Span::new(piece(from, to))
+            .font(Font::MONOSPACE)
+            .size(size)
+            .color(colors.text)
+    };
+    let mut spans = Vec::new();
+    let mut at = 0;
+    for span in highlighted {
+        if span.start > at {
+            spans.push(plain(at, span.start));
+        }
+        let style = colors.style(Some(span.kind));
+        spans.push(
+            Span::new(piece(span.start.max(at), span.end))
+                .font(Font {
+                    family: Font::MONOSPACE.family,
+                    ..style.font
+                })
+                .size(size)
+                .color(style.color.unwrap_or(colors.text)),
+        );
+        at = at.max(span.end);
+    }
+    if at < chars.len() || spans.is_empty() {
+        spans.push(plain(at, chars.len()));
+    }
+    spans
 }
 
 impl<Message> RichEditor<'_, Message> {
@@ -574,7 +663,15 @@ impl<Message> RichEditor<'_, Message> {
     /// Rehace la maquetación si cambió el documento, la anchura o la letra. Reaprovecha
     /// las líneas cuyo texto no ha cambiado.
     fn rebuild(&self, state: &mut State, width: f32, renderer: &Renderer) {
-        let key = (self.editor.version(), width, self.metrics.font_size);
+        let highlights = self
+            .highlights
+            .map_or(0, |highlights| std::ptr::from_ref(highlights) as usize);
+        let key = (
+            self.editor.version(),
+            width,
+            self.metrics.font_size,
+            highlights,
+        );
         let same_path = state.built_path.as_deref() == self.document;
         if state.built_for == Some(key) && same_path {
             return;
@@ -582,7 +679,7 @@ impl<Message> RichEditor<'_, Message> {
         let same_metrics = same_path
             && state
                 .built_for
-                .is_some_and(|(_, w, size)| w == width && size == self.metrics.font_size);
+                .is_some_and(|(_, w, size, _)| w == width && size == self.metrics.font_size);
         let mut old: std::collections::HashMap<String, Vec<LineLayout>> =
             std::collections::HashMap::new();
         if same_metrics {
@@ -592,11 +689,22 @@ impl<Message> RichEditor<'_, Message> {
         }
         let buffer = self.editor.buffer();
         let mut lines = Vec::with_capacity(buffer.len_lines());
+        let mut fences = CodeFences::default();
         for line in 0..buffer.len_lines() {
             let text = buffer.line_text(line);
-            let layout = old.get_mut(&text).and_then(Vec::pop).unwrap_or_else(|| {
+            let code = fences.next_line(&text).then(|| {
+                self.highlights
+                    .map(|highlights| highlights.line(line).to_vec())
+                    .unwrap_or_default()
+            });
+            let reused = old.get_mut(&text).and_then(|candidates| {
+                let index = candidates.iter().position(|l| l.code == code)?;
+                Some(candidates.swap_remove(index))
+            });
+            let layout = reused.unwrap_or_else(|| {
                 build_line(
                     &text,
+                    code,
                     width,
                     self.metrics.font_size,
                     self.colors,
@@ -1105,6 +1213,22 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                 };
                 let line_start = buffer.line_start(line);
                 let line_len = layout.text.chars().count();
+                // Fondo de los bloques de código (contenido y vallas).
+                if layout.code.is_some() || is_fence(&layout.text) {
+                    fill(
+                        renderer,
+                        Rectangle {
+                            x: origin.x - 8.0,
+                            y: origin.y + top,
+                            width: Self::text_width(bounds) + 16.0,
+                            height: layout.height,
+                        },
+                        Color {
+                            a: 0.06,
+                            ..colors.text
+                        },
+                    );
+                }
                 // Selecciones que tocan la línea.
                 for selection in selections {
                     let range = selection.range();

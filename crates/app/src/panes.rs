@@ -142,6 +142,7 @@ impl Lorca {
                 self.metrics_for(id),
                 move |action| Message::Editor(id, action),
             )
+            .highlights(highlights)
             .into();
             return editor;
         }

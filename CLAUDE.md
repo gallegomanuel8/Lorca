@@ -215,6 +215,12 @@ mensaje en español.
     y una copia translúcida; al soltar, `EditorAction::MoveLine` (`lorca_formats::move_line`,
     una sola transacción). Marco y arrastre se dibujan en una capa aparte: en la misma, las
     imágenes tapan los quads.
+    Bloques de código con vallas: `CodeFences` (recorre las líneas en orden) +
+    `parse_line_in(línea, dentro)` → `Block::Code` (tal cual, monoespaciada, sin marcas
+    ocultas ni listas que continúan). El widget los colorea con el resaltado del documento
+    (`RichEditor::highlights`; la gramática de Markdown inyecta la del bloque), que entra en
+    la clave de la caché (`LineLayout::code`), y les pone fondo (también a las vallas,
+    atenuadas). `rich_edit::markup` hace lo mismo para el cursor y las teclas.
     Tareas: `- [ ] texto` / `- [x]` (`Block::Task`, `ListKind::Task`): se ve una casilla
     («☐»/«☑», en el `[`, `CharStyle::checkbox`); clic en ella (`State::task_box_at`) →
     `EditorAction::ToggleTask` (`lorca_formats::toggle_task`, misma longitud). Hechas,

@@ -22,6 +22,9 @@ pub enum Block {
     Task(bool),
     /// Fila de tabla o valla de código: se muestra tal cual, en monoespaciada.
     Raw,
+    /// Línea dentro de un bloque de código con vallas: tal cual, en monoespaciada y con el
+    /// resaltado de su lenguaje. Ver [`CodeFences`].
+    Code,
     /// Línea con solo una imagen (`![descripción](ruta)`): se ve la imagen y, como pie, la
     /// descripción (lo único visible del texto). Ver [`parse_image`].
     Image,
@@ -259,6 +262,49 @@ pub fn toggle_task(line: &str) -> Option<String> {
     Some(out.into_iter().collect())
 }
 
+/// Sigue los bloques de código con vallas (```` ``` ```` o `~~~`) línea a línea: dice qué
+/// líneas son contenido de un bloque (las vallas no lo son). Hay que pasarle todas las
+/// líneas en orden desde la primera.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodeFences {
+    open: Option<char>,
+}
+
+impl CodeFences {
+    /// ¿Es `line` (la siguiente) contenido de un bloque de código?
+    pub fn next_line(&mut self, line: &str) -> bool {
+        let trimmed = line.trim_start();
+        let fence = ['`', '~']
+            .into_iter()
+            .find(|&c| trimmed.starts_with(&String::from(c).repeat(3)));
+        match (self.open, fence) {
+            (Some(open), Some(fence)) if open == fence => {
+                self.open = None;
+                false
+            }
+            (Some(_), _) => true,
+            (None, Some(fence)) => {
+                self.open = Some(fence);
+                false
+            }
+            (None, None) => false,
+        }
+    }
+}
+
+/// Analiza una línea sabiendo si está dentro de un bloque de código ([`CodeFences`]):
+/// dentro, todo se ve tal cual ([`Block::Code`]).
+pub fn parse_line_in(line: &str, in_code: bool) -> LineMarkup {
+    if in_code {
+        return LineMarkup {
+            block: Block::Code,
+            chars: vec![CharStyle::default(); line.chars().count()],
+            prefix: 0,
+        };
+    }
+    parse_line(line)
+}
+
 /// Analiza una línea (sin el salto).
 pub fn parse_line(line: &str) -> LineMarkup {
     let chars: Vec<char> = line.chars().collect();
@@ -450,6 +496,29 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_fences_mark_their_content() {
+        let mut fences = CodeFences::default();
+        let lines = [
+            "texto",
+            "```rust",
+            "let **a** = 1;",
+            "~~~",
+            "```",
+            "**b**",
+            "~~~",
+            "x",
+        ];
+        let inside: Vec<bool> = lines.iter().map(|l| fences.next_line(l)).collect();
+        assert_eq!(
+            inside,
+            [false, false, true, true, false, false, false, true]
+        );
+        let markup = parse_line_in("let **a** = 1;", true);
+        assert_eq!(markup.block, Block::Code);
+        assert!(markup.chars.iter().all(|style| !style.hidden));
+    }
 
     #[test]
     fn task_lines_show_a_checkbox() {
