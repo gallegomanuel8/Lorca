@@ -1865,6 +1865,7 @@ impl Lorca {
         let list = match lorca_formats::parse_line(&line).block {
             lorca_formats::Block::Bullet => Some(lorca_formats::ListKind::Bullet),
             lorca_formats::Block::Numbered => Some(lorca_formats::ListKind::Numbered),
+            lorca_formats::Block::Task(_) => Some(lorca_formats::ListKind::Task),
             _ => None,
         };
         format_bar::BarState {

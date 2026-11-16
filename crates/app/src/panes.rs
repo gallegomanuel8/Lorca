@@ -355,6 +355,11 @@ impl Lorca {
                 context(ContextAction::List(ListKind::Numbered)),
             ),
             Command::new(
+                "Formato: Lista de tareas",
+                "",
+                context(ContextAction::List(ListKind::Task)),
+            ),
+            Command::new(
                 "Editar: Formatear documento (JSON/SQL)",
                 keys::FORMAT,
                 context(ContextAction::FormatDocument),
@@ -667,6 +672,11 @@ impl Lorca {
                             "Lista numerada",
                             keys::NUMBERED,
                             Some(ContextAction::List(ListKind::Numbered)),
+                        ),
+                        MenuItem::new(
+                            "Lista de tareas",
+                            "",
+                            Some(ContextAction::List(ListKind::Task)),
                         ),
                         MenuItem::new("Insertar vínculo", keys::LINK, Some(ContextAction::Link)),
                         MenuItem::new("Borrar formato", "", Some(ContextAction::ClearFormatting)),

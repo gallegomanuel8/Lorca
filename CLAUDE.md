@@ -215,6 +215,10 @@ mensaje en español.
     y una copia translúcida; al soltar, `EditorAction::MoveLine` (`lorca_formats::move_line`,
     una sola transacción). Marco y arrastre se dibujan en una capa aparte: en la misma, las
     imágenes tapan los quads.
+    Tareas: `- [ ] texto` / `- [x]` (`Block::Task`, `ListKind::Task`): se ve una casilla
+    («☐»/«☑», en el `[`, `CharStyle::checkbox`); clic en ella (`State::task_box_at`) →
+    `EditorAction::ToggleTask` (`lorca_formats::toggle_task`, misma longitud). Hechas,
+    atenuadas. Intro continúa con `- [ ] `.
     Tamaño: `![descripción|300](ruta)` (como Obsidian; `ImageRef::width`, `set_image_width`).
     Con la imagen seleccionada, el tirador de su esquina (`ImageResize`) cambia el ancho con
     vista previa y al soltar publica `EditorAction::ResizeImage`; doble clic = tamaño

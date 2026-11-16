@@ -43,6 +43,10 @@ pub enum EditorAction {
         line: usize,
         width: Option<u32>,
     },
+    /// Marca o desmarca la tarea de `line` (clic en su casilla).
+    ToggleTask {
+        line: usize,
+    },
     Insert(String),
     /// Como `Insert`, pero con texto del portapapeles (puede deducir el lenguaje).
     Paste(String),
@@ -197,6 +201,20 @@ pub fn apply_action(
                     editor.replace_ranges(&[(start..end, new)])?;
                     // La imagen sigue seleccionada.
                     editor.set_selection(Selection::new(new_next, start));
+                }
+            }
+        }
+        EditorAction::ToggleTask { line } => {
+            let buffer = editor.buffer();
+            if line < buffer.len_lines() {
+                let start = buffer.line_start(line);
+                let text = buffer.line_text(line);
+                let end = start + text.chars().count();
+                if let Some(new) = lorca_formats::toggle_task(&text) {
+                    // Misma longitud: el cursor y la selección no se mueven.
+                    let selection = editor.selection();
+                    editor.replace_ranges(&[(start..end, new)])?;
+                    editor.set_selection(selection);
                 }
             }
         }

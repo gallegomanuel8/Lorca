@@ -259,6 +259,30 @@ impl State {
         Some(Rectangle::new(Point::new(0.0, top), image.size))
     }
 
+    /// Línea cuya casilla de tarea está bajo un punto del contenido.
+    fn task_box_at(&self, point: Point) -> Option<usize> {
+        let line = self.line_at(point.y.max(0.0));
+        let layout = self.lines.get(line)?;
+        if !matches!(layout.markup.block, Block::Task(_)) {
+            return None;
+        }
+        let column = layout
+            .markup
+            .chars
+            .iter()
+            .position(|style| style.checkbox)?;
+        let start = self.caret(line, column)?;
+        // Hasta el espacio que sigue a la casilla (las columnas de en medio están ocultas).
+        let end = self.caret(line, column + 3)?;
+        let rect = Rectangle {
+            x: start.x - 3.0,
+            y: start.y,
+            width: (end.x - start.x).max(start.height * 0.6) + 6.0,
+            height: start.height,
+        };
+        rect.contains(point).then_some(line)
+    }
+
     /// Línea cuya imagen está bajo un punto del contenido.
     fn image_at(&self, point: Point) -> Option<usize> {
         let line = self.line_at(point.y.max(0.0));
@@ -435,12 +459,18 @@ fn build_line(
         let key = CharStyle {
             hidden: false,
             bullet: false,
+            checkbox: false,
             ..style
         };
         if runs.last().is_none_or(|(_, last)| *last != key) {
             runs.push((display.len(), key));
         }
-        display.push(if style.bullet { '•' } else { c });
+        display.push(match (style.bullet, style.checkbox, markup.block) {
+            (true, _, _) => '•',
+            (_, true, Block::Task(true)) => '☑',
+            (_, true, _) => '☐',
+            _ => c,
+        });
     }
     col_byte.push(display.len());
 
@@ -454,6 +484,10 @@ fn build_line(
                 .size(size)
                 .strikethrough(style.strike)
                 .underline(style.link);
+            if markup.block == Block::Task(true) {
+                // Tarea hecha: atenuada.
+                span = span.color(colors.line_number);
+            }
             if is_image {
                 span = span.color(colors.line_number).font(Font {
                     style: iced::font::Style::Italic,
@@ -902,6 +936,19 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor
                     .position_over(bounds)
+                    .is_some_and(|position| state.task_box_at(to_content(position)).is_some()) =>
+            {
+                if let Some(line) = cursor
+                    .position_over(bounds)
+                    .and_then(|position| state.task_box_at(to_content(position)))
+                {
+                    self.publish(shell, EditorAction::ToggleTask { line });
+                }
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor
+                    .position_over(bounds)
                     .is_some_and(|position| state.image_at(to_content(position)).is_some()) =>
             {
                 let Some(position) = cursor.position_over(bounds) else {
@@ -1269,6 +1316,13 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                 .is_some()
         {
             return mouse::Interaction::Grab;
+        }
+        if let Some(position) = cursor.position_over(bounds)
+            && state
+                .task_box_at(Point::new(position.x - origin.x, position.y - origin.y))
+                .is_some()
+        {
+            return mouse::Interaction::Pointer;
         }
         if cursor.is_over(bounds) {
             mouse::Interaction::Text

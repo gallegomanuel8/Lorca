@@ -18,6 +18,8 @@ pub enum Block {
     Bullet,
     /// Elemento de lista numerada (el número se ve tal cual).
     Numbered,
+    /// Tarea (`- [ ] texto`, hecha con `- [x]`): se ve una casilla que se marca con un clic.
+    Task(bool),
     /// Fila de tabla o valla de código: se muestra tal cual, en monoespaciada.
     Raw,
     /// Línea con solo una imagen (`![descripción](ruta)`): se ve la imagen y, como pie, la
@@ -37,6 +39,8 @@ pub struct CharStyle {
     pub link: bool,
     /// Guion de una lista que se dibuja como «•».
     pub bullet: bool,
+    /// Corchete de una tarea que se dibuja como su casilla («☐» o «☑»).
+    pub checkbox: bool,
 }
 
 /// Línea analizada: un estilo por carácter.
@@ -199,6 +203,10 @@ pub fn continue_list(line: &str) -> Option<ListContinuation> {
         .take_while(|c| *c == ' ' || *c == '\t')
         .collect();
     let marker = match markup.block {
+        Block::Task(_) => {
+            let symbol = line.chars().nth(indent.chars().count()).unwrap_or('-');
+            format!("{symbol} [ ] ")
+        }
         Block::Bullet => {
             let symbol = line.chars().nth(indent.chars().count()).unwrap_or('-');
             format!("{symbol} ")
@@ -219,6 +227,36 @@ pub fn continue_list(line: &str) -> Option<ListContinuation> {
     } else {
         Some(ListContinuation::Continue(format!("{indent}{marker}")))
     }
+}
+
+/// Si `rest` (sin sangría) empieza por una tarea (`- [ ] `, `- [x] `), si está hecha.
+fn task_state(rest: &[char]) -> Option<bool> {
+    match rest {
+        [
+            '-' | '*' | '+',
+            ' ',
+            '[',
+            mark @ (' ' | 'x' | 'X'),
+            ']',
+            ' ',
+            ..,
+        ] => Some(*mark != ' '),
+        _ => None,
+    }
+}
+
+/// Marca o desmarca la tarea de `line`. Devuelve la línea nueva, o `None` si no es una
+/// tarea.
+pub fn toggle_task(line: &str) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let indent = chars
+        .iter()
+        .take_while(|c| **c == ' ' || **c == '\t')
+        .count();
+    let done = task_state(chars.get(indent..)?)?;
+    let mut out = chars;
+    *out.get_mut(indent + 3)? = if done { ' ' } else { 'x' };
+    Some(out.into_iter().collect())
 }
 
 /// Analiza una línea (sin el salto).
@@ -260,6 +298,16 @@ pub fn parse_line(line: &str) -> LineMarkup {
             style.hidden = true;
         }
         (Block::Heading(level), end)
+    } else if let Some(done) = task_state(chars.get(indent..).unwrap_or_default()) {
+        // «- [ ] »: se ve solo la casilla (en el «[») y el espacio que la sigue.
+        for (offset, style) in styles.iter_mut().skip(indent).take(5).enumerate() {
+            if offset == 2 {
+                style.checkbox = true;
+            } else {
+                style.hidden = true;
+            }
+        }
+        (Block::Task(done), indent + 6)
     } else if let ['-' | '*' | '+', ' ', ..] = chars.get(indent..).unwrap_or_default() {
         if let Some(style) = styles.get_mut(indent) {
             style.bullet = true;
@@ -402,6 +450,35 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_lines_show_a_checkbox() {
+        let markup = parse_line("  - [x] pan");
+        assert_eq!(markup.block, Block::Task(true));
+        assert_eq!(markup.prefix, 8);
+        let shown: String = "  - [x] pan"
+            .chars()
+            .zip(&markup.chars)
+            .filter(|(_, style)| !style.hidden)
+            .map(|(c, style)| if style.checkbox { '☑' } else { c })
+            .collect();
+        assert_eq!(shown, "  ☑ pan");
+        assert_eq!(parse_line("- [ ] a").block, Block::Task(false));
+        assert_eq!(parse_line("- [ ]a").block, Block::Bullet);
+        assert_eq!(parse_line("- [y] a").block, Block::Bullet);
+    }
+
+    #[test]
+    fn tasks_toggle_and_continue() {
+        assert_eq!(toggle_task("- [ ] pan").as_deref(), Some("- [x] pan"));
+        assert_eq!(toggle_task("  * [X] pan").as_deref(), Some("  * [ ] pan"));
+        assert_eq!(toggle_task("- pan"), None);
+        assert_eq!(
+            continue_list("- [x] pan"),
+            Some(ListContinuation::Continue("- [ ] ".to_owned()))
+        );
+        assert_eq!(continue_list("- [ ] "), Some(ListContinuation::End(6)));
+    }
 
     #[test]
     fn detects_markdown_being_typed() {

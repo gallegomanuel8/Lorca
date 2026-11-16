@@ -396,6 +396,11 @@ fn list_menu<'a>(state: BarState) -> Element<'a, Message> {
             state.list == Some(ListKind::Numbered),
         ),
         entry(
+            label("Lista de tareas"),
+            Some(ContextAction::List(ListKind::Task)),
+            state.list == Some(ListKind::Task),
+        ),
+        entry(
             label("Aumentar sangría"),
             state.in_list.then_some(ContextAction::IndentList(true)),
             false

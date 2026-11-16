@@ -24,6 +24,7 @@ pub use markup::{
 };
 pub use pdf::{FontFiles, PdfError, PdfFonts, markdown_to_pdf};
 pub use rich::{
-    Block, CharStyle, LineMarkup, ListContinuation, continue_list, parse_line, typed_markdown,
+    Block, CharStyle, LineMarkup, ListContinuation, continue_list, parse_line, toggle_task,
+    typed_markdown,
 };
 pub use sql::format_sql;

@@ -22,6 +22,8 @@ pub enum Inline {
 pub enum ListKind {
     Bullet,
     Numbered,
+    /// Lista de tareas (`- [ ] `).
+    Task,
 }
 
 /// Cambios que aplicar: sustituciones (rango de caracteres → texto) y la selección final.
@@ -308,6 +310,7 @@ pub fn toggle_list(text: &str, selection: Range<usize>, kind: ListKind) -> Marku
             match kind {
                 ListKind::Bullet => "- ".to_owned(),
                 ListKind::Numbered => format!("{number}. "),
+                ListKind::Task => "- [ ] ".to_owned(),
             }
         };
         delta += new_marker.chars().count() as isize - old_len as isize;
@@ -782,6 +785,7 @@ pub fn edit_table(text: &str, index: usize, edit: TableEdit) -> Option<MarkupEdi
 /// Marca de lista al principio de `rest` (ya sin sangría): tipo y longitud con el espacio.
 fn list_marker(rest: &[char]) -> Option<(ListKind, usize)> {
     match rest {
+        ['-' | '*' | '+', ' ', '[', ' ' | 'x' | 'X', ']', ' ', ..] => Some((ListKind::Task, 6)),
         ['-' | '*' | '+', ' ', ..] => Some((ListKind::Bullet, 2)),
         _ => {
             let digits = rest.iter().take_while(|c| c.is_ascii_digit()).count();
@@ -1003,6 +1007,10 @@ mod tests {
         let (text, _) = list("- uno\n  dos\n7. tres", 0..20, ListKind::Numbered);
         assert_eq!(text, "1. uno\n  2. dos\n3. tres");
         let (text, _) = list("1. uno\n2. dos", 0..13, ListKind::Numbered);
+        let (tasks, _) = list("- uno\ndos", 0..9, ListKind::Task);
+        assert_eq!(tasks, "- [ ] uno\n- [ ] dos");
+        let (plain, _) = list("- [x] uno\n- [ ] dos", 0..19, ListKind::Task);
+        assert_eq!(plain, "uno\ndos");
         assert_eq!(text, "uno\ndos");
         let (text, _) = list("1. uno\n2. dos", 0..13, ListKind::Bullet);
         assert_eq!(text, "- uno\n- dos");
