@@ -62,6 +62,7 @@ impl Inline {
 /// - Sin selección inserta las dos marcas con el cursor en medio.
 /// - Si la selección ya está rodeada por la marca (por fuera o por dentro), la quita.
 /// - Si no, la rodea con ella y deja seleccionado el mismo texto.
+/// - Si abarca varias líneas, se aplica línea a línea (ver `toggle_inline_lines`).
 pub fn toggle_inline(text: &str, selection: Range<usize>, style: Inline) -> MarkupEdit {
     let chars: Vec<char> = text.chars().collect();
     let start = selection.start.min(chars.len());
@@ -75,53 +76,177 @@ pub fn toggle_inline(text: &str, selection: Range<usize>, style: Inline) -> Mark
             selection: start + m..start + m,
         };
     }
+    if chars.get(start..end).unwrap_or_default().contains(&'\n') {
+        return toggle_inline_lines(&chars, start..end, style);
+    }
 
+    match existing_marks(&chars, start..end, style) {
+        Some(Marks::Outside) => MarkupEdit {
+            replacements: vec![
+                (start - m..start, String::new()),
+                (end..end + m, String::new()),
+            ],
+            selection: start - m..end - m,
+        },
+        Some(Marks::Inside { leading, trailing }) => MarkupEdit {
+            replacements: vec![
+                (start + leading - m..start + leading, String::new()),
+                (end - trailing..end - trailing + m, String::new()),
+            ],
+            selection: start..end - 2 * m,
+        },
+        None => MarkupEdit {
+            replacements: vec![
+                (start..start, marker.to_owned()),
+                (end..end, marker.to_owned()),
+            ],
+            selection: start + m..end + m,
+        },
+    }
+}
+
+/// Dónde están las marcas de un tramo que ya tiene el formato.
+#[derive(Debug, Clone, Copy)]
+enum Marks {
+    /// Justo antes y justo después del tramo.
+    Outside,
+    /// Dentro del tramo (se seleccionó «**texto**»): rachas del símbolo a cada lado.
+    Inside { leading: usize, trailing: usize },
+}
+
+/// ¿Tiene `range` (no vacío) ya el formato `style`? Las marcas más cercanas al texto.
+fn existing_marks(chars: &[char], range: Range<usize>, style: Inline) -> Option<Marks> {
     let symbol = style.symbol();
     let stars_before = chars
-        .get(..start)
+        .get(..range.start)
         .unwrap_or_default()
         .iter()
         .rev()
         .take_while(|&&c| c == symbol)
         .count();
     let stars_after = chars
-        .get(end..)
+        .get(range.end..)
         .unwrap_or_default()
         .iter()
         .take_while(|&&c| c == symbol)
         .count();
-    // Marcas alrededor de la selección: se quitan las más cercanas al texto.
     if style.present_in(stars_before) && style.present_in(stars_after) {
-        return MarkupEdit {
-            replacements: vec![
-                (start - m..start, String::new()),
-                (end..end + m, String::new()),
-            ],
-            selection: start - m..end - m,
-        };
+        return Some(Marks::Outside);
     }
-
-    let inner = chars.get(start..end).unwrap_or_default();
+    let inner = chars.get(range).unwrap_or_default();
     let leading = inner.iter().take_while(|&&c| c == symbol).count();
     let trailing = inner.iter().rev().take_while(|&&c| c == symbol).count();
-    // Marcas dentro de la selección (se seleccionó «**texto**»).
-    if leading + trailing < inner.len() && style.present_in(leading) && style.present_in(trailing) {
-        return MarkupEdit {
-            replacements: vec![
-                (start + leading - m..start + leading, String::new()),
-                (end - trailing..end - trailing + m, String::new()),
-            ],
-            selection: start..end - 2 * m,
-        };
+    (leading + trailing < inner.len() && style.present_in(leading) && style.present_in(trailing))
+        .then_some(Marks::Inside { leading, trailing })
+}
+
+/// Negrita, cursiva o tachado de una selección de varias líneas: cada línea con texto se
+/// marca por separado (unas marcas que crucen líneas no son Markdown válido), sin incluir
+/// la marca de bloque (título, lista, cita), la sangría ni los espacios de los extremos.
+/// Las líneas en blanco y las de imagen no se tocan. Si todas ya tienen el formato, se
+/// quita; si no, se pone en las que no lo tienen. La selección pasa a cubrir el texto
+/// con sus marcas nuevas.
+fn toggle_inline_lines(chars: &[char], selection: Range<usize>, style: Inline) -> MarkupEdit {
+    let marker = style.marker();
+    let m = marker.chars().count();
+
+    // Tramos de texto de cada línea dentro de la selección.
+    let mut segments = Vec::new();
+    let mut line_start = chars
+        .get(..selection.start)
+        .unwrap_or_default()
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |i| i + 1);
+    while line_start < selection.end {
+        let line_end = chars
+            .get(line_start..)
+            .unwrap_or_default()
+            .iter()
+            .position(|&c| c == '\n')
+            .map_or(chars.len(), |i| line_start + i);
+        let line = chars.get(line_start..line_end).unwrap_or_default();
+        let content = line_start + block_prefix_len(line);
+        let mut from = selection.start.max(content);
+        let mut to = selection.end.min(line_end);
+        while from < to && chars.get(from).is_some_and(|c| c.is_whitespace()) {
+            from += 1;
+        }
+        while to > from && chars.get(to - 1).is_some_and(|c| c.is_whitespace()) {
+            to -= 1;
+        }
+        let image = crate::parse_image(&line.iter().collect::<String>()).is_some();
+        if from < to && !image {
+            segments.push(from..to);
+        }
+        line_start = line_end + 1;
     }
 
-    MarkupEdit {
-        replacements: vec![
-            (start..start, marker.to_owned()),
-            (end..end, marker.to_owned()),
-        ],
-        selection: start + m..end + m,
+    let marks: Vec<Option<Marks>> = segments
+        .iter()
+        .map(|segment| existing_marks(chars, segment.clone(), style))
+        .collect();
+    let remove = !segments.is_empty() && marks.iter().all(Option::is_some);
+
+    let mut replacements = Vec::new();
+    for (segment, marks) in segments.iter().zip(&marks) {
+        let Range { start, end } = segment.clone();
+        match (remove, marks) {
+            (true, Some(Marks::Outside)) => {
+                replacements.push((start - m..start, String::new()));
+                replacements.push((end..end + m, String::new()));
+            }
+            (true, Some(Marks::Inside { leading, trailing })) => {
+                replacements.push((start + leading - m..start + leading, String::new()));
+                replacements.push((end - trailing..end - trailing + m, String::new()));
+            }
+            (false, None) => {
+                replacements.push((start..start, marker.to_owned()));
+                replacements.push((end..end, marker.to_owned()));
+            }
+            _ => {}
+        }
     }
+
+    // Posición de `index` tras los cambios. `inserted_at`: ¿cuenta lo insertado justo ahí?
+    let shift = |index: usize, inserted_at: bool| -> usize {
+        let mut position = index;
+        for (range, replacement) in &replacements {
+            let counts = if range.is_empty() {
+                range.start < index || (inserted_at && range.start == index)
+            } else {
+                range.end <= index
+            };
+            if counts {
+                position = (position + replacement.chars().count()).saturating_sub(range.len());
+            }
+        }
+        position
+    };
+    let start = shift(selection.start, false);
+    let end = shift(selection.end, true).max(start);
+    MarkupEdit {
+        replacements,
+        selection: start..end,
+    }
+}
+
+/// Caracteres del principio de `line` que no son texto: sangría, marca de título o de
+/// lista, cita (`> `).
+fn block_prefix_len(line: &[char]) -> usize {
+    let mut at = line
+        .iter()
+        .take_while(|c| **c == ' ' || **c == '\t')
+        .count();
+    while let ['>', rest @ ..] = line.get(at..).unwrap_or_default() {
+        at += 1 + usize::from(rest.first() == Some(&' '));
+    }
+    let rest = line.get(at..).unwrap_or_default();
+    let hashes = rest.iter().take_while(|&&c| c == '#').count();
+    if (1..=6).contains(&hashes) && matches!(rest.get(hashes), None | Some(' ')) {
+        return at + hashes + usize::from(rest.get(hashes).is_some());
+    }
+    at + list_marker(rest).map_or(0, |(_, len)| len)
 }
 
 /// Convierte en lista (o deja de serlo) las líneas que toca `selection`.
@@ -683,6 +808,40 @@ mod tests {
 
     fn inline(text: &str, selection: Range<usize>, style: Inline) -> (String, String) {
         apply(text, &toggle_inline(text, selection, style))
+    }
+
+    #[test]
+    fn inline_over_several_lines_marks_each_line() {
+        let text = "# me llamo manuel\n## cscesesc\n- zzzz\n\notra ";
+        let (bold, selected) = inline(text, 0..text.chars().count(), Inline::Bold);
+        assert_eq!(
+            bold,
+            "# **me llamo manuel**\n## **cscesesc**\n- **zzzz**\n\n**otra** "
+        );
+        assert_eq!(selected, bold);
+        // Otra vez: se quita.
+        let (plain, _) = inline(&bold, 0..bold.chars().count(), Inline::Bold);
+        assert_eq!(plain, text);
+
+        let (struck, _) = inline(text, 0..text.chars().count(), Inline::Strikethrough);
+        assert_eq!(
+            struck,
+            "# ~~me llamo manuel~~\n## ~~cscesesc~~\n- ~~zzzz~~\n\n~~otra~~ "
+        );
+    }
+
+    #[test]
+    fn inline_over_lines_respects_partial_selection_and_mixed_state() {
+        // Desde la mitad de la primera hasta la mitad de la segunda.
+        let (text, selected) = inline("uno dos\ntres cuatro", 4..12, Inline::Italic);
+        assert_eq!(text, "uno *dos*\n*tres* cuatro");
+        assert_eq!(selected, "*dos*\n*tres*");
+        // Una ya en negrita y otra no: se pone en la que falta.
+        let (text, _) = inline("**uno**\ndos", 0..11, Inline::Bold);
+        assert_eq!(text, "**uno**\n**dos**");
+        // Las imágenes y las citas.
+        let (text, _) = inline("> cita\n![foto](a.png)\nfin", 0..25, Inline::Bold);
+        assert_eq!(text, "> **cita**\n![foto](a.png)\n**fin**");
     }
 
     #[test]
