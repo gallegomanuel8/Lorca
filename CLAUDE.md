@@ -229,7 +229,8 @@ mensaje en español.
     la clave de la caché (`LineLayout::code`), y les pone fondo (también a las vallas,
     atenuadas). `rich_edit::markup` hace lo mismo para el cursor y las teclas.
     Tareas: `- [ ] texto` / `- [x]` (`Block::Task`, `ListKind::Task`): se ve una casilla
-    («☐»/«☑», en el `[`, `CharStyle::checkbox`); clic en ella (`State::task_box_at`) →
+    (en el `[`, `CharStyle::checkbox`: un espacio largo y la casilla dibujada con quads en
+    `draw_task_box`; los símbolos ☐/☑ salían de tamaños distintos); clic en ella (`State::task_box_at`) →
     `EditorAction::ToggleTask` (`lorca_formats::toggle_task`, misma longitud). Hechas,
     atenuadas. Intro continúa con `- [ ] `.
     Tamaño: `![descripción|300](ruta)` (como Obsidian; `ImageRef::width`, `set_image_width`).

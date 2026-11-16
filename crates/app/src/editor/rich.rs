@@ -505,8 +505,9 @@ fn build_line(
         }
         display.push(match (style.bullet, style.checkbox, markup.block) {
             (true, _, _) => '•',
-            (_, true, Block::Task(true)) => '☑',
-            (_, true, _) => '☐',
+            // Hueco para la casilla, que se dibuja aparte (`draw_task_box`): los símbolos
+            // ☐/☑ salen de tamaños distintos según la letra.
+            (_, true, _) => '\u{2003}',
             _ => c,
         });
     }
@@ -1290,6 +1291,9 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                         bounds,
                     );
                 }
+                if let Block::Task(done) = layout.markup.block {
+                    draw_task_box(renderer, state, line, origin, done, colors, bounds);
+                }
                 let at = Point::new(origin.x, origin.y + top + layout.text_top);
                 renderer.fill_paragraph(&layout.paragraph, at, colors.text, bounds);
                 // Tachado (por la mitad) y subrayado de los vínculos (abajo).
@@ -1533,6 +1537,75 @@ fn outline(renderer: &mut Renderer, rect: Rectangle, color: Color) {
         },
         color,
     );
+}
+
+/// Casilla de la tarea de `line` (en el hueco de su `[`): un cuadro con borde o, si está
+/// hecha, relleno del color de los vínculos con una marca.
+fn draw_task_box(
+    renderer: &mut Renderer,
+    state: &State,
+    line: usize,
+    origin: Point,
+    done: bool,
+    colors: &EditorColors,
+    clip: Rectangle,
+) {
+    let Some(layout) = state.lines.get(line) else {
+        return;
+    };
+    let Some(column) = layout.markup.chars.iter().position(|style| style.checkbox) else {
+        return;
+    };
+    let (Some(start), Some(end)) = (state.caret(line, column), state.caret(line, column + 1))
+    else {
+        return;
+    };
+    let side = (start.height * 0.62).min((end.x - start.x).max(start.height * 0.5));
+    let bounds = Rectangle {
+        x: origin.x + start.x + ((end.x - start.x) - side).max(0.0) / 2.0,
+        y: origin.y + start.y + (start.height - side) / 2.0,
+        width: side,
+        height: side,
+    };
+    renderer::Renderer::fill_quad(
+        renderer,
+        Quad {
+            bounds,
+            border: iced::Border {
+                color: if done {
+                    colors.bookmark
+                } else {
+                    colors.line_number
+                },
+                width: 1.5,
+                radius: (side * 0.22).into(),
+            },
+            ..Quad::default()
+        },
+        Background::Color(if done {
+            colors.bookmark
+        } else {
+            Color::TRANSPARENT
+        }),
+    );
+    if done {
+        renderer.fill_text(
+            Text {
+                content: "✓".to_owned(),
+                bounds: Size::new(side, side),
+                size: Pixels(side * 0.9),
+                line_height: text::LineHeight::Relative(1.0),
+                font: Font::default(),
+                align_x: text::Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: text::Shaping::Advanced,
+                wrapping: text::Wrapping::None,
+            },
+            bounds.center(),
+            colors.background,
+            clip,
+        );
+    }
 }
 
 /// Pinta el fondo de `range` (índices del documento) en la línea que empieza en
