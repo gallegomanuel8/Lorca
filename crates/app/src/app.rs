@@ -1,6 +1,7 @@
 //! Estado de la aplicación, mensajes y vista principal.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use iced::{
     Alignment, Element, Length, Point, Size, Subscription, Task, Theme, event, keyboard, system,
     window,
 };
+use lorca_core::TextStats;
 use lorca_formats::{PdfFonts, markdown_to_pdf};
 use lorca_search::SearchQuery;
 use lorca_syntax::{Highlights, Language, SyntaxError};
@@ -285,6 +287,9 @@ pub struct Lorca {
     tour_page: Option<usize>,
     /// Ventana «Acerca de» abierta (Windows y Linux; en macOS la da el sistema).
     about_open: bool,
+    /// Palabras y caracteres del texto activo: (documento, versión, selección, del
+    /// documento, de la selección). Se recalcula en `refresh_stats` solo si cambia algo.
+    stats: Option<(DocumentId, u64, Range<usize>, TextStats, TextStats)>,
     /// Temas disponibles (incluidos y del usuario) y el que se está mostrando.
     themes: ThemeSet,
     active_theme: ActiveTheme,
@@ -396,6 +401,7 @@ impl Lorca {
                 .then(|| config.theme.unwrap_or(ThemeMode::Auto)),
             tour_page: None,
             about_open: false,
+            stats: None,
             themes,
             active_theme,
             config,
@@ -546,6 +552,7 @@ impl Lorca {
         let task = self.handle(message);
         self.sync_panes();
         self.refresh_search();
+        self.refresh_stats();
         self.refresh_previews();
         self.refresh_wraps();
         self.refresh_theme();
@@ -2025,6 +2032,78 @@ impl Lorca {
         }
     }
 
+    /// Recuenta palabras y caracteres del documento activo si es de texto y cambió su
+    /// versión o la selección.
+    fn refresh_stats(&mut self) {
+        let Some(document) = self
+            .workspace
+            .active()
+            .filter(|document| is_prose(document.language()))
+        else {
+            self.stats = None;
+            return;
+        };
+        let id = document.id();
+        let version = document.editor.version();
+        let range = document.editor.selection().range();
+        if let Some((cached_id, cached_version, cached_range, total, selected)) = &mut self.stats
+            && *cached_id == id
+        {
+            if *cached_version != version {
+                *total = document.editor.buffer().stats(0..usize::MAX);
+            }
+            if *cached_version != version || *cached_range != range {
+                *selected = document.editor.buffer().stats(range.clone());
+            }
+            *cached_version = version;
+            *cached_range = range;
+            return;
+        }
+        let buffer = document.editor.buffer();
+        self.stats = Some((
+            id,
+            version,
+            range.clone(),
+            buffer.stats(0..usize::MAX),
+            buffer.stats(range),
+        ));
+    }
+
+    /// Texto del recuento para la barra de estado («120 palabras», o «12 de 120 palabras»
+    /// con selección), con los caracteres en la ayuda.
+    fn stats_label(&self) -> Option<(String, String)> {
+        let (id, _, range, total, selected) = self.stats.as_ref()?;
+        if self.workspace.active_id() != Some(*id) {
+            return None;
+        }
+        let plural = |n: usize, one: &str, many: &str| {
+            if n == 1 {
+                format!("{n} {one}")
+            } else {
+                format!("{n} {many}")
+            }
+        };
+        Some(if range.is_empty() {
+            (
+                plural(total.words, "palabra", "palabras"),
+                plural(total.chars, "carácter", "caracteres"),
+            )
+        } else {
+            (
+                format!(
+                    "{} de {}",
+                    selected.words,
+                    plural(total.words, "palabra", "palabras")
+                ),
+                format!(
+                    "{} de {}",
+                    selected.chars,
+                    plural(total.chars, "carácter", "caracteres")
+                ),
+            )
+        })
+    }
+
     fn status_bar(&self) -> Element<'_, Message> {
         let mut items: Vec<Element<'_, Message>> = Vec::new();
 
@@ -2097,6 +2176,18 @@ impl Lorca {
                 position.push_str(&format!(" ({selected} seleccionados)"));
             }
             let format = document.format();
+            if let Some((words, chars)) = self.stats_label() {
+                items.push(
+                    tooltip(
+                        text(words).size(12),
+                        container(text(chars).size(12))
+                            .padding(6)
+                            .style(container::rounded_box),
+                        tooltip::Position::Top,
+                    )
+                    .into(),
+                );
+            }
             items.push(text(position).size(12).into());
             // Zoom de la pestaña; un clic lo devuelve al 100 % (como ⌘0).
             let size = document

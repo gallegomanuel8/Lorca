@@ -261,6 +261,10 @@ mensaje en español.
     evita abrir dos. Las confirmaciones («¿Guardar los cambios?», «Archivo cambiado en
     disco») son propias: `prompt.rs` (`Prompt` en `Lorca::prompt`, dibujada encima de todo
     con `stack` + `opaque`; Intro = `Message::PromptAccept`, Escape = cancelar).
+  - Barra de estado de los textos (texto plano y con formato): palabras (y caracteres en la
+    ayuda), o «N de M» con selección. `lorca_core::TextStats` (`Buffer::stats`; una palabra
+    necesita alguna letra o cifra, así `#` o `-` sueltos no cuentan), recalculado en
+    `refresh_stats` solo si cambian la versión o la selección (`Lorca::stats`).
   - Sesión: cualquier mensaje que la afecte marca `session_dirty`; un `time::every`
     (ejecutor smol) la guarda 300 ms tras el último cambio o cada 2 s como máximo, y al
     cerrar la ventana. Cerrar la app no pregunta; si no se puede guardar la sesión, vuelve
