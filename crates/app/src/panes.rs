@@ -143,6 +143,7 @@ impl Lorca {
                 move |action| Message::Editor(id, action),
             )
             .highlights(highlights)
+            .decorations(&decorations)
             .into();
             return editor;
         }

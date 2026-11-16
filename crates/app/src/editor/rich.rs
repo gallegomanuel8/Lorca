@@ -20,6 +20,7 @@
 //! sobre un fondo propio y con el resaltado del documento (las gramáticas de Markdown
 //! inyectan la del lenguaje del bloque).
 
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use iced::advanced::graphics::text::cosmic_text;
@@ -43,7 +44,7 @@ use lorca_syntax::{Highlights, StyledSpan};
 
 use super::keymap::{KeyCommand, map_key};
 use super::palette::EditorColors;
-use super::{ClickKind, DocView, EditorAction, Metrics, Viewport};
+use super::{ClickKind, Decorations, DocView, EditorAction, Metrics, Viewport};
 
 type Paragraph = <Renderer as text::Renderer>::Paragraph;
 
@@ -88,6 +89,9 @@ pub fn rich_editor<'a, Message>(
         colors,
         metrics,
         highlights: None,
+        matches: &[],
+        current_match: None,
+        marks: &[],
         on_action: Box::new(on_action),
     }
 }
@@ -96,6 +100,14 @@ impl<'a, Message> RichEditor<'a, Message> {
     /// Resaltado del documento, para colorear los bloques de código.
     pub fn highlights(mut self, highlights: Option<&'a Highlights>) -> Self {
         self.highlights = highlights;
+        self
+    }
+
+    /// Coincidencias de la búsqueda (la actual, más marcada) y de «Marcar».
+    pub fn decorations(mut self, decorations: &Decorations<'a>) -> Self {
+        self.matches = decorations.matches;
+        self.current_match = decorations.current;
+        self.marks = decorations.marks;
         self
     }
 }
@@ -111,6 +123,10 @@ pub struct RichEditor<'a, Message> {
     /// Resaltado del documento (para los bloques de código); puede ir una versión por
     /// detrás.
     highlights: Option<&'a Highlights>,
+    /// Coincidencias de la búsqueda y de «Marcar» (como en el editor de código).
+    matches: &'a [Range<usize>],
+    current_match: Option<usize>,
+    marks: &'a [Range<usize>],
     on_action: Box<dyn Fn(EditorAction) -> Message + 'a>,
 }
 
@@ -1229,44 +1245,42 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
                         },
                     );
                 }
+                let line_end = line_start + line_len;
+                // Coincidencias de «Marcar» y de la búsqueda (debajo de la selección).
+                let current = self.current_match.and_then(|index| self.matches.get(index));
+                for (ranges, color) in [(self.marks, colors.mark), (self.matches, colors.found)] {
+                    let first = ranges.partition_point(|range| range.end < line_start);
+                    for range in ranges.iter().skip(first) {
+                        if range.start > line_end {
+                            break;
+                        }
+                        let color = if Some(range) == current {
+                            colors.found_current
+                        } else {
+                            color
+                        };
+                        fill_columns(
+                            renderer, layout, origin, *top, line_start, range, false, color,
+                        );
+                    }
+                }
                 // Selecciones que tocan la línea.
                 for selection in selections {
                     let range = selection.range();
-                    if range.is_empty()
-                        || range.end < line_start
-                        || range.start > line_start + line_len
-                    {
+                    if range.is_empty() || range.end < line_start || range.start > line_end {
                         continue;
                     }
-                    let from = range.start.saturating_sub(line_start).min(line_len);
-                    let to = (range.end - line_start).min(line_len);
-                    let b0 = layout.col_byte.get(from).copied().unwrap_or(0);
-                    let b1 = layout.col_byte.get(to).copied().unwrap_or(0);
-                    let continues = range.end > line_start + line_len;
-                    for run in layout.paragraph.buffer().layout_runs() {
-                        let highlight = run.highlight(
-                            cosmic_text::Cursor::new(0, b0),
-                            cosmic_text::Cursor::new(0, b1),
-                        );
-                        let (x, mut w) = match highlight {
-                            Some(found) => found,
-                            None if b0 == b1 && continues => (run.line_w, 0.0),
-                            None => continue,
-                        };
-                        if continues {
-                            w += 6.0;
-                        }
-                        fill(
-                            renderer,
-                            Rectangle {
-                                x: origin.x + x,
-                                y: origin.y + top + layout.text_top + run.line_top,
-                                width: w,
-                                height: run.line_height,
-                            },
-                            colors.selection,
-                        );
-                    }
+                    let continues = range.end > line_end;
+                    fill_columns(
+                        renderer,
+                        layout,
+                        origin,
+                        *top,
+                        line_start,
+                        &range,
+                        continues,
+                        colors.selection,
+                    );
                 }
                 let resizing = state.image_resize.as_ref().is_some_and(|r| r.line == line);
                 if let Some(image) = layout.image.as_ref().filter(|_| !resizing) {
@@ -1519,6 +1533,54 @@ fn outline(renderer: &mut Renderer, rect: Rectangle, color: Color) {
         },
         color,
     );
+}
+
+/// Pinta el fondo de `range` (índices del documento) en la línea que empieza en
+/// `line_start`. Con `continues` (la selección sigue en la línea siguiente) se alarga un
+/// poco tras el final.
+#[allow(clippy::too_many_arguments)]
+fn fill_columns(
+    renderer: &mut Renderer,
+    layout: &LineLayout,
+    origin: Point,
+    top: f32,
+    line_start: usize,
+    range: &Range<usize>,
+    continues: bool,
+    color: Color,
+) {
+    let line_len = layout.text.chars().count();
+    let from = range.start.saturating_sub(line_start).min(line_len);
+    let to = range.end.saturating_sub(line_start).min(line_len);
+    if from == to && !continues {
+        return;
+    }
+    let b0 = layout.col_byte.get(from).copied().unwrap_or(0);
+    let b1 = layout.col_byte.get(to).copied().unwrap_or(0);
+    for run in layout.paragraph.buffer().layout_runs() {
+        let highlight = run.highlight(
+            cosmic_text::Cursor::new(0, b0),
+            cosmic_text::Cursor::new(0, b1),
+        );
+        let (x, mut w) = match highlight {
+            Some(found) => found,
+            None if b0 == b1 && continues => (run.line_w, 0.0),
+            None => continue,
+        };
+        if continues {
+            w += 6.0;
+        }
+        fill(
+            renderer,
+            Rectangle {
+                x: origin.x + x,
+                y: origin.y + top + layout.text_top + run.line_top,
+                width: w,
+                height: run.line_height,
+            },
+            color,
+        );
+    }
 }
 
 fn fill(renderer: &mut Renderer, bounds: Rectangle, color: Color) {

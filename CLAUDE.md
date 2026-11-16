@@ -184,8 +184,9 @@ mensaje en español.
     `DocView::rich_height`, que desactiva el cálculo por filas). `editor/rich_edit.rs`:
     ←/→ saltan las marcas, Retroceso al principio de viñeta o título quita la marca, Intro
     continúa listas y el cursor nunca queda dentro de una marca (`snap_cursor`). Análisis
-    de cada línea en `lorca_formats::parse_line`. Sin números de línea ni resaltado de
-    búsqueda en este modo; la barra de desplazamiento es solo indicador.
+    de cada línea en `lorca_formats::parse_line`. Sin números de línea en este modo;
+    la barra de desplazamiento es solo indicador. Las coincidencias de la búsqueda y de
+    «Marcar» se pintan como en el de código (`RichEditor::decorations`, `fill_columns`).
   - Imágenes (solo en texto con formato): una línea con solo `![descripción](ruta)`
     (`lorca_formats::parse_image`, `Block::Image`) se dibuja como la imagen (ajustada al
     ancho, sin agrandarla; `LineImage`, cargada con `Renderer::load_image`) con la
