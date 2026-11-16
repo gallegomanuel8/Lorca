@@ -791,12 +791,16 @@ impl Lorca {
                 };
                 let text = document.editor.text();
                 let title = document.display_name();
+                let source = document.path().map(PathBuf::from);
                 self.show_info("Generando el PDF…".to_owned());
                 Task::perform(
                     async move {
                         let fonts = PdfFonts::system().map_err(|e| e.to_string())?;
-                        let pdf =
-                            markdown_to_pdf(&text, &title, &fonts).map_err(|e| e.to_string())?;
+                        let resolve = |target: &str| {
+                            lorca_workspace::resolve_image(source.as_deref(), target)
+                        };
+                        let pdf = markdown_to_pdf(&text, &title, &fonts, &resolve)
+                            .map_err(|e| e.to_string())?;
                         std::fs::write(&path, pdf).map_err(|e| e.to_string())?;
                         Ok(path)
                     },

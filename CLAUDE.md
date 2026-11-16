@@ -197,8 +197,12 @@ mensaje en español.
     (`lorca_formats::set_image_target`, una transacción). Al arrancar,
     tras restaurar la sesión, `Workspace::clean_scratch_images` borra las que ningún
     documento enlaza (no antes: deshacer podría volver a necesitarlas). Sin carpeta de datos,
-    el documento se guarda antes (`Then::InsertImages`, `Lorca::pending_images`). El PDF aún
-    no incluye las imágenes.
+    el documento se guarda antes (`Then::InsertImages`, `Lorca::pending_images`). El PDF las
+    incluye (`markdown_to_pdf` recibe una función que resuelve las rutas; las líneas de imagen
+    se sustituyen por una marca antes de pulldown-cmark, `extract_images`), con su ancho
+    (`|300` a 96 ppp), sin transparencia (genpdf no la admite: sobre blanco) y reducidas a
+    150 ppp. Usa `image` 0.23 (`image023`), el que pide genpdf; printpdf solo comprime las
+    imágenes en release.
     Clic en una imagen: selecciona su línea con el salto (`EditorAction::SelectRange`, cursor
     al principio para que `snap_cursor` no lo lleve a la línea siguiente) y se ve un marco.
     Arrastrarla (`ImageDrag` en el estado del widget) muestra una raya en el hueco de destino

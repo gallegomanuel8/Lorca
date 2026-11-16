@@ -6,7 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-genpdf = "0.2.0"
+genpdf = { version = "0.2.0", features = ["images"] }
+image023 = { version = "0.23", package = "image", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 pulldown-cmark = "0.13.6"
 serde = "1.0.229"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
