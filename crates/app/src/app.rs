@@ -1354,6 +1354,14 @@ impl Lorca {
             }
             _ => None,
         };
+        // Escribir marcas de Markdown en una nota nueva de texto plano la convierte en texto
+        // con formato (como dar formato con la barra). Los archivos `.txt` siguen siendo
+        // texto plano: en ellos un guion o un número al principio son solo texto.
+        let may_adopt = matches!(&action, EditorAction::Insert(text) if text.chars().count() == 1)
+            && document.language() == Language::PlainText
+            && document.path().is_none()
+            && !document.is_language_manual()
+            && document.editor.selections().len() == 1;
         let result = match rich
             .then(|| editor::rich_edit::apply(&action, &mut document.editor))
             .flatten()
@@ -1368,11 +1376,24 @@ impl Lorca {
             view.reveal_cursor(&document.editor, view.viewport);
         }
         document.refresh_language();
+        let mut adopted = false;
+        if may_adopt && result.is_ok() {
+            let cursor = document.editor.cursor();
+            let line = document.editor.buffer().line_text(cursor.line);
+            let before: String = line.chars().take(cursor.column).collect();
+            if lorca_formats::typed_markdown(&before) {
+                document.adopt_markdown();
+                adopted = document.language() == Language::Markdown;
+            }
+        }
         if let Some(pasted) = pasted
             && result.is_ok()
             && let Some(language) = document.guess_language_from_paste(&pasted)
         {
             self.show_info(format!("Lenguaje detectado: {language}"));
+        }
+        if adopted {
+            self.show_info("Ahora es texto con formato".to_owned());
         }
         if let Err(error) = result {
             self.show_error(error.to_string());

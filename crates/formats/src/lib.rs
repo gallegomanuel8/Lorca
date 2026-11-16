@@ -23,5 +23,7 @@ pub use markup::{
     indent_list, insert_link, insert_table, is_list_item, set_heading, toggle_inline, toggle_list,
 };
 pub use pdf::{FontFiles, PdfError, PdfFonts, markdown_to_pdf};
-pub use rich::{Block, CharStyle, LineMarkup, ListContinuation, continue_list, parse_line};
+pub use rich::{
+    Block, CharStyle, LineMarkup, ListContinuation, continue_list, parse_line, typed_markdown,
+};
 pub use sql::format_sql;

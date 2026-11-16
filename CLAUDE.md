@@ -162,7 +162,10 @@ mensaje en español.
   - Tres tipos de documento: **texto plano** (tal cual, sin ajuste de línea), **texto con
     formato** (Markdown; `Language::name` es «Texto con formato») y código. Dar formato a
     un texto plano lo convierte en texto con formato (`Document::adopt_markdown`) y al
-    guardar se propone `.md`.
+    guardar se propone `.md`. También escribir marcas en una nota nueva (sin ruta) de texto
+    plano: `# `, `- `, `1. ` recién empezados o `**texto**`, `~~texto~~` recién cerrados
+    (`lorca_formats::typed_markdown`, en `apply_editor_action` tras cada carácter tecleado).
+    Los `.txt` no cambian.
   - Texto con formato (WYSIWYG, salvo `Config::show_markdown_markers`, «Ver → Mostrar marcas
     de Markdown»): `editor/rich.rs` sustituye al editor de código en los documentos
     Markdown (`Lorca::is_rich`). Cada línea es un `Paragraph` de iced (spans con letra proporcional

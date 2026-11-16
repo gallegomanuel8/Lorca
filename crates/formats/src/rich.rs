@@ -140,6 +140,47 @@ impl LineMarkup {
     }
 }
 
+/// ¿Acaba de escribirse formato de Markdown? `before` es la línea hasta el cursor, justo
+/// después de teclear: un título (`# `), una viñeta (`- `, `* `, `+ `), un número (`1. `)
+/// recién empezados, o una negrita (`**texto**`) o un tachado (`~~texto~~`) recién
+/// cerrados. Sirve para que un texto plano nuevo pase a texto con formato al escribirlo.
+pub fn typed_markdown(before: &str) -> bool {
+    let rest = before.trim_start_matches([' ', '\t']);
+    let Some(marker) = rest.strip_suffix(' ') else {
+        return closed_inline(before, "**") || closed_inline(before, "~~");
+    };
+    let hashes = marker.chars().take_while(|&c| c == '#').count();
+    if (1..=6).contains(&hashes) && hashes == marker.chars().count() {
+        return true;
+    }
+    if matches!(marker, "-" | "*" | "+") {
+        return true;
+    }
+    let digits = marker.chars().take_while(char::is_ascii_digit).count();
+    digits > 0 && digits < 4 && matches!(marker.get(digits..), Some(".") | Some(")"))
+}
+
+/// ¿Acaba `before` en `mark` cerrando un tramo `mark` + texto + `mark` (sin espacios junto
+/// a las marcas)?
+fn closed_inline(before: &str, mark: &str) -> bool {
+    let Some(head) = before.strip_suffix(mark) else {
+        return false;
+    };
+    let symbol = mark.chars().next().unwrap_or('*');
+    if head.ends_with(symbol) || head.ends_with(char::is_whitespace) {
+        return false;
+    }
+    let Some(open) = head.rfind(mark) else {
+        return false;
+    };
+    let inner = &head[open + mark.len()..];
+    let before_open = &head[..open];
+    !inner.is_empty()
+        && !inner.starts_with(char::is_whitespace)
+        && !inner.starts_with(symbol)
+        && !before_open.ends_with(symbol)
+}
+
 /// Qué hacer al pulsar Intro al final de un elemento de lista.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListContinuation {
@@ -361,6 +402,40 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_markdown_being_typed() {
+        for typed in [
+            "# ",
+            "### ",
+            "- ",
+            "  * ",
+            "1. ",
+            "12) ",
+            "hola **mundo**",
+            "~~no~~",
+        ] {
+            assert!(typed_markdown(typed), "{typed:?}");
+        }
+        for typed in [
+            "#",
+            "####### ",
+            "#a ",
+            "hola ",
+            "- a ",
+            "1234. ",
+            "a. ",
+            "2 * 3 ",
+            "**",
+            "** a**",
+            "**a **",
+            "****",
+            "a ~~ b ~~",
+            "uno*",
+        ] {
+            assert!(!typed_markdown(typed), "{typed:?}");
+        }
+    }
 
     #[test]
     fn style_for_the_format_bar() {
