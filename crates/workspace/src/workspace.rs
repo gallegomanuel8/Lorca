@@ -328,26 +328,31 @@ impl Workspace {
             .documents
             .get_mut(&id)
             .ok_or(WorkspaceError::UnknownDocument(id))?;
-        // Las imágenes del texto con formato se van con el documento a su carpeta.
-        if matches!(
+        // Las imágenes del texto con formato se van con el documento a su carpeta. Los
+        // enlaces se cambian en el editor solo si se pudo escribir: si no, el documento
+        // seguiría en su ruta anterior con enlaces pensados para la nueva.
+        let text = document.editor.text();
+        let replacements = if matches!(
             document.language(),
             Language::PlainText | Language::Markdown
         ) {
-            let replacements = relocate_images(
-                &document.editor.text(),
-                document.path(),
-                path,
-                self.scratch_images.as_deref(),
-            )?;
-            if !replacements.is_empty() {
-                document.editor.replace_ranges(&replacements)?;
-            }
-        }
-        let bytes = save_bytes(&document.editor.text(), document.format())?;
+            relocate_images(&text, document.path(), path, self.scratch_images.as_deref())?
+        } else {
+            Vec::new()
+        };
+        let text = if replacements.is_empty() {
+            text
+        } else {
+            apply_replacements(&text, &replacements)
+        };
+        let bytes = save_bytes(&text, document.format())?;
         std::fs::write(path, bytes).map_err(|source| WorkspaceError::Write {
             path: path.to_owned(),
             source,
         })?;
+        if !replacements.is_empty() {
+            document.editor.replace_ranges(&replacements)?;
+        }
         document.mark_saved(normalize_path(path));
         Ok(())
     }
@@ -470,6 +475,21 @@ impl Workspace {
 /// Ruta absoluta y canónica si existe; si no, la ruta tal cual.
 fn normalize_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// `text` con las sustituciones (rangos de caracteres, ordenados y sin solapes) hechas.
+fn apply_replacements(text: &str, replacements: &[(std::ops::Range<usize>, String)]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    let mut at = 0;
+    for (range, replacement) in replacements {
+        out.extend(chars.by_ref().take(range.start.saturating_sub(at)));
+        chars.by_ref().take(range.len()).for_each(drop);
+        out.push_str(replacement);
+        at = range.end;
+    }
+    out.extend(chars);
+    out
 }
 
 #[cfg(test)]
@@ -779,6 +799,38 @@ mod tests {
         // Ya nadie enlaza la copia temporal: se borra al limpiar.
         ws.clean_scratch_images();
         assert!(!pasted.exists());
+    }
+
+    #[test]
+    fn failed_save_keeps_the_image_links() {
+        let data = tempfile::tempdir().unwrap();
+        let scratch = crate::scratch_images_dir(data.path());
+        let pixels = [255_u8, 0, 0, 255].repeat(4);
+        let pasted = crate::save_scratch_png(&scratch, 2, 2, &pixels).unwrap();
+        let mut ws = Workspace::new();
+        ws.set_scratch_images(scratch);
+        let id = ws.new_document();
+        let line = format!(
+            "![imagen-1]({})\n",
+            crate::image_target(Path::new("/"), &pasted)
+        );
+        ws.active_mut().unwrap().editor.insert_text(&line).unwrap();
+
+        // Una carpeta con el nombre del archivo: no se puede escribir.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notas.md");
+        std::fs::create_dir(&path).unwrap();
+        assert!(ws.save_as(id, &path).is_err());
+        assert_eq!(ws.document(id).unwrap().editor.text(), line);
+        assert!(ws.document(id).unwrap().path().is_none());
+    }
+
+    #[test]
+    fn replacements_apply_by_characters() {
+        let text = "año\nuno\ndós";
+        let edits = [(0..3, "AÑO".to_owned()), (8..11, "x".to_owned())];
+        assert_eq!(apply_replacements(text, &edits), "AÑO\nuno\nx");
+        assert_eq!(apply_replacements(text, &[]), text);
     }
 
     #[test]
