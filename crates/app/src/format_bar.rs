@@ -43,8 +43,14 @@ pub struct BarState {
     pub heading: Option<u8>,
     /// El cursor está en un elemento de lista (se puede cambiar la sangría).
     pub in_list: bool,
+    /// Tipo de la lista de la línea del cursor (lo que la barra muestra activo).
+    pub list: Option<ListKind>,
     /// El cursor está en una tabla (se puede modificar).
     pub in_table: bool,
+    /// La selección (o el texto junto al cursor) tiene ese formato: el botón se ve pulsado.
+    pub bold: bool,
+    pub italic: bool,
+    pub strike: bool,
 }
 
 /// Tamaño de la cuadrícula de «Insertar tabla».
@@ -123,6 +129,20 @@ fn tool_style(theme: &Theme, status: button::Status) -> button::Style {
     style
 }
 
+/// Estilo de un botón de la barra que puede verse pulsado (`active`: el formato está
+/// puesto donde está el cursor).
+fn toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let mut style = tool_style(theme, status);
+        if active && status != button::Status::Disabled {
+            let palette = theme.extended_palette();
+            style.background = Some(palette.primary.weak.color.into());
+            style.text_color = palette.primary.weak.text;
+        }
+        style
+    }
+}
+
 /// Botón que aplica `action` al pulsarlo.
 fn tool<'a>(
     content: impl Into<Element<'a, Message>>,
@@ -130,28 +150,54 @@ fn tool<'a>(
     action: ContextAction,
     enabled: bool,
 ) -> Element<'a, Message> {
+    toggle_tool(content, label, action, enabled, false)
+}
+
+/// Botón de formato que se ve pulsado si `active`.
+fn toggle_tool<'a>(
+    content: impl Into<Element<'a, Message>>,
+    label: String,
+    action: ContextAction,
+    enabled: bool,
+    active: bool,
+) -> Element<'a, Message> {
     tip(
         button(content)
             .padding([4, 7])
-            .style(tool_style)
+            .style(toggle_style(active))
             .on_press_maybe(enabled.then_some(Message::Context(action))),
         label,
     )
 }
 
-/// Botón que abre un desplegable bajo él.
+/// Botón que abre un desplegable bajo él (con fondo si `active`: la línea del cursor ya
+/// tiene ese formato).
 fn menu_tool<'a>(
     content: Element<'a, Message>,
     label: &str,
     menu: FormatMenu,
     enabled: bool,
+    active: bool,
 ) -> Element<'a, Message> {
     let content = row![content, icon(CHEVRON, 12.0, enabled)]
         .spacing(3)
         .align_y(Alignment::Center);
     // Contenedor y no botón: `anchor_area` necesita recibir el clic para saber dónde
     // abrir el desplegable.
-    let area = container(content).padding([4, 7]);
+    let area = container(content)
+        .padding([4, 7])
+        .style(move |theme: &Theme| {
+            let mut style = container::Style::default();
+            if active && enabled {
+                style = style
+                    .background(theme.extended_palette().primary.weak.color)
+                    .border(Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    });
+            }
+            style
+        });
     let area: Element<'a, Message> = if enabled {
         anchor_area(
             mouse_area(area).interaction(iced::mouse::Interaction::Pointer),
@@ -196,31 +242,36 @@ pub fn bar<'a>(state: BarState, background: fn(&Theme) -> Color) -> Element<'a, 
             "Encabezado",
             FormatMenu::Heading,
             enabled,
+            state.heading.is_some(),
         ),
         menu_tool(
             icon(LIST, 16.0, enabled),
             "Listas",
             FormatMenu::List,
-            enabled
+            enabled,
+            state.list.is_some(),
         ),
         separator(),
-        tool(
+        toggle_tool(
             text("B").size(15).font(font(Weight::Bold, Style::Normal)),
             with_keys("Negrita", keys::BOLD),
             ContextAction::Inline(Inline::Bold),
             enabled,
+            state.bold,
         ),
-        tool(
+        toggle_tool(
             text("I").size(15).font(font(Weight::Normal, Style::Italic)),
             with_keys("Cursiva", keys::ITALIC),
             ContextAction::Inline(Inline::Italic),
             enabled,
+            state.italic,
         ),
-        tool(
+        toggle_tool(
             rich_text![span::<(), _>("S").strikethrough(true)].size(15),
             "Tachado".to_owned(),
             ContextAction::Inline(Inline::Strikethrough),
             enabled,
+            state.strike,
         ),
         tool(
             icon(LINK, 16.0, enabled),
@@ -238,7 +289,8 @@ pub fn bar<'a>(state: BarState, background: fn(&Theme) -> Color) -> Element<'a, 
             icon(TABLE, 16.0, enabled),
             "Tabla",
             FormatMenu::Table,
-            enabled
+            enabled,
+            state.in_table,
         ),
         separator(),
         tool(
@@ -336,12 +388,12 @@ fn list_menu<'a>(state: BarState) -> Element<'a, Message> {
         entry(
             label("Lista con viñetas"),
             Some(ContextAction::List(ListKind::Bullet)),
-            false
+            state.list == Some(ListKind::Bullet),
         ),
         entry(
             label("Lista numerada"),
             Some(ContextAction::List(ListKind::Numbered)),
-            false
+            state.list == Some(ListKind::Numbered),
         ),
         entry(
             label("Aumentar sangría"),

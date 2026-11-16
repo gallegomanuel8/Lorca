@@ -93,7 +93,10 @@ mensaje en español.
   teñidos con el tema). Desplegables propios (`FormatPopup` en `Lorca::format_popup`,
   abiertos con `anchor_area` y dibujados con `stack` + `pin`): encabezado (Título…Cuerpo,
   cada uno a su tamaño), listas (+ sangría, `indent_list`) y tabla (cuadrícula 5×5,
-  `insert_table`; «Modificar tabla» con `edit_table`). Siempre visible; desactivada fuera
+  `insert_table`; «Modificar tabla» con `edit_table`). Los botones se ven pulsados con el
+  formato de la selección o del cursor (`Lorca::bar_state` → `BarState`, con
+  `LineMarkup::style_in`: sin selección, el carácter visible anterior). Con varias líneas
+  seleccionadas, negrita/cursiva/tachado se ponen línea a línea (`toggle_inline_lines`). Siempre visible; desactivada fuera
   de texto y Markdown. El ajuste de línea se aplica
   también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`

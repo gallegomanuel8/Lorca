@@ -101,6 +101,45 @@ impl LineMarkup {
     }
 }
 
+impl LineMarkup {
+    /// Formato de `range` (columnas de la línea) para marcar los botones de la barra: con
+    /// selección, lo que tienen todos sus caracteres visibles; sin ella, el del carácter
+    /// visible anterior (el que se continúa al escribir) o, al principio, el siguiente.
+    /// `None` si no hay ningún carácter visible que mirar.
+    pub fn style_in(&self, range: std::ops::Range<usize>) -> Option<CharStyle> {
+        let visible = |index: &usize| {
+            *index >= self.prefix && self.chars.get(*index).is_some_and(|style| !style.hidden)
+        };
+        let end = range.end.min(self.chars.len());
+        let start = range.start.min(end);
+        if start < end {
+            let mut chars = (start..end)
+                .filter(visible)
+                .filter_map(|i| self.chars.get(i));
+            let first = *chars.next()?;
+            return Some(chars.fold(first, |all, style| CharStyle {
+                bold: all.bold && style.bold,
+                italic: all.italic && style.italic,
+                strike: all.strike && style.strike,
+                code: all.code && style.code,
+                link: all.link && style.link,
+                ..CharStyle::default()
+            }));
+        }
+        let index = (0..start)
+            .rev()
+            .find(visible)
+            .or_else(|| (start..self.chars.len()).find(visible));
+        index
+            .and_then(|i| self.chars.get(i))
+            .map(|style| CharStyle {
+                hidden: false,
+                bullet: false,
+                ..*style
+            })
+    }
+}
+
 /// Qué hacer al pulsar Intro al final de un elemento de lista.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListContinuation {
@@ -322,6 +361,24 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn style_for_the_format_bar() {
+        let markup = parse_line("# uno **dos** ~~tres~~");
+        // Cursor tras «dos» (antes de las marcas de cierre o después): negrita.
+        let bold = |range| markup.style_in(range).is_some_and(|style| style.bold);
+        assert!(bold(11..11));
+        assert!(bold(13..13));
+        // Al principio del texto del título: el carácter siguiente.
+        assert!(!bold(2..2));
+        assert!(!bold(0..0));
+        // Selección: todos los caracteres visibles.
+        assert!(bold(6..13));
+        assert!(!bold(2..13));
+        assert!(markup.style_in(16..20).is_some_and(|style| style.strike));
+        assert_eq!(markup.style_in(0..2), None);
+        assert_eq!(parse_line("").style_in(0..0), None);
+    }
 
     #[test]
     fn image_lines_only_show_their_description() {

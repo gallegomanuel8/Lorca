@@ -1814,12 +1814,47 @@ impl Lorca {
             return format_bar::BarState::default();
         };
         let editor = &document.editor;
-        let line = editor.buffer().line_text(editor.cursor().line);
+        let buffer = editor.buffer();
+        let line = buffer.line_text(editor.cursor().line);
+        // Formato de la selección (o del cursor): lo que comparten todas sus líneas con
+        // texto visible. Con selecciones enormes solo se miran las primeras líneas.
+        let range = editor.selection().range();
+        let first = buffer.char_to_line(range.start);
+        let last = buffer.char_to_line(range.end).min(first + 200);
+        let style = (first..=last)
+            .filter_map(|index| {
+                let start = buffer.line_start(index);
+                let len = buffer.line_len(index);
+                let from = range.start.saturating_sub(start).min(len);
+                let to = range.end.saturating_sub(start).min(len);
+                // Sin selección se mira el cursor; una línea de una selección que no toca
+                // texto (acaba al principio de una línea) no cuenta.
+                if from == to && !range.is_empty() {
+                    return None;
+                }
+                lorca_formats::parse_line(&buffer.line_text(index)).style_in(from..to)
+            })
+            .reduce(|all, style| lorca_formats::CharStyle {
+                bold: all.bold && style.bold,
+                italic: all.italic && style.italic,
+                strike: all.strike && style.strike,
+                ..lorca_formats::CharStyle::default()
+            })
+            .unwrap_or_default();
+        let list = match lorca_formats::parse_line(&line).block {
+            lorca_formats::Block::Bullet => Some(lorca_formats::ListKind::Bullet),
+            lorca_formats::Block::Numbered => Some(lorca_formats::ListKind::Numbered),
+            _ => None,
+        };
         format_bar::BarState {
             enabled: true,
             heading: lorca_formats::heading_level(&line),
             in_list: lorca_formats::is_list_item(&line),
+            list,
             in_table: line.trim_start().starts_with('|'),
+            bold: style.bold,
+            italic: style.italic,
+            strike: style.strike,
         }
     }
 
