@@ -166,6 +166,12 @@ mensaje en español.
     plano: `# `, `- `, `1. ` recién empezados o `**texto**`, `~~texto~~` recién cerrados
     (`lorca_formats::typed_markdown`, en `apply_editor_action` tras cada carácter tecleado).
     Los `.txt` no cambian.
+  - Pegar HTML (de una web o un procesador de textos) en un texto con formato o en una nota
+    nueva de texto plano: `Lorca::formatted_paste` lee el HTML con `arboard` y lo pega como
+    Markdown (`lorca_formats::html_to_markdown`, crate `htmd`; el tachado con un manejador
+    propio, la cursiva `_x_` pasa a `*x*`, sin imágenes ni scripts). Solo si el HTML tiene
+    etiquetas de formato (`FORMAT_TAGS`): el de los editores de código (`div`/`span`) se
+    pega como texto.
   - Texto con formato (WYSIWYG, salvo `Config::show_markdown_markers`, «Ver → Mostrar marcas
     de Markdown»): `editor/rich.rs` sustituye al editor de código en los documentos
     Markdown (`Lorca::is_rich`). Cada línea es un `Paragraph` de iced (spans con letra proporcional

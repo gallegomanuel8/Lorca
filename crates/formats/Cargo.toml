@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 genpdf = { version = "0.2.0", features = ["images"] }
+htmd = "0.5.6"
 image023 = { version = "0.23", package = "image", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 pulldown-cmark = "0.13.6"
 serde = "1.0.229"

@@ -584,6 +584,12 @@ impl Lorca {
                     }
                     _ => {}
                 }
+                let action = match action {
+                    EditorAction::Paste(text) => {
+                        EditorAction::Paste(self.formatted_paste(id, text))
+                    }
+                    other => other,
+                };
                 self.apply_editor_action(id, action.clone());
                 self.after_editor_action(id, &action);
                 if matches!(action, EditorAction::GoToDefinition { .. }) {
@@ -835,6 +841,7 @@ impl Lorca {
                 if let Some(contents) = contents
                     && let Some(id) = self.workspace.active_id()
                 {
+                    let contents = self.formatted_paste(id, contents);
                     self.apply_editor_action(id, EditorAction::Paste(contents));
                 }
                 Task::none()
@@ -1398,6 +1405,33 @@ impl Lorca {
         if let Err(error) = result {
             self.show_error(error.to_string());
         }
+    }
+
+    /// Texto que se pega en el documento `id`: si es texto con formato (o una nota nueva de
+    /// texto plano, que pasa a serlo) y el portapapeles trae HTML con formato (copiado de
+    /// una web o de un procesador de textos), su Markdown; si no, `text`.
+    fn formatted_paste(&mut self, id: DocumentId, text: String) -> String {
+        let Some(document) = self.workspace.document_mut(id) else {
+            return text;
+        };
+        let plain_note = document.language() == Language::PlainText
+            && document.path().is_none()
+            && !document.is_language_manual();
+        if document.language() != Language::Markdown && !plain_note {
+            return text;
+        }
+        let html = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get().html());
+        let Some(markdown) = html
+            .ok()
+            .and_then(|html| lorca_formats::html_to_markdown(&html))
+        else {
+            return text;
+        };
+        if markdown.trim() == text.trim() {
+            return text;
+        }
+        document.adopt_markdown();
+        markdown
     }
 
     /// `true` si un documento de este lenguaje se edita viendo el formato (WYSIWYG): los
