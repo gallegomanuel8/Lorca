@@ -183,7 +183,9 @@ mensaje en español.
     cursor a la vista (`ScrollTo`) y publica su alto (`EditorAction::RichHeight` →
     `DocView::rich_height`, que desactiva el cálculo por filas). `editor/rich_edit.rs`:
     ←/→ saltan las marcas, Retroceso al principio de viñeta o título quita la marca, Intro
-    continúa listas y el cursor nunca queda dentro de una marca (`snap_cursor`). Análisis
+    continúa listas y el cursor nunca queda dentro de una marca (`snap_cursor`). Un espacio
+    junto a una marca oculta se escribe fuera de ella (`lorca_formats::spacing_column`: `**hola **`
+    no sería negrita). Análisis
     de cada línea en `lorca_formats::parse_line`. Sin números de línea en este modo;
     la barra de desplazamiento es solo indicador. Las coincidencias de la búsqueda y de
     «Marcar» se pintan como en el de código (`RichEditor::decorations`, `fill_columns`).

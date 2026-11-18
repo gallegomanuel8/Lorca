@@ -292,6 +292,48 @@ impl CodeFences {
     }
 }
 
+/// Columna donde escribir `text` (solo espacios o tabuladores) con el cursor en `col`, junto
+/// a una marca oculta, sin romper el formato: `**hola **` ya no es negrita, así que un espacio
+/// al final de una negrita va detrás de su `**` y uno al principio, delante. Se prueba cada
+/// columna de la marca y se queda la primera (empezando por `col`) que deja igual el estilo de
+/// todo lo visible. Si ninguna lo consigue, o no hay marca, `col`.
+pub fn spacing_column(line: &str, col: usize, text: &str) -> usize {
+    if text.is_empty() || !text.chars().all(|c| c == ' ' || c == '\t') {
+        return col;
+    }
+    let markup = parse_line(line);
+    if matches!(markup.block, Block::Raw | Block::Code | Block::Image) {
+        return col;
+    }
+    let Some(run) = markup
+        .hidden_runs()
+        .into_iter()
+        .find(|run| run.start <= col && col <= run.end)
+    else {
+        return col;
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let added = text.chars().count();
+    let keeps_style = |at: usize| {
+        let mut candidate: String = chars.iter().take(at).collect();
+        candidate.push_str(text);
+        candidate.extend(chars.iter().skip(at));
+        let after = parse_line(&candidate);
+        let inserted_visible =
+            (at..at + added).all(|index| after.chars.get(index).is_some_and(|style| !style.hidden));
+        inserted_visible
+            && markup.chars.iter().enumerate().all(|(index, style)| {
+                let moved = if index < at { index } else { index + added };
+                style.hidden || after.chars.get(moved) == Some(style)
+            })
+    };
+    std::iter::once(col)
+        .chain(run.start..=run.end)
+        .filter(|at| *at >= markup.prefix)
+        .find(|at| keeps_style(*at))
+        .unwrap_or(col)
+}
+
 /// Analiza una línea sabiendo si está dentro de un bloque de código ([`CodeFences`]):
 /// dentro, todo se ve tal cual ([`Block::Code`]).
 pub fn parse_line_in(line: &str, in_code: bool) -> LineMarkup {
@@ -496,6 +538,23 @@ fn pair(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spaces_stay_outside_the_markers() {
+        // Al final de la negrita (cursor delante del `**` de cierre): detrás.
+        assert_eq!(spacing_column("**hola**", 6, " "), 8);
+        // Al principio (cursor detrás del `**` de apertura): delante.
+        assert_eq!(spacing_column("**hola**", 2, " "), 0);
+        // Dentro del texto o sin marca al lado, donde está el cursor.
+        assert_eq!(spacing_column("**hola**", 4, " "), 4);
+        assert_eq!(spacing_column("hola", 4, " "), 4);
+        // Las letras siguen dentro de la negrita.
+        assert_eq!(spacing_column("**hola**", 6, "x"), 6);
+        // Varias marcas juntas: entre la negrita que se cierra y la cursiva que empieza.
+        assert_eq!(spacing_column("**a***b*", 3, " "), 5);
+        assert_eq!(spacing_column("- ~~tachado~~", 11, " "), 13);
+        assert_eq!(spacing_column("# **Título**", 10, " "), 12);
+    }
 
     #[test]
     fn code_fences_mark_their_content() {

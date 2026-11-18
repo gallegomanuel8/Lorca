@@ -2,7 +2,9 @@
 //! cursor las salta, Retroceso no las rompe y Intro continúa las listas.
 
 use lorca_core::{CoreError, EditorState, Motion, Selection};
-use lorca_formats::{CodeFences, LineMarkup, ListContinuation, continue_list, parse_line_in};
+use lorca_formats::{
+    Block, CodeFences, LineMarkup, ListContinuation, continue_list, parse_line_in, spacing_column,
+};
 
 use super::EditorAction;
 
@@ -34,6 +36,18 @@ pub fn apply(action: &EditorAction, editor: &mut EditorState) -> Option<Result<(
             None
         }
         EditorAction::Newline if single && empty => newline(editor),
+        // Un espacio junto a una marca oculta va fuera de ella para no romper el formato.
+        EditorAction::Insert(text) if single && empty => {
+            let (line, col) = head(editor);
+            if markup(editor, line).block != Block::Code {
+                let column = spacing_column(&editor.buffer().line_text(line), col, text);
+                if column != col {
+                    let start = editor.buffer().line_start(line);
+                    editor.set_cursor(start + column, false);
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -136,7 +150,7 @@ fn backspace(editor: &mut EditorState) -> Result<(), CoreError> {
 /// Intro en una lista: continúa la lista o, en un elemento vacío, la termina.
 fn newline(editor: &mut EditorState) -> Option<Result<(), CoreError>> {
     let (line, _) = head(editor);
-    if markup(editor, line).block == lorca_formats::Block::Code {
+    if markup(editor, line).block == Block::Code {
         return None;
     }
     let text = editor.buffer().line_text(line);
@@ -216,6 +230,15 @@ mod tests {
         assert_eq!(editor.text(), "- pan\n- ");
         let editor = run("1. uno\n2. ", 10, EditorAction::Newline);
         assert_eq!(editor.text(), "1. uno\n");
+    }
+
+    #[test]
+    fn space_after_bold_keeps_it_bold() {
+        let mut editor = EditorState::from_text("**hola**");
+        editor.set_cursor(6, false);
+        // Solo coloca el cursor; la inserción es la de siempre.
+        assert!(apply(&EditorAction::Insert(" ".into()), &mut editor).is_none());
+        assert_eq!(editor.selection().head, 8);
     }
 
     #[test]
