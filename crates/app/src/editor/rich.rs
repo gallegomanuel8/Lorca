@@ -459,6 +459,9 @@ fn line_image(
     Ok(LineImage { size, allocation })
 }
 
+/// Separador invisible sin corte de línea (U+2060). Ver `build_line`.
+const WORD_JOINER: char = '\u{2060}';
+
 /// Maqueta una línea para la anchura `width`.
 fn build_line(
     text: &str,
@@ -501,6 +504,17 @@ fn build_line(
             ..style
         };
         if runs.last().is_none_or(|(_, last)| *last != key) {
+            // cosmic-text 0.15 da a una palabra solo ASCII la letra de su primer tramo
+            // («**negrita**sigue» saldría todo en negrita). Un separador invisible que no
+            // permite cortar la línea la hace no ASCII y así respeta cada tramo.
+            if !c.is_whitespace()
+                && display
+                    .chars()
+                    .next_back()
+                    .is_some_and(|p| !p.is_whitespace())
+            {
+                display.push(WORD_JOINER);
+            }
             runs.push((display.len(), key));
         }
         display.push(match (style.bullet, style.checkbox, markup.block) {

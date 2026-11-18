@@ -567,6 +567,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bold_ends_at_its_closing_marker() {
+        let line = "- [ ] **Contenido 3**jjk`+´+-+";
+        let markup = parse_line(line);
+        let bold: String = line
+            .chars()
+            .zip(&markup.chars)
+            .filter(|(_, style)| style.bold && !style.hidden)
+            .map(|(c, _)| c)
+            .collect();
+        assert_eq!(bold, "Contenido 3");
+    }
+
+    #[test]
     fn spaces_stay_outside_the_markers() {
         // Al final de la negrita (cursor delante del `**` de cierre): detrás.
         assert_eq!(spacing_column("**hola**", 6, " "), 8);
