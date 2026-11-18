@@ -325,12 +325,16 @@ pub fn toggle_list(text: &str, selection: Range<usize>, kind: ListKind) -> Marku
 
 /// Primera y última posición (carácter) de las líneas que toca `selection`: desde el
 /// principio de la primera hasta el final (sin salto) de la última. Una selección que
-/// acaba al principio de una línea no incluye esa línea.
+/// acaba al principio de una línea no incluye esa línea, ni una que empieza al final de una
+/// línea incluye esa.
 fn line_block(chars: &[char], selection: Range<usize>) -> Range<usize> {
-    let start = selection.start.min(chars.len());
+    let mut start = selection.start.min(chars.len());
     let mut end = selection.end.clamp(start, chars.len());
     if end > start && chars.get(end - 1) == Some(&'\n') {
         end -= 1;
+    }
+    if end > start && chars.get(start) == Some(&'\n') {
+        start += 1;
     }
     let first = chars
         .get(..start)
@@ -812,6 +816,21 @@ mod tests {
 
     fn inline(text: &str, selection: Range<usize>, style: Inline) -> (String, String) {
         apply(text, &toggle_inline(text, selection, style))
+    }
+
+    #[test]
+    fn selection_from_the_end_of_a_line_leaves_that_line_alone() {
+        let text = "Titulo\nContenido 1\nContenido 2";
+        let all = 6..text.chars().count();
+        let (bold, _) = inline(text, all.clone(), Inline::Bold);
+        assert_eq!(bold, "Titulo\n**Contenido 1**\n**Contenido 2**");
+        let (list, _) = apply(text, &toggle_list(text, all.clone(), ListKind::Bullet));
+        assert_eq!(list, "Titulo\n- Contenido 1\n- Contenido 2");
+        let (heading, _) = apply(text, &set_heading(text, all, Some(2)));
+        assert_eq!(heading, "Titulo\n## Contenido 1\n## Contenido 2");
+        // Solo el salto seleccionado: la línea del cursor.
+        let (only, _) = apply(text, &set_heading(text, 6..7, Some(1)));
+        assert_eq!(only, "# Titulo\nContenido 1\nContenido 2");
     }
 
     #[test]
