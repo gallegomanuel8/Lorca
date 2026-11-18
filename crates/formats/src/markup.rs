@@ -9,6 +9,8 @@
 
 use std::ops::Range;
 
+use crate::rich::{Block, CharStyle, insertion_keeps_styles, parse_line, typing_style};
+
 /// Formato dentro de una línea.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inline {
@@ -34,6 +36,25 @@ pub struct MarkupEdit {
 }
 
 impl Inline {
+    /// ¿Tiene `style` este formato?
+    fn in_style(self, style: CharStyle) -> bool {
+        match self {
+            Self::Bold => style.bold,
+            Self::Italic => style.italic,
+            Self::Strikethrough => style.strike,
+        }
+    }
+
+    /// `style` con este formato puesto o quitado.
+    fn toggled(self, mut style: CharStyle) -> CharStyle {
+        match self {
+            Self::Bold => style.bold = !style.bold,
+            Self::Italic => style.italic = !style.italic,
+            Self::Strikethrough => style.strike = !style.strike,
+        }
+        style
+    }
+
     fn marker(self) -> &'static str {
         match self {
             Self::Bold => "**",
@@ -73,6 +94,9 @@ pub fn toggle_inline(text: &str, selection: Range<usize>, style: Inline) -> Mark
     let m = marker.chars().count();
 
     if start == end {
+        if let Some(edit) = toggle_at_cursor(text, &chars, start, style) {
+            return edit;
+        }
         return MarkupEdit {
             replacements: vec![(start..start, marker.repeat(2))],
             selection: start + m..start + m,
@@ -105,6 +129,89 @@ pub fn toggle_inline(text: &str, selection: Range<usize>, style: Inline) -> Mark
             selection: start + m..end + m,
         },
     }
+}
+
+/// Negrita, cursiva o tachado sin selección, con el cursor junto a texto con formato (lo
+/// que se escribiría en `at` ya lo tiene, o lo tendría al otro lado de una marca oculta):
+///
+/// - Si al otro lado de la marca que toca el cursor se escribiría con el formato cambiado
+///   (al final de una negrita, detrás del `**`), solo se mueve el cursor allí: así se sigue
+///   escribiendo sin negrita (o se vuelve a ella).
+/// - En medio de un texto con el formato, se le quita a todo ese tramo.
+///
+/// `None` si no es el caso: se insertan las dos marcas como siempre.
+fn toggle_at_cursor(text: &str, chars: &[char], at: usize, style: Inline) -> Option<MarkupEdit> {
+    let line_start = chars
+        .get(..at)?
+        .iter()
+        .rposition(|&c| c == '\n')
+        .map_or(0, |i| i + 1);
+    let line_end = chars
+        .get(at..)?
+        .iter()
+        .position(|&c| c == '\n')
+        .map_or(chars.len(), |i| at + i);
+    let line: String = chars.get(line_start..line_end)?.iter().collect();
+    let col = at - line_start;
+    let markup = parse_line(&line);
+    if matches!(markup.block, Block::Raw | Block::Code | Block::Image) {
+        return None;
+    }
+    let current = typing_style(&line, col);
+    let wanted = style.toggled(current);
+    if let Some(run) = markup
+        .hidden_runs()
+        .into_iter()
+        .find(|run| run.start <= col && col <= run.end)
+        && let Some(target) = (run.start..=run.end)
+            .filter(|target| *target >= markup.prefix)
+            .find(|target| {
+                insertion_keeps_styles(&line, &markup, *target, "x")
+                    .is_some_and(|_| typing_style(&line, *target) == wanted)
+            })
+    {
+        let cursor = line_start + target;
+        return Some(MarkupEdit {
+            replacements: Vec::new(),
+            selection: cursor..cursor,
+        });
+    }
+    if !style.in_style(current) {
+        return None;
+    }
+    // Tramo visible con el formato alrededor del cursor.
+    let styled = |index: usize| {
+        markup
+            .chars
+            .get(index)
+            .is_some_and(|c| !c.hidden && style.in_style(*c))
+    };
+    let mut from = col;
+    while from > markup.prefix && styled(from - 1) {
+        from -= 1;
+    }
+    let mut to = col;
+    while styled(to) {
+        to += 1;
+    }
+    if from == to {
+        return None;
+    }
+    let edit = toggle_inline(text, line_start + from..line_start + to, style);
+    // Solo vale si quita el formato (con marcas anidadas podría ponerlo).
+    if edit.replacements.iter().any(|(_, new)| !new.is_empty()) {
+        return None;
+    }
+    let removed_before: usize = edit
+        .replacements
+        .iter()
+        .map(|(range, _)| range.end.min(at).saturating_sub(range.start))
+        .sum();
+    let cursor = at - removed_before;
+    Some(MarkupEdit {
+        replacements: edit.replacements,
+        selection: cursor..cursor,
+    })
 }
 
 /// Dónde están las marcas de un tramo que ya tiene el formato.
@@ -816,6 +923,34 @@ mod tests {
 
     fn inline(text: &str, selection: Range<usize>, style: Inline) -> (String, String) {
         apply(text, &toggle_inline(text, selection, style))
+    }
+
+    #[test]
+    fn bold_button_without_selection_next_to_bold_text() {
+        // Al final de la negrita: el cursor sale de ella, sin tocar el texto.
+        let text = "- [ ] **Contenido 3**";
+        let edit = toggle_inline(text, 19..19, Inline::Bold);
+        assert!(edit.replacements.is_empty());
+        assert_eq!(edit.selection, 21..21);
+        // Otra vez: vuelve a entrar.
+        let edit = toggle_inline(text, 21..21, Inline::Bold);
+        assert!(edit.replacements.is_empty());
+        assert_eq!(edit.selection, 19..19);
+        // Negrita y cursiva: quitar la negrita deja la cursiva.
+        let text = "***ab***";
+        let edit = toggle_inline(text, 5..5, Inline::Bold);
+        assert!(edit.replacements.is_empty());
+        assert!(typing_style(text, edit.selection.start).italic);
+        assert!(!typing_style(text, edit.selection.start).bold);
+        // En medio: se quita la negrita del tramo y el cursor sigue entre las mismas letras.
+        let text = "a **hola** b";
+        let edit = toggle_inline(text, 6..6, Inline::Bold);
+        let (plain, _) = apply(text, &edit);
+        assert_eq!(plain, "a hola b");
+        assert_eq!(edit.selection, 4..4);
+        // Lejos de cualquier formato: las dos marcas, como siempre.
+        let (marks, _) = apply("hola ", &toggle_inline("hola ", 5..5, Inline::Bold));
+        assert_eq!(marks, "hola ****");
     }
 
     #[test]

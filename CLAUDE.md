@@ -96,7 +96,10 @@ mensaje en español.
   `insert_table`; «Modificar tabla» con `edit_table`). Los botones se ven pulsados con el
   formato de la selección o del cursor (`Lorca::bar_state` → `BarState`, con
   `LineMarkup::style_in`: sin selección, el carácter visible anterior). Con varias líneas
-  seleccionadas, negrita/cursiva/tachado se ponen línea a línea (`toggle_inline_lines`). Siempre visible; desactivada fuera
+  seleccionadas, negrita/cursiva/tachado se ponen línea a línea (`toggle_inline_lines`). Sin
+  selección, junto a texto con formato el botón solo mueve el cursor al otro lado de la marca
+  (al final de una negrita, detrás del `**`) y en medio quita el formato del tramo
+  (`toggle_at_cursor`); los botones sin selección muestran `lorca_formats::typing_style`. Siempre visible; desactivada fuera
   de texto y Markdown. El ajuste de línea se aplica
   también a Markdown.
 - `formats`: `format_json`/`minify_json` (serde_json con `preserve_order`), `format_sql`

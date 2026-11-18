@@ -292,6 +292,48 @@ impl CodeFences {
     }
 }
 
+/// Análisis de `line` con `text` escrito en la columna `at`, si lo escrito se ve y todo lo
+/// que ya se veía (`markup`, el análisis de `line`) conserva su estilo.
+pub(crate) fn insertion_keeps_styles(
+    line: &str,
+    markup: &LineMarkup,
+    at: usize,
+    text: &str,
+) -> Option<LineMarkup> {
+    let chars: Vec<char> = line.chars().collect();
+    let added = text.chars().count();
+    let mut candidate: String = chars.iter().take(at).collect();
+    candidate.push_str(text);
+    candidate.extend(chars.iter().skip(at));
+    let after = parse_line(&candidate);
+    let inserted_visible =
+        (at..at + added).all(|index| after.chars.get(index).is_some_and(|style| !style.hidden));
+    let kept = markup.chars.iter().enumerate().all(|(index, style)| {
+        let moved = if index < at { index } else { index + added };
+        style.hidden || after.chars.get(moved) == Some(style)
+    });
+    (inserted_visible && kept).then_some(after)
+}
+
+/// Estilo que tendría un carácter escrito en la columna `col` de `line` (lo que se ve en
+/// los botones de la barra sin selección).
+pub fn typing_style(line: &str, col: usize) -> CharStyle {
+    let mut chars: Vec<char> = line.chars().collect();
+    let col = col.min(chars.len());
+    chars.insert(col, 'x');
+    let text: String = chars.into_iter().collect();
+    parse_line(&text)
+        .chars
+        .get(col)
+        .map(|style| CharStyle {
+            hidden: false,
+            bullet: false,
+            checkbox: false,
+            ..*style
+        })
+        .unwrap_or_default()
+}
+
 /// Columna donde escribir `text` (solo espacios o tabuladores) con el cursor en `col`, junto
 /// a una marca oculta, sin romper el formato: `**hola **` ya no es negrita, así que un espacio
 /// al final de una negrita va detrás de su `**` y uno al principio, delante. Se prueba cada
@@ -312,25 +354,10 @@ pub fn spacing_column(line: &str, col: usize, text: &str) -> usize {
     else {
         return col;
     };
-    let chars: Vec<char> = line.chars().collect();
-    let added = text.chars().count();
-    let keeps_style = |at: usize| {
-        let mut candidate: String = chars.iter().take(at).collect();
-        candidate.push_str(text);
-        candidate.extend(chars.iter().skip(at));
-        let after = parse_line(&candidate);
-        let inserted_visible =
-            (at..at + added).all(|index| after.chars.get(index).is_some_and(|style| !style.hidden));
-        inserted_visible
-            && markup.chars.iter().enumerate().all(|(index, style)| {
-                let moved = if index < at { index } else { index + added };
-                style.hidden || after.chars.get(moved) == Some(style)
-            })
-    };
     std::iter::once(col)
         .chain(run.start..=run.end)
         .filter(|at| *at >= markup.prefix)
-        .find(|at| keeps_style(*at))
+        .find(|at| insertion_keeps_styles(line, &markup, *at, text).is_some())
         .unwrap_or(col)
 }
 

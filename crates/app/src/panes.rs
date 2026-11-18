@@ -1252,7 +1252,10 @@ impl Lorca {
         }
         let id = document.id();
         let edit = markup(&document.editor.text(), document.editor.selection().range());
-        if let Err(error) = document.editor.replace_ranges(&edit.replacements) {
+        // Sin cambios (solo mover el cursor) no se crea un paso de deshacer vacío.
+        if !edit.replacements.is_empty()
+            && let Err(error) = document.editor.replace_ranges(&edit.replacements)
+        {
             self.show_error(error.to_string());
             return;
         }

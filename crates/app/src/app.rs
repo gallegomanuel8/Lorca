@@ -1889,12 +1889,17 @@ impl Lorca {
                 let len = buffer.line_len(index);
                 let from = range.start.saturating_sub(start).min(len);
                 let to = range.end.saturating_sub(start).min(len);
-                // Sin selección se mira el cursor; una línea de una selección que no toca
-                // texto (acaba al principio de una línea) no cuenta.
-                if from == to && !range.is_empty() {
+                // Sin selección, lo que se escribiría en el cursor (al final de una negrita
+                // pero detrás de su `**`, ya no es negrita); una línea de una selección que
+                // no toca texto (acaba al principio de una línea) no cuenta.
+                let text = buffer.line_text(index);
+                if range.is_empty() {
+                    return Some(lorca_formats::typing_style(&text, from));
+                }
+                if from == to {
                     return None;
                 }
-                lorca_formats::parse_line(&buffer.line_text(index)).style_in(from..to)
+                lorca_formats::parse_line(&text).style_in(from..to)
             })
             .reduce(|all, style| lorca_formats::CharStyle {
                 bold: all.bold && style.bold,
