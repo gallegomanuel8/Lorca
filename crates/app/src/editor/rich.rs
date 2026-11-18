@@ -42,7 +42,7 @@ use lorca_core::{EditorState, Motion};
 use lorca_formats::{Block, CharStyle, CodeFences, LineMarkup, parse_image, parse_line_in};
 use lorca_syntax::{Highlights, StyledSpan};
 
-use super::keymap::{KeyCommand, map_key};
+use super::keymap::{KeyCommand, editing_key, map_key};
 use super::palette::EditorColors;
 use super::{ClickKind, Decorations, DocView, EditorAction, Metrics, Viewport};
 
@@ -927,12 +927,15 @@ impl<Message> Widget<Message, Theme, Renderer> for RichEditor<'_, Message> {
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
+                modified_key,
                 physical_key,
                 modifiers,
+                location,
                 text,
                 ..
             }) if self.focused && !shell.is_event_captured() => {
                 state.modifiers = *modifiers;
+                let key = editing_key(key, modified_key, *location);
                 let line_step = self.metrics.font_size * LINE_HEIGHT * 0.5;
                 let Some(command) = map_key(key, *physical_key, *modifiers, text.as_deref(), 1)
                 else {

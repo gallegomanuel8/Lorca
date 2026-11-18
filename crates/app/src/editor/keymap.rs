@@ -4,7 +4,7 @@
 //! (guardar, deshacer, pestañas…) no se capturan, para que lleguen a la suscripción global.
 
 use iced::keyboard::key::{Named, Physical};
-use iced::keyboard::{Key, Modifiers};
+use iced::keyboard::{Key, Location, Modifiers};
 use lorca_core::Motion;
 
 use super::EditorAction;
@@ -16,6 +16,17 @@ pub enum KeyCommand {
     Copy,
     Cut,
     Paste,
+}
+
+/// Tecla que interpreta el editor. iced da la tecla sin modificadores, y en Windows y
+/// Linux eso deja fuera también Bloq Num: el 6 del teclado numérico llegaría como →. En el
+/// teclado numérico se usa la tecla con modificadores, que sí lo respeta.
+pub fn editing_key<'a>(key: &'a Key, modified_key: &'a Key, location: Location) -> &'a Key {
+    if location == Location::Numpad {
+        modified_key
+    } else {
+        key
+    }
 }
 
 /// Interpreta una pulsación. `page_lines` es el número de líneas que avanza Re Pág/Av Pág.
@@ -161,6 +172,14 @@ pub fn map_key(
 mod tests {
     use super::*;
     use iced::keyboard::key::{Code, NativeCode};
+
+    #[test]
+    fn numpad_uses_the_modified_key() {
+        let arrow = Key::Named(Named::ArrowRight);
+        let six = Key::Character("6".into());
+        assert_eq!(editing_key(&arrow, &six, Location::Numpad), &six);
+        assert_eq!(editing_key(&arrow, &six, Location::Standard), &arrow);
+    }
 
     fn physical() -> Physical {
         Physical::Unidentified(NativeCode::Unidentified)

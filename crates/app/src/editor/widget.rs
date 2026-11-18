@@ -19,7 +19,7 @@ use lorca_core::{EditorState, LineEnding, Row, Rows, display};
 use lorca_syntax::Highlights;
 
 use super::action::CompletionKey;
-use super::keymap::{KeyCommand, map_key};
+use super::keymap::{KeyCommand, editing_key, map_key};
 use super::palette::EditorColors;
 use super::scrollbar::{ARROW_DELAY, ARROW_REPEAT, Axis, Hit, SCROLLBAR_SIZE, Track};
 use super::view::{longest_line, max_scroll};
@@ -501,12 +501,15 @@ impl<Message> Widget<Message, Theme, Renderer> for CodeEditor<'_, Message> {
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
+                modified_key,
                 physical_key,
                 modifiers,
+                location,
                 text,
                 ..
             }) if self.focused && !shell.is_event_captured() => {
                 state.modifiers = *modifiers;
+                let key = editing_key(key, modified_key, *location);
                 if self.options.completion_open
                     && let Some(key) = completion_key(key, *modifiers)
                 {
